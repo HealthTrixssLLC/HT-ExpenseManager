@@ -16,11 +16,13 @@ export function MobileShell({
       className="ht-root"
       style={{ minHeight: "100vh", display: "grid", placeItems: "start center", padding: 0 }}
     >
-      <div className="ht-mobile-shell">
+      <div className="ht-mobile-shell" style={{ borderRadius: 44, boxShadow: "0 0 0 10px #000", margin: "20px 0" }}>
         {showStatusBar && (
-          <div className="ht-mobile-statusbar">
-            <span>{time}</span>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+          <div className="ht-mobile-statusbar" style={{ height: 54, paddingTop: 10, position: "relative", zIndex: 100 }}>
+            {/* Dynamic Island Hint */}
+            <div style={{ position: "absolute", top: 11, left: "50%", transform: "translateX(-50%)", width: 120, height: 32, background: "black", borderRadius: 16 }} />
+            <span style={{ fontSize: 15, fontWeight: 600, paddingLeft: 12, zIndex: 1 }}>{time}</span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 5, paddingRight: 12, zIndex: 1 }}>
               {/* Signal */}
               <svg width="17" height="11" viewBox="0 0 17 11" fill="none" aria-hidden>
                 <rect x="0" y="7" width="3" height="4" rx="0.5" fill="currentColor" />
@@ -43,8 +45,8 @@ export function MobileShell({
             </span>
           </div>
         )}
-        <div style={{ minHeight: showStatusBar ? 800 : 844 }}>{children}</div>
-        {showHomeIndicator && <div className="ht-mobile-homeindicator" />}
+        <div style={{ minHeight: showStatusBar ? 800 : 844, position: "relative", overflow: "hidden", borderRadius: showStatusBar ? "0 0 44px 44px" : 44 }}>{children}</div>
+        {showHomeIndicator && <div className="ht-mobile-homeindicator" style={{ bottom: 8, zIndex: 100 }} />}
       </div>
     </div>
   );

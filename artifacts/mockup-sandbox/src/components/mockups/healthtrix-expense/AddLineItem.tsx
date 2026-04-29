@@ -1,197 +1,104 @@
 import { MobileShell } from "./_shared/Shells";
-import { X, Camera } from "lucide-react";
+import { IOSNavigationBar, IOSList, IOSListItem, IOSButton } from "./_shared/IOSPrimitives";
+import { Camera, Image as ImageIcon } from "lucide-react";
 
 export function AddLineItem() {
   return (
     <MobileShell>
-      <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--ht-surface)" }}>
-        {/* Header */}
-        <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--ht-border)", display: "flex", alignItems: "center", gap: 16 }}>
-          <X size={24} color="var(--ht-ink-2)" />
-          <div>
-            <h1 style={{ fontSize: 17, fontWeight: 700, color: "var(--ht-ink)", margin: 0 }}>Add expense</h1>
-            <div style={{ fontSize: 13, color: "var(--ht-ink-3)", fontWeight: 500 }}>EXP-2604-118</div>
-          </div>
+      <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--ht-canvas)", borderRadius: "14px 14px 0 0", marginTop: 12, overflow: "hidden" }}>
+        <div style={{ display: "flex", justifyContent: "center", paddingTop: 8, paddingBottom: 4, background: "var(--ht-surface)" }}>
+          <div style={{ width: 36, height: 5, background: "var(--ht-border)", borderRadius: 999 }} />
         </div>
+        
+        <IOSNavigationBar 
+          title="Add Expense" 
+          leading={<span style={{ color: "var(--ht-navy)", fontSize: 17 }}>Cancel</span>}
+          border={false}
+          background="var(--ht-surface)"
+        />
 
-        <div style={{ flex: 1, overflowY: "auto", padding: "24px 20px" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-            
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <label style={{ fontSize: 14, fontWeight: 600, color: "var(--ht-ink)" }}>Date</label>
+        <div style={{ flex: 1, overflowY: "auto", paddingBottom: 100 }}>
+          {/* Amount Area - Apple Wallet Style */}
+          <div style={{ background: "var(--ht-surface)", padding: "32px 16px 40px", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center" }}>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "center" }}>
+              <span style={{ fontSize: 32, fontWeight: 500, color: "var(--ht-ink-2)", marginTop: 8 }}>$</span>
               <input
                 type="text"
-                defaultValue="Apr 15, 2026"
+                defaultValue="184.62"
                 style={{
-                  height: 48,
-                  padding: "0 16px",
-                  borderRadius: 8,
-                  border: "1px solid var(--ht-border-strong)",
-                  fontSize: 15,
-                  background: "var(--ht-canvas)",
+                  fontSize: 64,
+                  fontWeight: 600,
+                  background: "transparent",
+                  border: "none",
                   color: "var(--ht-ink)",
+                  width: "200px",
+                  textAlign: "center",
+                  outline: "none",
+                  letterSpacing: -1.5,
                 }}
               />
             </div>
+            <div style={{ fontSize: 15, color: "var(--ht-ink-3)", marginTop: -8 }}>
+              EXP-2604-118
+            </div>
+          </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <label style={{ fontSize: 14, fontWeight: 600, color: "var(--ht-ink)" }}>Merchant</label>
+          <IOSList>
+            <div style={{ padding: "0 16px" }}>
               <input
                 type="text"
+                placeholder="Merchant"
                 defaultValue="Jaleo Las Vegas"
                 style={{
-                  height: 48,
-                  padding: "0 16px",
-                  borderRadius: 8,
-                  border: "1px solid var(--ht-border-strong)",
-                  fontSize: 15,
-                  background: "var(--ht-canvas)",
+                  width: "100%",
+                  height: 50,
+                  border: "none",
+                  borderBottom: "1px solid var(--ht-border)",
+                  fontSize: 17,
+                  background: "transparent",
                   color: "var(--ht-ink)",
+                  outline: "none",
                 }}
               />
             </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <label style={{ fontSize: 14, fontWeight: 600, color: "var(--ht-ink)" }}>Description</label>
-              <input
-                type="text"
-                defaultValue="Dinner with 3 prospective customers"
-                style={{
-                  height: 48,
-                  padding: "0 16px",
-                  borderRadius: 8,
-                  border: "1px solid var(--ht-border-strong)",
-                  fontSize: 15,
-                  background: "var(--ht-canvas)",
-                  color: "var(--ht-ink)",
-                }}
-              />
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <label style={{ fontSize: 14, fontWeight: 600, color: "var(--ht-ink)" }}>Amount</label>
-              <div style={{ position: "relative" }}>
-                <span className="ht-mono" style={{ position: "absolute", left: 16, top: 12, fontSize: 24, color: "var(--ht-ink-2)" }}>$</span>
-                <input
-                  type="text"
-                  defaultValue="184.62"
-                  className="ht-mono"
-                  style={{
-                    height: 56,
-                    padding: "0 16px 0 36px",
-                    borderRadius: 8,
-                    border: "1px solid var(--ht-border-strong)",
-                    fontSize: 24,
-                    background: "var(--ht-canvas)",
-                    color: "var(--ht-ink)",
-                    width: "100%",
-                    boxSizing: "border-box"
-                  }}
-                />
+            <IOSListItem trailing={<span style={{ color: "var(--ht-ink)" }}>Apr 15, 2026</span>}>
+              Date
+            </IOSListItem>
+            <IOSListItem trailing={
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ color: "var(--ht-ink-2)" }}>Meals & Ent.</span>
+                <svg width="9" height="14" viewBox="0 0 9 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 2l5 5-5 5"/></svg>
+              </div>
+            }>
+              Category
+            </IOSListItem>
+            <div style={{ padding: "12px 16px", borderTop: "1px solid var(--ht-border)" }}>
+              {/* Segmented Control */}
+              <div style={{ display: "flex", background: "var(--ht-canvas)", borderRadius: 8, padding: 2, position: "relative" }}>
+                <div style={{ flex: 1, padding: "6px 0", textAlign: "center", fontSize: 13, fontWeight: 600, zIndex: 1, background: "white", borderRadius: 6, boxShadow: "0 3px 8px rgba(0,0,0,0.12), 0 3px 1px rgba(0,0,0,0.04)" }}>Personal</div>
+                <div style={{ flex: 1, padding: "6px 0", textAlign: "center", fontSize: 13, fontWeight: 500, zIndex: 1 }}>Company</div>
+                <div style={{ flex: 1, padding: "6px 0", textAlign: "center", fontSize: 13, fontWeight: 500, zIndex: 1 }}>Cash</div>
               </div>
             </div>
+          </IOSList>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <label style={{ fontSize: 14, fontWeight: 600, color: "var(--ht-ink)" }}>QuickBooks Category</label>
-              <select
-                defaultValue="Meals & Entertainment"
-                style={{
-                  height: 48,
-                  padding: "0 16px",
-                  borderRadius: 8,
-                  border: "1px solid var(--ht-border-strong)",
-                  fontSize: 15,
-                  background: "var(--ht-canvas)",
-                  color: "var(--ht-ink)",
-                  appearance: "none",
-                }}
-              >
-                <option>Meals & Entertainment</option>
-              </select>
-              <div style={{ fontSize: 12, color: "var(--ht-ink-3)", marginTop: 2 }}>Mapped to QBO account · 6210</div>
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <label style={{ fontSize: 14, fontWeight: 600, color: "var(--ht-ink)" }}>Payment Method</label>
-              <div style={{ display: "flex", background: "var(--ht-canvas)", padding: 4, borderRadius: 8, border: "1px solid var(--ht-border-strong)" }}>
-                <div style={{ flex: 1, padding: "8px 0", textAlign: "center", background: "var(--ht-surface)", borderRadius: 6, fontSize: 13, fontWeight: 600, boxShadow: "0 1px 2px rgba(0,0,0,0.05)" }}>Personal Card</div>
-                <div style={{ flex: 1, padding: "8px 0", textAlign: "center", color: "var(--ht-ink-2)", fontSize: 13, fontWeight: 500 }}>Company Card</div>
-                <div style={{ flex: 1, padding: "8px 0", textAlign: "center", color: "var(--ht-ink-2)", fontSize: 13, fontWeight: 500 }}>Cash</div>
+          <IOSList>
+            <div style={{ padding: "16px", display: "flex", gap: 16 }}>
+              <div style={{ width: 60, height: 80, borderRadius: 8, background: "var(--ht-canvas)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, color: "var(--ht-navy)" }}>
+                <Camera size={20} strokeWidth={1.5} />
+              </div>
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                <div style={{ fontSize: 17, fontWeight: 400, color: "var(--ht-ink)" }}>Attach Receipt</div>
+                <div style={{ fontSize: 13, color: "var(--ht-ink-3)" }}>Take photo or choose from library</div>
               </div>
             </div>
-
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0", borderBottom: "1px solid var(--ht-border)", borderTop: "1px solid var(--ht-border)" }}>
-              <label style={{ fontSize: 15, fontWeight: 600, color: "var(--ht-ink)" }}>Reimbursable</label>
-              <div style={{ width: 44, height: 24, background: "var(--ht-success)", borderRadius: 999, position: "relative" }}>
-                <div style={{ width: 20, height: 20, background: "white", borderRadius: 999, position: "absolute", top: 2, right: 2 }} />
-              </div>
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <label style={{ fontSize: 14, fontWeight: 600, color: "var(--ht-ink)" }}>Notes</label>
-              <textarea
-                style={{
-                  height: 80,
-                  padding: "12px 16px",
-                  borderRadius: 8,
-                  border: "1px solid var(--ht-border-strong)",
-                  fontSize: 15,
-                  background: "var(--ht-canvas)",
-                  color: "var(--ht-ink)",
-                  resize: "none",
-                  fontFamily: "inherit",
-                }}
-              />
-            </div>
-
-            <div style={{ marginTop: 8 }}>
-              <label style={{ fontSize: 14, fontWeight: 600, color: "var(--ht-ink)", display: "block", marginBottom: 12 }}>Receipts</label>
-              <div style={{ display: "flex", gap: 12, overflowX: "auto" }}>
-                <div style={{ width: 80, height: 100, borderRadius: 8, background: "var(--ht-light-grey)", border: "1px solid var(--ht-border-strong)", position: "relative" }}>
-                  <div style={{ position: "absolute", top: -6, right: -6, background: "var(--ht-ink)", color: "white", borderRadius: 999, width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <X size={12} />
-                  </div>
-                </div>
-                <button style={{ width: 80, height: 100, borderRadius: 8, border: "2px dashed var(--ht-border-strong)", background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, color: "var(--ht-navy)", cursor: "pointer" }}>
-                  <Camera size={20} />
-                  <span style={{ fontSize: 11, fontWeight: 600, textAlign: "center", padding: "0 4px" }}>Add another receipt</span>
-                </button>
-              </div>
-            </div>
-
-          </div>
+          </IOSList>
         </div>
 
-        {/* Sticky Action Bar */}
-        <div style={{ padding: "16px 20px 32px", background: "var(--ht-surface)", borderTop: "1px solid var(--ht-border)", display: "flex", gap: 12 }}>
-          <button
-            style={{
-              flex: 1,
-              height: 52,
-              background: "var(--ht-surface)",
-              color: "var(--ht-ink)",
-              border: "1px solid var(--ht-border-strong)",
-              borderRadius: 8,
-              fontSize: 16,
-              fontWeight: 600,
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            style={{
-              flex: 2,
-              height: 52,
-              background: "var(--ht-navy)",
-              color: "white",
-              border: "none",
-              borderRadius: 8,
-              fontSize: 16,
-              fontWeight: 600,
-            }}
-          >
-            Save line item
-          </button>
+        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "16px", background: "var(--ht-surface)", borderTop: "1px solid var(--ht-border)", display: "flex", flexDirection: "column", gap: 12 }}>
+          <IOSButton variant="primary">
+            Add Expense
+          </IOSButton>
         </div>
       </div>
     </MobileShell>

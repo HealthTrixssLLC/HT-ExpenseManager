@@ -1,148 +1,92 @@
 import { MobileShell } from "./_shared/Shells";
 import { DEPARTMENTS } from "./_shared/data";
-import { ChevronLeft } from "lucide-react";
+import { IOSNavigationBar, IOSList, IOSListItem, IOSButton } from "./_shared/IOSPrimitives";
 
 export function CreateReport() {
   return (
     <MobileShell>
-      <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--ht-canvas)" }}>
-        {/* Header */}
-        <div style={{ padding: "16px 20px", background: "var(--ht-surface)", borderBottom: "1px solid var(--ht-border)", display: "flex", alignItems: "center", gap: 16 }}>
-          <ChevronLeft size={24} color="var(--ht-navy)" />
-          <div>
-            <h1 style={{ fontSize: 17, fontWeight: 700, color: "var(--ht-ink)", margin: 0 }}>New expense report</h1>
-            <div style={{ fontSize: 13, color: "var(--ht-ink-3)", fontWeight: 500 }}>Step 1 of 2</div>
-          </div>
+      <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--ht-canvas)", borderRadius: "14px 14px 0 0", marginTop: 12, overflow: "hidden" }}>
+        <div style={{ display: "flex", justifyContent: "center", paddingTop: 8, paddingBottom: 4, background: "var(--ht-surface)" }}>
+          <div style={{ width: 36, height: 5, background: "var(--ht-border)", borderRadius: 999 }} />
         </div>
+        
+        <IOSNavigationBar 
+          title="New Report" 
+          leading={<span style={{ color: "var(--ht-navy)", fontSize: 17 }}>Cancel</span>}
+          border={false}
+          background="var(--ht-surface)"
+        />
 
-        <div style={{ flex: 1, overflowY: "auto", padding: "24px 20px" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-            
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <label style={{ fontSize: 14, fontWeight: 600, color: "var(--ht-ink)" }}>Report Title</label>
+        <div style={{ flex: 1, overflowY: "auto", paddingBottom: 100 }}>
+          <IOSList>
+            <div style={{ padding: "0 16px" }}>
               <input
                 type="text"
-                defaultValue="HIMSS 2026 Conference — Las Vegas"
+                placeholder="Report Name"
+                defaultValue="HIMSS 2026 Conference"
                 style={{
-                  height: 48,
-                  padding: "0 16px",
-                  borderRadius: 8,
-                  border: "1px solid var(--ht-border-strong)",
-                  fontSize: 15,
-                  background: "var(--ht-surface)",
+                  width: "100%",
+                  height: 50,
+                  border: "none",
+                  borderBottom: "1px solid var(--ht-border)",
+                  fontSize: 17,
+                  background: "transparent",
                   color: "var(--ht-ink)",
+                  outline: "none",
                 }}
               />
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <label style={{ fontSize: 14, fontWeight: 600, color: "var(--ht-ink)" }}>Department</label>
-              <select
-                defaultValue="Clinical Operations"
-                style={{
-                  height: 48,
-                  padding: "0 16px",
-                  borderRadius: 8,
-                  border: "1px solid var(--ht-border-strong)",
-                  fontSize: 15,
-                  background: "var(--ht-surface)",
-                  color: "var(--ht-ink)",
-                  appearance: "none",
-                }}
-              >
-                {DEPARTMENTS.map(d => (
-                  <option key={d} value={d}>{d}</option>
-                ))}
-              </select>
-            </div>
-
-            <div style={{ display: "flex", gap: 16 }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: 1 }}>
-                <label style={{ fontSize: 14, fontWeight: 600, color: "var(--ht-ink)" }}>Period Start Date</label>
-                <input
-                  type="text"
-                  defaultValue="Apr 14, 2026"
-                  style={{
-                    height: 48,
-                    padding: "0 16px",
-                    borderRadius: 8,
-                    border: "1px solid var(--ht-border-strong)",
-                    fontSize: 15,
-                    background: "var(--ht-surface)",
-                    color: "var(--ht-ink)",
-                  }}
-                />
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: 1 }}>
-                <label style={{ fontSize: 14, fontWeight: 600, color: "var(--ht-ink)" }}>Period End Date</label>
-                <input
-                  type="text"
-                  defaultValue="Apr 18, 2026"
-                  style={{
-                    height: 48,
-                    padding: "0 16px",
-                    borderRadius: 8,
-                    border: "1px solid var(--ht-border-strong)",
-                    fontSize: 15,
-                    background: "var(--ht-surface)",
-                    color: "var(--ht-ink)",
-                  }}
-                />
-              </div>
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <label style={{ fontSize: 14, fontWeight: 600, color: "var(--ht-ink)" }}>Business Purpose</label>
               <textarea
-                defaultValue="Attending HIMSS 2026 to evaluate clinical workflow vendors. Meeting with 3 prospective enterprise customers to discuss integration partnerships."
+                placeholder="Business Purpose"
+                defaultValue="Attending HIMSS 2026 to evaluate clinical workflow vendors."
                 style={{
-                  height: 120,
-                  padding: "16px",
-                  borderRadius: 8,
-                  border: "1px solid var(--ht-border-strong)",
-                  fontSize: 15,
-                  background: "var(--ht-surface)",
+                  width: "100%",
+                  height: 100,
+                  padding: "16px 0",
+                  border: "none",
+                  fontSize: 17,
+                  background: "transparent",
                   color: "var(--ht-ink)",
+                  outline: "none",
                   resize: "none",
                   fontFamily: "inherit",
-                  lineHeight: 1.5,
                 }}
               />
             </div>
+          </IOSList>
 
-          </div>
+          <IOSList>
+            <IOSListItem trailing={<span style={{ color: "var(--ht-ink)" }}>Apr 14, 2026</span>}>
+              Start Date
+            </IOSListItem>
+            <IOSListItem isLast trailing={<span style={{ color: "var(--ht-ink)" }}>Apr 18, 2026</span>}>
+              End Date
+            </IOSListItem>
+          </IOSList>
+
+          <IOSList>
+            <IOSListItem trailing={
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ color: "var(--ht-ink-2)" }}>Clinical Operations</span>
+                <svg width="9" height="14" viewBox="0 0 9 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 2l5 5-5 5"/></svg>
+              </div>
+            }>
+              Department
+            </IOSListItem>
+            <IOSListItem isLast trailing={
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ color: "var(--ht-ink-2)" }}>Standard Travel</span>
+                <svg width="9" height="14" viewBox="0 0 9 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 2l5 5-5 5"/></svg>
+              </div>
+            }>
+              Policy
+            </IOSListItem>
+          </IOSList>
         </div>
 
-        {/* Sticky Action Bar */}
-        <div style={{ padding: "16px 20px 32px", background: "var(--ht-surface)", borderTop: "1px solid var(--ht-border)", display: "flex", gap: 12 }}>
-          <button
-            style={{
-              flex: 1,
-              height: 52,
-              background: "var(--ht-surface)",
-              color: "var(--ht-ink)",
-              border: "1px solid var(--ht-border-strong)",
-              borderRadius: 8,
-              fontSize: 16,
-              fontWeight: 600,
-            }}
-          >
-            Save draft
-          </button>
-          <button
-            style={{
-              flex: 2,
-              height: 52,
-              background: "var(--ht-navy)",
-              color: "white",
-              border: "none",
-              borderRadius: 8,
-              fontSize: 16,
-              fontWeight: 600,
-            }}
-          >
-            Continue · Add line items
-          </button>
+        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "16px", background: "var(--ht-surface)", borderTop: "1px solid var(--ht-border)", display: "flex", gap: 12 }}>
+          <IOSButton variant="primary">
+            Continue
+          </IOSButton>
         </div>
       </div>
     </MobileShell>
