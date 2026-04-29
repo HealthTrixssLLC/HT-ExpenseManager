@@ -9,7 +9,7 @@ import {
 } from "@workspace/api-zod";
 import { db, receiptsTable } from "../lib/db";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
-import { sendProblem } from "../lib/problem";
+import { HttpError, sendProblem } from "../lib/problem";
 import { requireAuth } from "../middlewares/session";
 import { canView, fetchReportOrThrow } from "../lib/reports";
 import { validateReceiptUpload } from "../lib/receipts";
@@ -159,7 +159,8 @@ router.delete(
         allowed = true;
       } else if (
         req.auth!.user.role === "System Admin" ||
-        req.auth!.user.role === "Accounting Admin"
+        req.auth!.user.role === "Accounting Admin" ||
+        req.auth!.user.role === "Finance Approver"
       ) {
         allowed = true;
       }
@@ -224,7 +225,12 @@ router.get(
       const receiptRows = await db
         .select()
         .from(receiptsTable)
-        .where(eq(receiptsTable.objectPath, objectPath))
+        .where(
+          and(
+            eq(receiptsTable.objectPath, objectPath),
+            eq(receiptsTable.orgId, req.auth!.user.orgId),
+          ),
+        )
         .limit(1);
       const receipt = receiptRows[0];
       if (!receipt) {
@@ -265,6 +271,10 @@ router.get(
       if (error instanceof ObjectNotFoundError) {
         req.log.warn({ err: error }, "Object not found");
         sendProblem(res, 404, "Not Found", "Object not found.");
+        return;
+      }
+      if (error instanceof HttpError) {
+        sendProblem(res, error.status, error.title, error.detail);
         return;
       }
       req.log.error({ err: error }, "Error serving object");
