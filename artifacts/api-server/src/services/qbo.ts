@@ -218,8 +218,11 @@ function parseStubErrorRate(raw: string | undefined): number {
 
 /**
  * Find or create the org's QuickBooks connection row, then mark it as
- * connected with a freshly-generated realm id and the org's actual company
- * name. This is the stub equivalent of completing the Intuit OAuth dance.
+ * connected with a freshly-generated realm id and a sandbox-suffixed
+ * company name. This is the stub equivalent of completing the Intuit
+ * OAuth dance — we always return a "<org name> · Sandbox" string so it
+ * is obvious in the UI that this is the stub connection, not a real
+ * Intuit-issued company.
  */
 export async function connectQboStub(orgId: string): Promise<QboConnection> {
   const [org] = await db
@@ -231,13 +234,14 @@ export async function connectQboStub(orgId: string): Promise<QboConnection> {
     throw new Error(`Org ${orgId} not found while connecting QuickBooks stub`);
   }
   const realmId = REALM_NANOID();
+  const companyName = `${org.name} · Sandbox`;
   await ensureConnectionRow(orgId);
   const [updated] = await db
     .update(qboConnectionTable)
     .set({
       status: "connected",
       realmId,
-      companyName: org.name,
+      companyName,
       connectedAt: new Date(),
       lastSyncError: null,
     })
