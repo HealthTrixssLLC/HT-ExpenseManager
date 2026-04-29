@@ -1,5 +1,5 @@
 import { MobileShell } from "./_shared/Shells";
-import { X, Zap, Image as ImageIcon, CameraReverse, Plus } from "lucide-react";
+import { X, Zap, Image as ImageIcon, SwitchCamera, Plus } from "lucide-react";
 
 export function ReceiptCapture() {
   return (
@@ -72,7 +72,7 @@ export function ReceiptCapture() {
           </div>
 
           <div style={{ width: 32, display: "flex", justifyContent: "flex-end" }}>
-            <CameraReverse size={28} color="white" />
+            <SwitchCamera size={28} color="white" />
           </div>
         </div>
       </div>

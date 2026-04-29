@@ -17,8 +17,18 @@ import { DesktopShell } from "./_shared/Shells";
 import { DesktopTopbar } from "./_shared/BrandHeader";
 import { Sidebar } from "./_shared/Sidebar";
 import { StatusPill } from "./_shared/StatusPill";
+import type { WorkflowStatus } from "./_shared/types";
 import { SAMPLE_REPORTS } from "./_shared/data";
 import { Button } from "@/components/ui/button";
+
+type ReconRow = {
+  id: string;
+  employee: string;
+  approved: number;
+  paid: number | null;
+  variance: number;
+  status: WorkflowStatus;
+};
 
 export function FinancePosting() {
   const sidebarItems = [
@@ -45,13 +55,13 @@ export function FinancePosting() {
     { id: "EXP-2604-111", employee: "Rosa Delacruz", posted: "Apr 22, 2026", period: "Apr 16 — Apr 30", total: 3247.40 },
   ];
 
-  const reconRows = [
-    { id: "EXP-2603-098", employee: "Sarah Jenkins", approved: 450.00, paid: 450.00, variance: 0, status: "Reconciled" },
-    { id: "EXP-2603-097", employee: "Michael Chang", approved: 1250.50, paid: 1250.50, variance: 0, status: "Reconciled" },
-    { id: "EXP-2603-096", employee: "Emily Rostova", approved: 890.20, paid: 847.70, variance: -42.50, status: "Sync Error" },
-    { id: "EXP-2603-095", employee: "David Kim", approved: 320.00, paid: 325.00, variance: 5.00, status: "Sync Error" },
-    { id: "EXP-2603-094", employee: "Aisha Patel", approved: 610.75, paid: null, variance: -610.75, status: "Sync Error" },
-    { id: "EXP-2603-093", employee: "Tom Wilson", approved: 215.00, paid: 215.00, variance: 0, status: "Reconciled" },
+  const reconRows: ReconRow[] = [
+    { id: "EXP-2603-098", employee: "Sarah Jenkins",  approved: 450.00,  paid: 450.00,  variance: 0,       status: "Reconciled" },
+    { id: "EXP-2603-097", employee: "Michael Chang",  approved: 1250.50, paid: 1250.50, variance: 0,       status: "Reconciled" },
+    { id: "EXP-2603-096", employee: "Emily Rostova",  approved: 890.20,  paid: 847.70,  variance: -42.50,  status: "Sync Error" },
+    { id: "EXP-2603-095", employee: "David Kim",      approved: 320.00,  paid: 325.00,  variance: 5.00,    status: "Sync Error" },
+    { id: "EXP-2603-094", employee: "Aisha Patel",    approved: 610.75,  paid: null,    variance: -610.75, status: "Sync Error" },
+    { id: "EXP-2603-093", employee: "Tom Wilson",     approved: 215.00,  paid: 215.00,  variance: 0,       status: "Reconciled" },
   ];
 
   const [activeTab, setActiveTab] = useState("Post");
@@ -317,7 +327,7 @@ export function FinancePosting() {
                           {r.variance !== 0 ? (r.variance > 0 ? `+$${r.variance.toFixed(2)}` : `-$${Math.abs(r.variance).toFixed(2)}`) : "$0.00"}
                         </td>
                         <td style={{ padding: "16px 20px" }}>
-                          <StatusPill status={r.status as any} size="xs" />
+                          <StatusPill status={r.status} size="xs" />
                         </td>
                         <td style={{ padding: "16px 20px", textAlign: "right" }}>
                           {r.variance !== 0 && (
