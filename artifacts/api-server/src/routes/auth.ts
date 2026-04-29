@@ -21,6 +21,7 @@ import {
   CSRF_COOKIE,
   SESSION_COOKIE,
 } from "../lib/auth";
+import { assertSameOrgRefs } from "../lib/orgRefs";
 import { sendProblem } from "../lib/problem";
 import { requireAuth, requireRole } from "../middlewares/session";
 import { toUserDto } from "../lib/serializers";
@@ -296,6 +297,14 @@ router.post(
         "Email Taken",
         `A user with email ${email} already exists in this organization.`,
       );
+      return;
+    }
+    const refError = await assertSameOrgRefs(orgId, {
+      departmentId: parsed.data.departmentId ?? null,
+      managerId: parsed.data.managerId ?? null,
+    });
+    if (refError) {
+      sendProblem(res, 400, "Invalid Reference", refError);
       return;
     }
     const passwordHash = await hashPassword(parsed.data.password);
