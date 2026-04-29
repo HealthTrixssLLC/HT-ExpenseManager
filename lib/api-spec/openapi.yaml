@@ -3,34 +3,1427 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Healthtrix Expense backend API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
-    description: Health operations
+  - name: auth
+  - name: users
+  - name: lookups
+  - name: reports
+  - name: line-items
+  - name: receipts
+  - name: storage
+  - name: manager
+  - name: finance
+  - name: payroll
+  - name: admin
+  - name: timeline
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
           content:
             application/json:
+              schema: { $ref: "#/components/schemas/HealthStatus" }
+
+  /health:
+    get:
+      operationId: detailedHealthCheck
+      tags: [health]
+      summary: Detailed health check (includes DB ping)
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DetailedHealthStatus" }
+
+  /auth/bootstrap-status:
+    get:
+      operationId: getBootstrapStatus
+      tags: [auth]
+      summary: Whether the System Admin bootstrap step has been completed
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BootstrapStatus" }
+
+  /auth/bootstrap:
+    post:
+      operationId: bootstrapAdmin
+      tags: [auth]
+      summary: Create the very first System Admin user (one-shot)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BootstrapBody" }
+      responses:
+        "201":
+          description: Bootstrap complete; session established
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthSession" }
+        "409":
+          description: Bootstrap already complete
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Email + password login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginBody" }
+      responses:
+        "200":
+          description: Logged in
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthSession" }
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "429":
+          description: Rate limited
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Destroy the current session
+      responses:
+        "204":
+          description: Logged out
+
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Current user + CSRF token
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthSession" }
+        "401":
+          description: Not signed in
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /lookups/categories:
+    get:
+      operationId: listCategories
+      tags: [lookups]
+      summary: GL categories (employee-facing)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
               schema:
-                $ref: "#/components/schemas/HealthStatus"
+                type: array
+                items: { $ref: "#/components/schemas/CategoryOption" }
+
+  /lookups/departments:
+    get:
+      operationId: listDepartments
+      tags: [lookups]
+      summary: Departments
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Department" }
+
+  /lookups/policy-rules:
+    get:
+      operationId: listPolicyRules
+      tags: [lookups]
+      summary: Effective policy rules visible to all signed-in users
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/PolicyRule" }
+
+  /admin/users:
+    get:
+      operationId: adminListUsers
+      tags: [users, admin]
+      summary: List users
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/User" }
+    post:
+      operationId: adminCreateUser
+      tags: [users, admin]
+      summary: Invite/create a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateUserBody" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+
+  /admin/users/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      operationId: adminUpdateUser
+      tags: [users, admin]
+      summary: Update a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateUserBody" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+    delete:
+      operationId: adminDeactivateUser
+      tags: [users, admin]
+      summary: Deactivate a user (soft delete)
+      responses:
+        "204":
+          description: Deactivated
+
+  /admin/gl-mappings:
+    get:
+      operationId: adminListGlMappings
+      tags: [admin]
+      summary: GL category mappings
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/GlMapping" }
+
+  /admin/gl-mappings/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      operationId: adminUpdateGlMapping
+      tags: [admin]
+      summary: Update a GL mapping
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateGlMappingBody" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GlMapping" }
+
+  /admin/policy-rules/{name}:
+    parameters:
+      - in: path
+        name: name
+        required: true
+        schema: { type: string }
+    put:
+      operationId: adminUpdatePolicyRule
+      tags: [admin]
+      summary: Set a policy rule by name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdatePolicyRuleBody" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PolicyRule" }
+
+  /admin/qbo/connection:
+    get:
+      operationId: adminGetQboConnection
+      tags: [admin]
+      summary: Get QuickBooks Online connection status
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QboConnection" }
+    put:
+      operationId: adminUpdateQboConnection
+      tags: [admin]
+      summary: Toggle the QuickBooks connection (stub OAuth)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateQboConnectionBody" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QboConnection" }
+
+  /reports:
+    get:
+      operationId: listReports
+      tags: [reports]
+      summary: List expense reports the caller can see
+      parameters:
+        - in: query
+          name: scope
+          schema:
+            type: string
+            enum: [mine, manager, finance, payroll, all]
+        - in: query
+          name: status
+          schema: { type: string }
+        - in: query
+          name: q
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ExpenseReportSummary" }
+    post:
+      operationId: createReport
+      tags: [reports]
+      summary: Create a draft expense report
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateReportBody" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExpenseReport" }
+
+  /reports/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getReport
+      tags: [reports]
+      summary: Get a single report with line items and receipts
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExpenseReport" }
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+    patch:
+      operationId: updateReport
+      tags: [reports]
+      summary: Edit report metadata while in Draft or Changes Requested
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateReportBody" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExpenseReport" }
+    delete:
+      operationId: deleteReport
+      tags: [reports]
+      summary: Delete a Draft report
+      responses:
+        "204":
+          description: Deleted
+
+  /reports/{id}/submit:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: submitReport
+      tags: [reports]
+      summary: Submit Draft / Changes Requested report for review
+      responses:
+        "200":
+          description: Submitted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExpenseReport" }
+
+  /reports/{id}/withdraw:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: withdrawReport
+      tags: [reports]
+      summary: Withdraw a submitted report back to Draft
+      responses:
+        "200":
+          description: Withdrawn
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExpenseReport" }
+
+  /reports/{id}/timeline:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getReportTimeline
+      tags: [timeline]
+      summary: Approval action audit log for a report
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ApprovalAction" }
+
+  /reports/{id}/line-items:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: listLineItems
+      tags: [line-items]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/LineItem" }
+    post:
+      operationId: createLineItem
+      tags: [line-items]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateLineItemBody" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LineItem" }
+
+  /reports/{id}/line-items/{lineId}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+      - in: path
+        name: lineId
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      operationId: updateLineItem
+      tags: [line-items]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateLineItemBody" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LineItem" }
+    delete:
+      operationId: deleteLineItem
+      tags: [line-items]
+      responses:
+        "204":
+          description: Deleted
+
+  /reports/{id}/receipts:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: listReceipts
+      tags: [receipts]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Receipt" }
+    post:
+      operationId: registerReceipt
+      tags: [receipts]
+      summary: Register a receipt object after a successful presigned upload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterReceiptBody" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Receipt" }
+
+  /receipts/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      operationId: deleteReceipt
+      tags: [receipts]
+      responses:
+        "204":
+          description: Deleted
+
+  /storage/uploads/request-url:
+    post:
+      operationId: requestUploadUrl
+      tags: [storage]
+      summary: Request a presigned upload URL for object storage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RequestUploadUrlBody" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RequestUploadUrlResponse" }
+
+  /manager/queue:
+    get:
+      operationId: managerQueue
+      tags: [manager]
+      summary: Reports awaiting the caller's manager review
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ExpenseReportSummary" }
+
+  /reports/{id}/manager-approve:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: managerApprove
+      tags: [manager]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ApprovalActionBody" }
+      responses:
+        "200":
+          description: Approved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExpenseReport" }
+
+  /reports/{id}/manager-request-changes:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: managerRequestChanges
+      tags: [manager]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ApprovalActionBody" }
+      responses:
+        "200":
+          description: Changes requested
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExpenseReport" }
+
+  /reports/{id}/manager-reject:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: managerReject
+      tags: [manager]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ApprovalActionBody" }
+      responses:
+        "200":
+          description: Rejected
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExpenseReport" }
+
+  /finance/queue:
+    get:
+      operationId: financeQueue
+      tags: [finance]
+      summary: Reports awaiting Finance review
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ExpenseReportSummary" }
+
+  /reports/{id}/finance-approve:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: financeApprove
+      tags: [finance]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ApprovalActionBody" }
+      responses:
+        "200":
+          description: Approved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExpenseReport" }
+
+  /reports/{id}/finance-reject:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: financeReject
+      tags: [finance]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ApprovalActionBody" }
+      responses:
+        "200":
+          description: Rejected
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExpenseReport" }
+
+  /reports/{id}/gl-preview:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getGlPreview
+      tags: [finance]
+      summary: Preview the QuickBooks JournalEntry that will be posted
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GlPreview" }
+
+  /reports/{id}/post-to-quickbooks:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: postToQuickbooks
+      tags: [finance]
+      summary: Post an Approved report to QuickBooks (stub)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ApprovalActionBody" }
+      responses:
+        "200":
+          description: Posted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PostToQuickbooksResponse" }
+
+  /reports/{id}/retry-quickbooks:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: retryQuickbooksPost
+      tags: [finance]
+      summary: Retry a Sync Error report posting
+      responses:
+        "200":
+          description: Retried
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PostToQuickbooksResponse" }
+
+  /payroll/queue:
+    get:
+      operationId: payrollQueue
+      tags: [payroll]
+      summary: Reports ready for payroll reimbursement
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ExpenseReportSummary" }
+
+  /payroll/batches:
+    get:
+      operationId: listPayrollBatches
+      tags: [payroll]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/PayrollBatch" }
+    post:
+      operationId: createPayrollBatch
+      tags: [payroll]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreatePayrollBatchBody" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PayrollBatch" }
+
+  /payroll/batches/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getPayrollBatch
+      tags: [payroll]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PayrollBatch" }
+
+  /payroll/batches/{id}/mark-paid:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: markPayrollBatchPaid
+      tags: [payroll]
+      summary: Mark all reports in batch as Paid Through Payroll
+      responses:
+        "200":
+          description: Paid
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PayrollBatch" }
+
+  /payroll/batches/{id}/reconcile:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: reconcilePayrollBatch
+      tags: [payroll]
+      summary: Reconcile a paid batch against actuals
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReconcileBatchBody" }
+      responses:
+        "200":
+          description: Reconciled
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PayrollBatch" }
+
 components:
   schemas:
+    Problem:
+      type: object
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+      required: [title, status]
+
     HealthStatus:
+      type: object
+      properties:
+        status: { type: string }
+      required: [status]
+
+    DetailedHealthStatus:
+      type: object
+      properties:
+        ok: { type: boolean }
+        db: { type: string, enum: [connected, disconnected] }
+        version: { type: string }
+      required: [ok, db]
+
+    BootstrapStatus:
+      type: object
+      properties:
+        bootstrapped: { type: boolean }
+      required: [bootstrapped]
+
+    BootstrapBody:
+      type: object
+      properties:
+        orgName: { type: string, minLength: 1 }
+        fullName: { type: string, minLength: 1 }
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8 }
+      required: [orgName, fullName, email, password]
+
+    LoginBody:
+      type: object
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 1 }
+      required: [email, password]
+
+    AuthSession:
+      type: object
+      properties:
+        user: { $ref: "#/components/schemas/User" }
+        csrfToken: { type: string }
+        sessionExpiresAt: { type: string, format: date-time }
+        sessionToken:
+          type: ["string", "null"]
+          description: Only returned when client header indicates a non-cookie client (iOS).
+      required: [user, csrfToken, sessionExpiresAt]
+
+    Role:
+      type: string
+      enum:
+        - Employee
+        - Manager Approver
+        - Finance Approver
+        - Accounting Admin
+        - System Admin
+
+    WorkflowStatus:
+      type: string
+      enum:
+        - Draft
+        - Submitted
+        - Manager Review
+        - Changes Requested
+        - Manager Approved
+        - Finance Review
+        - Finance Approved
+        - Posted to QuickBooks
+        - Ready for Payroll Reimbursement
+        - Paid Through Payroll
+        - Reconciled
+        - Rejected
+        - Voided
+        - Sync Error
+
+    PaymentMethod:
+      type: string
+      enum: [Personal Card, Cash, Company Card]
+
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string }
+        fullName: { type: string }
+        title: { type: ["string", "null"] }
+        role: { $ref: "#/components/schemas/Role" }
+        isAlsoEmployee: { type: boolean }
+        isActive: { type: boolean }
+        departmentId: { type: ["string", "null"], format: uuid }
+        departmentName: { type: ["string", "null"] }
+        managerId: { type: ["string", "null"], format: uuid }
+        managerName: { type: ["string", "null"] }
+        createdAt: { type: string, format: date-time }
+      required:
+        - id
+        - email
+        - fullName
+        - role
+        - isAlsoEmployee
+        - isActive
+        - createdAt
+
+    CreateUserBody:
+      type: object
+      properties:
+        email: { type: string, format: email }
+        fullName: { type: string, minLength: 1 }
+        title: { type: ["string", "null"] }
+        password: { type: string, minLength: 8 }
+        role: { $ref: "#/components/schemas/Role" }
+        isAlsoEmployee: { type: boolean }
+        departmentId: { type: ["string", "null"], format: uuid }
+        managerId: { type: ["string", "null"], format: uuid }
+      required: [email, fullName, password, role]
+
+    UpdateUserBody:
+      type: object
+      properties:
+        fullName: { type: string }
+        title: { type: ["string", "null"] }
+        role: { $ref: "#/components/schemas/Role" }
+        isAlsoEmployee: { type: boolean }
+        departmentId: { type: ["string", "null"], format: uuid }
+        managerId: { type: ["string", "null"], format: uuid }
+        isActive: { type: boolean }
+        password: { type: ["string", "null"], minLength: 8 }
+
+    CategoryOption:
+      type: object
+      properties:
+        code: { type: string }
+        qboAccount: { type: string }
+        active: { type: boolean }
+      required: [code, qboAccount, active]
+
+    Department:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+      required: [id, name]
+
+    PolicyRule:
+      type: object
+      properties:
+        name: { type: string }
+        value: {}
+        description: { type: ["string", "null"] }
+        updatedAt: { type: string, format: date-time }
+      required: [name, value, updatedAt]
+
+    UpdatePolicyRuleBody:
+      type: object
+      properties:
+        value: {}
+        description: { type: ["string", "null"] }
+      required: [value]
+
+    GlMapping:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        qboAccount: { type: string }
+        qboAccountId: { type: ["string", "null"] }
+        active: { type: boolean }
+      required: [id, code, qboAccount, active]
+
+    UpdateGlMappingBody:
+      type: object
+      properties:
+        qboAccount: { type: string }
+        qboAccountId: { type: ["string", "null"] }
+        active: { type: boolean }
+
+    QboConnection:
       type: object
       properties:
         status:
           type: string
-      required:
-        - status
+          enum: [connected, disconnected, error]
+        realmId: { type: ["string", "null"] }
+        companyName: { type: ["string", "null"] }
+        connectedAt: { type: ["string", "null"], format: date-time }
+        lastSyncAt: { type: ["string", "null"], format: date-time }
+        lastSyncError: { type: ["string", "null"] }
+      required: [status]
 
+    UpdateQboConnectionBody:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [connect, disconnect]
+      required: [action]
+
+    ExpenseReportSummary:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        displayCode: { type: string }
+        title: { type: string }
+        employee: { $ref: "#/components/schemas/UserRef" }
+        departmentName: { type: ["string", "null"] }
+        period: { type: ["string", "null"] }
+        status: { $ref: "#/components/schemas/WorkflowStatus" }
+        total: { type: string, description: "Decimal as string" }
+        lineCount: { type: integer }
+        receiptCount: { type: integer }
+        needsReceipt: { type: boolean }
+        submittedAt: { type: ["string", "null"], format: date-time }
+        ageDays: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required:
+        - id
+        - displayCode
+        - title
+        - employee
+        - status
+        - total
+        - lineCount
+        - receiptCount
+        - needsReceipt
+        - ageDays
+        - createdAt
+        - updatedAt
+
+    UserRef:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        fullName: { type: string }
+        role: { $ref: "#/components/schemas/Role" }
+      required: [id, fullName, role]
+
+    ExpenseReport:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        displayCode: { type: string }
+        title: { type: string }
+        description: { type: string }
+        employee: { $ref: "#/components/schemas/UserRef" }
+        departmentId: { type: ["string", "null"], format: uuid }
+        departmentName: { type: ["string", "null"] }
+        policy: { type: string }
+        periodStart: { type: ["string", "null"], format: date }
+        periodEnd: { type: ["string", "null"], format: date }
+        status: { $ref: "#/components/schemas/WorkflowStatus" }
+        total: { type: string }
+        submittedAt: { type: ["string", "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        lineItems:
+          type: array
+          items: { $ref: "#/components/schemas/LineItem" }
+        receipts:
+          type: array
+          items: { $ref: "#/components/schemas/Receipt" }
+      required:
+        - id
+        - displayCode
+        - title
+        - description
+        - employee
+        - policy
+        - status
+        - total
+        - createdAt
+        - updatedAt
+        - lineItems
+        - receipts
+
+    CreateReportBody:
+      type: object
+      properties:
+        title: { type: string, minLength: 1 }
+        description: { type: string }
+        departmentId: { type: ["string", "null"], format: uuid }
+        policy: { type: ["string", "null"] }
+        periodStart: { type: ["string", "null"], format: date }
+        periodEnd: { type: ["string", "null"], format: date }
+      required: [title]
+
+    UpdateReportBody:
+      type: object
+      properties:
+        title: { type: string }
+        description: { type: string }
+        departmentId: { type: ["string", "null"], format: uuid }
+        policy: { type: string }
+        periodStart: { type: ["string", "null"], format: date }
+        periodEnd: { type: ["string", "null"], format: date }
+
+    LineItem:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        reportId: { type: string, format: uuid }
+        occurredOn: { type: string, format: date }
+        merchant: { type: string }
+        description: { type: string }
+        category: { type: string }
+        amount: { type: string }
+        paymentMethod: { $ref: "#/components/schemas/PaymentMethod" }
+        needsReview: { type: boolean }
+        receiptCount: { type: integer }
+        createdAt: { type: string, format: date-time }
+      required:
+        - id
+        - reportId
+        - occurredOn
+        - merchant
+        - description
+        - category
+        - amount
+        - paymentMethod
+        - needsReview
+        - receiptCount
+        - createdAt
+
+    CreateLineItemBody:
+      type: object
+      properties:
+        occurredOn: { type: string, format: date }
+        merchant: { type: string, minLength: 1 }
+        description: { type: string }
+        category: { type: string, minLength: 1 }
+        amount: { type: string }
+        paymentMethod: { $ref: "#/components/schemas/PaymentMethod" }
+      required: [occurredOn, merchant, category, amount, paymentMethod]
+
+    UpdateLineItemBody:
+      type: object
+      properties:
+        occurredOn: { type: string, format: date }
+        merchant: { type: string }
+        description: { type: string }
+        category: { type: string }
+        amount: { type: string }
+        paymentMethod: { $ref: "#/components/schemas/PaymentMethod" }
+
+    Receipt:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        reportId: { type: ["string", "null"], format: uuid }
+        lineItemId: { type: ["string", "null"], format: uuid }
+        objectPath: { type: string }
+        filename: { type: string }
+        mimeType: { type: string }
+        sizeBytes: { type: integer }
+        uploadedById: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+      required:
+        - id
+        - objectPath
+        - filename
+        - mimeType
+        - sizeBytes
+        - uploadedById
+        - createdAt
+
+    RegisterReceiptBody:
+      type: object
+      properties:
+        objectPath: { type: string }
+        filename: { type: string }
+        mimeType: { type: string }
+        sizeBytes: { type: integer }
+        lineItemId: { type: ["string", "null"], format: uuid }
+      required: [objectPath, filename, mimeType, sizeBytes]
+
+    RequestUploadUrlBody:
+      type: object
+      properties:
+        name: { type: string }
+        size: { type: integer }
+        contentType: { type: string }
+      required: [name, size, contentType]
+
+    RequestUploadUrlResponse:
+      type: object
+      properties:
+        uploadURL: { type: string }
+        objectPath: { type: string }
+      required: [uploadURL, objectPath]
+
+    ApprovalActionBody:
+      type: object
+      properties:
+        comment: { type: ["string", "null"] }
+
+    ApprovalAction:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        reportId: { type: string, format: uuid }
+        actor: { $ref: "#/components/schemas/UserRef" }
+        actorRole: { $ref: "#/components/schemas/Role" }
+        fromStatus: { $ref: "#/components/schemas/WorkflowStatus" }
+        toStatus: { $ref: "#/components/schemas/WorkflowStatus" }
+        comment: { type: ["string", "null"] }
+        metadata: { type: ["string", "null"] }
+        sequence: { type: integer }
+        createdAt: { type: string, format: date-time }
+      required:
+        - id
+        - reportId
+        - actor
+        - actorRole
+        - fromStatus
+        - toStatus
+        - sequence
+        - createdAt
+
+    GlPreviewLine:
+      type: object
+      properties:
+        account: { type: string }
+        category: { type: string }
+        amount: { type: string }
+      required: [account, category, amount]
+
+    GlPreview:
+      type: object
+      properties:
+        reportId: { type: string, format: uuid }
+        displayCode: { type: string }
+        journalDate: { type: string, format: date }
+        memo: { type: string }
+        debits:
+          type: array
+          items: { $ref: "#/components/schemas/GlPreviewLine" }
+        credits:
+          type: array
+          items: { $ref: "#/components/schemas/GlPreviewLine" }
+        totalDebits: { type: string }
+        totalCredits: { type: string }
+        currency: { type: string }
+      required:
+        - reportId
+        - displayCode
+        - journalDate
+        - memo
+        - debits
+        - credits
+        - totalDebits
+        - totalCredits
+        - currency
+
+    PostToQuickbooksResponse:
+      type: object
+      properties:
+        report: { $ref: "#/components/schemas/ExpenseReport" }
+        journalId: { type: ["string", "null"] }
+        status:
+          type: string
+          enum: [posted, error]
+        errorMessage: { type: ["string", "null"] }
+      required: [report, status]
+
+    PayrollBatchItem:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        reportId: { type: string, format: uuid }
+        report: { $ref: "#/components/schemas/ExpenseReportSummary" }
+        amount: { type: string }
+      required: [id, reportId, report, amount]
+
+    ReconciliationRecord:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        reportId: { type: string, format: uuid }
+        expectedAmount: { type: string }
+        paidAmount: { type: string }
+        variance: { type: string }
+        flag:
+          type: string
+          enum: [matched, under, over, partial, missing]
+        note: { type: ["string", "null"] }
+        createdAt: { type: string, format: date-time }
+      required:
+        - id
+        - reportId
+        - expectedAmount
+        - paidAmount
+        - variance
+        - flag
+        - createdAt
+
+    PayrollBatch:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        label: { type: string }
+        status:
+          type: string
+          enum: [Draft, Marked Paid, Reconciled]
+        total: { type: string }
+        paidAt: { type: ["string", "null"], format: date-time }
+        reconciledAt: { type: ["string", "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/PayrollBatchItem" }
+        reconciliation:
+          type: array
+          items: { $ref: "#/components/schemas/ReconciliationRecord" }
+      required:
+        - id
+        - label
+        - status
+        - total
+        - createdAt
+        - items
+        - reconciliation
+
+    CreatePayrollBatchBody:
+      type: object
+      properties:
+        label: { type: string, minLength: 1 }
+        reportIds:
+          type: array
+          items: { type: string, format: uuid }
+          minItems: 1
+      required: [label, reportIds]
+
+    ReconcileBatchEntry:
+      type: object
+      properties:
+        reportId: { type: string, format: uuid }
+        paidAmount: { type: string }
+        note: { type: ["string", "null"] }
+      required: [reportId, paidAmount]
+
+    ReconcileBatchBody:
+      type: object
+      properties:
+        entries:
+          type: array
+          items: { $ref: "#/components/schemas/ReconcileBatchEntry" }
+          minItems: 1
+      required: [entries]
