@@ -9,6 +9,8 @@ export interface Problem {
   type?: string;
   title: string;
   status: number;
+  /** Stable machine-readable error code */
+  code: string;
   detail?: string;
   instance?: string;
 }
@@ -256,6 +258,13 @@ export interface ExpenseReportSummary {
   ageDays: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ManagerOption {
+  id: string;
+  fullName: string;
+  email: string;
+  role: Role;
 }
 
 export interface LineItem {

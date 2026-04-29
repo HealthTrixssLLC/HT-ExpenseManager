@@ -29,6 +29,7 @@ export * from "./lineItem";
 export * from "./listReportsParams";
 export * from "./listReportsScope";
 export * from "./loginBody";
+export * from "./managerOption";
 export * from "./paymentMethod";
 export * from "./payrollBatch";
 export * from "./payrollBatchItem";

@@ -1,15 +1,11 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { Readable } from "stream";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
 } from "@workspace/api-zod";
-import {
-  db,
-  expenseReportsTable,
-  receiptsTable,
-} from "../lib/db";
+import { db, receiptsTable } from "../lib/db";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import { sendProblem } from "../lib/problem";
 import { requireAuth } from "../middlewares/session";
@@ -18,37 +14,118 @@ import { canView, fetchReportOrThrow } from "../lib/reports";
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
 
-/**
- * POST /storage/uploads/request-url
- *
- * Request a presigned URL for file upload. Authenticated users only.
- */
-router.post(
-  "/storage/uploads/request-url",
+// Receipt upload constraints from the spec.
+const ALLOWED_MIME = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/heic",
+  "application/pdf",
+]);
+const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+
+function validateUpload(
+  size: number,
+  contentType: string,
+): { ok: true } | { ok: false; status: number; title: string; detail: string } {
+  if (!ALLOWED_MIME.has(contentType.toLowerCase())) {
+    return {
+      ok: false,
+      status: 415,
+      title: "Unsupported Media Type",
+      detail: `Receipts must be one of: ${[...ALLOWED_MIME].join(", ")}.`,
+    };
+  }
+  if (size > MAX_BYTES) {
+    return {
+      ok: false,
+      status: 413,
+      title: "Payload Too Large",
+      detail: `Receipts are limited to 10 MB (got ${size} bytes).`,
+    };
+  }
+  return { ok: true };
+}
+
+async function handleUploadRequest(req: Request, res: Response): Promise<void> {
+  const parsed = RequestUploadUrlBody.safeParse(req.body);
+  if (!parsed.success) {
+    sendProblem(res, 400, "Invalid Body", parsed.error.message);
+    return;
+  }
+  const { name, size, contentType } = parsed.data;
+  const v = validateUpload(size, contentType);
+  if (!v.ok) {
+    sendProblem(res, v.status, v.title, v.detail);
+    return;
+  }
+  try {
+    const uploadURL = await objectStorageService.getObjectEntityUploadURL();
+    const objectPath = objectStorageService.normalizeObjectEntityPath(uploadURL);
+    res.json(
+      RequestUploadUrlResponse.parse({
+        uploadURL,
+        objectPath,
+        metadata: { name, size, contentType },
+      }),
+    );
+  } catch (error) {
+    req.log.error({ err: error }, "Error generating upload URL");
+    sendProblem(res, 500, "Storage Error", "Failed to generate upload URL");
+  }
+}
+
+// Spec-canonical endpoint. The legacy storage path remains as a thin alias.
+router.post("/receipts/upload-url", requireAuth, handleUploadRequest);
+router.post("/storage/uploads/request-url", requireAuth, handleUploadRequest);
+
+// Delete a receipt by id. Only the uploader, the report's employee, or an
+// org-wide admin/finance role can delete.
+router.delete(
+  "/receipts/:id",
   requireAuth,
-  async (req: Request, res: Response) => {
-    const parsed = RequestUploadUrlBody.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: "Missing or invalid required fields" });
+  async (req: Request, res: Response): Promise<void> => {
+    const id = (req.params as Record<string, string>)["id"];
+    const rows = await db
+      .select()
+      .from(receiptsTable)
+      .where(
+        and(
+          eq(receiptsTable.id, id),
+          eq(receiptsTable.orgId, req.auth!.user.orgId),
+        ),
+      )
+      .limit(1);
+    const receipt = rows[0];
+    if (!receipt) {
+      sendProblem(res, 404, "Not Found");
       return;
     }
-
-    try {
-      const { name, size, contentType } = parsed.data;
-      const uploadURL = await objectStorageService.getObjectEntityUploadURL();
-      const objectPath = objectStorageService.normalizeObjectEntityPath(uploadURL);
-
-      res.json(
-        RequestUploadUrlResponse.parse({
-          uploadURL,
-          objectPath,
-          metadata: { name, size, contentType },
-        }),
+    let allowed = receipt.uploadedById === req.auth!.user.id;
+    if (!allowed && receipt.reportId) {
+      const report = await fetchReportOrThrow(
+        receipt.reportId,
+        req.auth!.user.orgId,
       );
-    } catch (error) {
-      req.log.error({ err: error }, "Error generating upload URL");
-      res.status(500).json({ error: "Failed to generate upload URL" });
+      if (req.auth!.user.id === report.employeeId) {
+        allowed = true;
+      } else if (
+        req.auth!.user.role === "System Admin" ||
+        req.auth!.user.role === "Accounting Admin"
+      ) {
+        allowed = true;
+      } else {
+        // Manager/finance can view but cannot delete employee receipts.
+        allowed = false;
+      }
+      void canView; // Available for future delete-time policies.
     }
+    if (!allowed) {
+      sendProblem(res, 403, "Forbidden");
+      return;
+    }
+    await db.delete(receiptsTable).where(eq(receiptsTable.id, id));
+    res.status(204).end();
   },
 );
 
@@ -100,7 +177,6 @@ router.get(
       const wildcardPath = Array.isArray(raw) ? raw.join("/") : raw;
       const objectPath = `/objects/${wildcardPath}`;
 
-      // Find the receipt that references this object.
       const receiptRows = await db
         .select()
         .from(receiptsTable)
@@ -112,7 +188,6 @@ router.get(
         return;
       }
       if (!receipt.reportId) {
-        // Org-scoped receipt with no report yet — only the uploader may view.
         if (receipt.uploadedById !== req.auth!.user.id) {
           sendProblem(res, 403, "Forbidden");
           return;
@@ -153,8 +228,5 @@ router.get(
     }
   },
 );
-
-// Reference unused import to satisfy isolated module checks if any.
-void expenseReportsTable;
 
 export default router;

@@ -189,11 +189,24 @@ router.post("/auth/login", async (req, res): Promise<void> => {
     return;
   }
 
+  // Email is unique per (orgId, email). For v1 we enforce a single-tenant
+  // server, so we resolve the user by email and reject if more than one org
+  // happens to share the same address — preventing cross-tenant ambiguity.
   const rows = await db
     .select()
     .from(usersTable)
     .where(eq(usersTable.email, email))
-    .limit(1);
+    .limit(2);
+  if (rows.length > 1) {
+    await recordAttempt(email, ip, false);
+    sendProblem(
+      res,
+      401,
+      "Invalid Credentials",
+      "Email is registered under multiple organizations; specify org context.",
+    );
+    return;
+  }
   const user = rows[0];
 
   if (!user || !user.isActive) {
@@ -256,11 +269,11 @@ router.get("/auth/me", requireAuth, async (req: Request, res: Response): Promise
 // over HTTP.
 export async function _mintSessionForUser(userId: string): Promise<string> {
   const { rawToken } = await createSession(userId, null, "smoke-test");
+  // Touch helpers so isolated-module tooling sees them as referenced; they
+  // remain exported for use by future test plumbing.
+  void hashToken;
+  void destroySession;
   return rawToken;
 }
-
-// Suppress unused import warning under noUnusedLocals="false"; export hashed
-// helpers in case future code needs them.
-export const _internal = { hashToken, destroySession };
 
 export default router;

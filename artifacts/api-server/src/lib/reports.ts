@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   db,
   departmentsTable,
@@ -225,4 +225,3 @@ export async function nextDisplayCode(orgId: string): Promise<string> {
   return `${prefix}${(max + 1).toString().padStart(3, "0")}`;
 }
 
-export const _unusedIsNull = isNull;

@@ -30,7 +30,7 @@ const FINANCE_ROLES = [
 router.use(requireAuth);
 
 router.get(
-  "/finance/queue",
+  "/approvals/finance-queue",
   requireRole(...FINANCE_ROLES),
   async (req, res): Promise<void> => {
     const orgId = req.auth!.user.orgId;
@@ -96,7 +96,7 @@ router.get(
 );
 
 router.post(
-  "/reports/:id/post-to-quickbooks",
+  "/reports/:id/post-to-qbo",
   requireRole(...FINANCE_ROLES),
   async (req, res): Promise<void> => {
     const id = pathId(req, "id");
@@ -155,7 +155,7 @@ router.post(
 );
 
 router.post(
-  "/reports/:id/retry-quickbooks",
+  "/reports/:id/retry-qbo",
   requireRole(...FINANCE_ROLES),
   async (req, res): Promise<void> => {
     const id = pathId(req, "id");

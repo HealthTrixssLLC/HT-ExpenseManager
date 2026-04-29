@@ -2,6 +2,7 @@ export * from "./enums";
 export * from "./orgs";
 export * from "./departments";
 export * from "./users";
+export * from "./employeeProfiles";
 export * from "./sessions";
 export * from "./loginAttempts";
 export * from "./glMappings";

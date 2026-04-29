@@ -39,11 +39,11 @@ export const TRANSITIONS = {
     T("Submitted", "Manager Review", ["Manager Approver"], "begin manager review"),
   ],
   managerApprove: [
-    T("Submitted", "Manager Approved", ["Manager Approver"], "manager approve"),
+    T("Submitted", "Manager Approved", ["Manager Approver", "System Admin"], "manager approve"),
     T(
       "Manager Review",
       "Manager Approved",
-      ["Manager Approver"],
+      ["Manager Approver", "System Admin"],
       "manager approve",
     ),
   ],
@@ -51,25 +51,25 @@ export const TRANSITIONS = {
     T(
       "Submitted",
       "Changes Requested",
-      ["Manager Approver"],
+      ["Manager Approver", "System Admin"],
       "request changes",
     ),
     T(
       "Manager Review",
       "Changes Requested",
-      ["Manager Approver"],
+      ["Manager Approver", "System Admin"],
       "request changes",
     ),
   ],
   managerReject: [
-    T("Submitted", "Rejected", ["Manager Approver"], "manager reject"),
-    T("Manager Review", "Rejected", ["Manager Approver"], "manager reject"),
+    T("Submitted", "Rejected", ["Manager Approver", "System Admin"], "manager reject"),
+    T("Manager Review", "Rejected", ["Manager Approver", "System Admin"], "manager reject"),
   ],
   enterFinanceReview: [
     T(
       "Manager Approved",
       "Finance Review",
-      ["Finance Approver", "Accounting Admin"],
+      ["Finance Approver", "Accounting Admin", "System Admin"],
       "begin finance review",
     ),
   ],
@@ -77,13 +77,13 @@ export const TRANSITIONS = {
     T(
       "Manager Approved",
       "Finance Approved",
-      ["Finance Approver", "Accounting Admin"],
+      ["Finance Approver", "Accounting Admin", "System Admin"],
       "finance approve",
     ),
     T(
       "Finance Review",
       "Finance Approved",
-      ["Finance Approver", "Accounting Admin"],
+      ["Finance Approver", "Accounting Admin", "System Admin"],
       "finance approve",
     ),
   ],
@@ -91,13 +91,13 @@ export const TRANSITIONS = {
     T(
       "Manager Approved",
       "Rejected",
-      ["Finance Approver", "Accounting Admin"],
+      ["Finance Approver", "Accounting Admin", "System Admin"],
       "finance reject",
     ),
     T(
       "Finance Review",
       "Rejected",
-      ["Finance Approver", "Accounting Admin"],
+      ["Finance Approver", "Accounting Admin", "System Admin"],
       "finance reject",
     ),
   ],
@@ -105,7 +105,7 @@ export const TRANSITIONS = {
     T(
       "Finance Approved",
       "Posted to QuickBooks",
-      ["Finance Approver", "Accounting Admin"],
+      ["Finance Approver", "Accounting Admin", "System Admin"],
       "post to QuickBooks",
     ),
   ],
@@ -113,7 +113,7 @@ export const TRANSITIONS = {
     T(
       "Finance Approved",
       "Sync Error",
-      ["Finance Approver", "Accounting Admin"],
+      ["Finance Approver", "Accounting Admin", "System Admin"],
       "QuickBooks sync error",
     ),
   ],
@@ -121,13 +121,13 @@ export const TRANSITIONS = {
     T(
       "Sync Error",
       "Posted to QuickBooks",
-      ["Finance Approver", "Accounting Admin"],
+      ["Finance Approver", "Accounting Admin", "System Admin"],
       "retry QuickBooks post",
     ),
     T(
       "Sync Error",
       "Sync Error",
-      ["Finance Approver", "Accounting Admin"],
+      ["Finance Approver", "Accounting Admin", "System Admin"],
       "retry QuickBooks post",
     ),
   ],
@@ -135,7 +135,7 @@ export const TRANSITIONS = {
     T(
       "Posted to QuickBooks",
       "Ready for Payroll Reimbursement",
-      ["Finance Approver", "Accounting Admin"],
+      ["Finance Approver", "Accounting Admin", "System Admin"],
       "send to payroll",
     ),
   ],
@@ -143,7 +143,7 @@ export const TRANSITIONS = {
     T(
       "Ready for Payroll Reimbursement",
       "Paid Through Payroll",
-      ["Finance Approver", "Accounting Admin"],
+      ["Finance Approver", "Accounting Admin", "System Admin"],
       "mark paid",
     ),
   ],
@@ -151,7 +151,7 @@ export const TRANSITIONS = {
     T(
       "Paid Through Payroll",
       "Reconciled",
-      ["Finance Approver", "Accounting Admin"],
+      ["Finance Approver", "Accounting Admin", "System Admin"],
       "reconcile",
     ),
   ],

@@ -47,7 +47,12 @@ router.get("/reports", async (req: Request, res: Response): Promise<void> => {
   const orgId = auth.user.orgId;
   const ALLOWED_SCOPES = ["mine", "manager", "finance", "payroll", "all"] as const;
   type Scope = typeof ALLOWED_SCOPES[number];
-  const rawScope = (req.query["scope"] as string | undefined) ?? "mine";
+  // The spec exposes `?mine=true` as a shorthand for `?scope=mine`. Either
+  // works; `?mine=true` wins if both are present.
+  const mineFlag = String(req.query["mine"] ?? "").toLowerCase() === "true";
+  const rawScope = mineFlag
+    ? "mine"
+    : (req.query["scope"] as string | undefined) ?? "mine";
   if (!ALLOWED_SCOPES.includes(rawScope as Scope)) {
     sendProblem(res, 400, "Bad Request", `Unknown scope: ${rawScope}`);
     return;
@@ -274,7 +279,7 @@ router.post("/reports/:id/submit", async (req, res): Promise<void> => {
   }
 });
 
-router.post("/reports/:id/withdraw", async (req, res): Promise<void> => {
+router.post("/reports/:id/recall", async (req, res): Promise<void> => {
   try {
     const id = pathId(req, "id");
     const report = await fetchReportOrThrow(id, req.auth!.user.orgId);
@@ -328,7 +333,7 @@ router.get("/reports/:id/timeline", async (req, res): Promise<void> => {
   }
 });
 
-router.get("/reports/:id/line-items", async (req, res): Promise<void> => {
+router.get("/reports/:id/lines", async (req, res): Promise<void> => {
   try {
     const id = pathId(req, "id");
     const report = await fetchReportOrThrow(id, req.auth!.user.orgId);
@@ -360,7 +365,7 @@ router.get("/reports/:id/line-items", async (req, res): Promise<void> => {
   }
 });
 
-router.post("/reports/:id/line-items", async (req, res): Promise<void> => {
+router.post("/reports/:id/lines", async (req, res): Promise<void> => {
   try {
     const id = pathId(req, "id");
     const parsed = CreateLineItemBody.safeParse(req.body);
@@ -395,7 +400,25 @@ router.post("/reports/:id/line-items", async (req, res): Promise<void> => {
   }
 });
 
-router.patch("/reports/:id/line-items/:lineId", async (req, res): Promise<void> => {
+router.patch("/lines/:lineId", async (req, res): Promise<void> => {
+  const lineId = pathId(req, "lineId");
+  // Resolve the parent report from the line itself so the route is top-level.
+  const lineRow = (
+    await db
+      .select({ reportId: lineItemsTable.reportId })
+      .from(lineItemsTable)
+      .where(eq(lineItemsTable.id, lineId))
+      .limit(1)
+  )[0];
+  if (!lineRow) {
+    sendProblem(res, 404, "Not Found");
+    return;
+  }
+  (req.params as Record<string, string>)["id"] = lineRow.reportId;
+  return updateLineItemHandler(req, res);
+});
+
+async function updateLineItemHandler(req: Request, res: Response): Promise<void> {
   try {
     const id = pathId(req, "id");
     const lineId = pathId(req, "lineId");
@@ -446,9 +469,26 @@ router.patch("/reports/:id/line-items/:lineId", async (req, res): Promise<void> 
   } catch (err) {
     handle(res, err);
   }
+}
+
+router.delete("/lines/:lineId", async (req, res): Promise<void> => {
+  const lineId = pathId(req, "lineId");
+  const lineRow = (
+    await db
+      .select({ reportId: lineItemsTable.reportId })
+      .from(lineItemsTable)
+      .where(eq(lineItemsTable.id, lineId))
+      .limit(1)
+  )[0];
+  if (!lineRow) {
+    sendProblem(res, 404, "Not Found");
+    return;
+  }
+  (req.params as Record<string, string>)["id"] = lineRow.reportId;
+  return deleteLineItemHandler(req, res);
 });
 
-router.delete("/reports/:id/line-items/:lineId", async (req, res): Promise<void> => {
+async function deleteLineItemHandler(req: Request, res: Response): Promise<void> {
   try {
     const id = pathId(req, "id");
     const lineId = pathId(req, "lineId");
@@ -470,7 +510,7 @@ router.delete("/reports/:id/line-items/:lineId", async (req, res): Promise<void>
   } catch (err) {
     handle(res, err);
   }
-});
+}
 
 router.get("/reports/:id/receipts", async (req, res): Promise<void> => {
   try {
@@ -485,6 +525,57 @@ router.get("/reports/:id/receipts", async (req, res): Promise<void> => {
       .from(receiptsTable)
       .where(eq(receiptsTable.reportId, report.id));
     res.json(ListReceiptsResponse.parse(rows.map(toReceiptDto)));
+  } catch (err) {
+    handle(res, err);
+  }
+});
+
+// Attach an already-uploaded object to a specific line item. The line's
+// parent report drives ownership and editability checks.
+router.post("/lines/:lineId/receipts", async (req, res): Promise<void> => {
+  try {
+    const lineId = pathId(req, "lineId");
+    const parsed = RegisterReceiptBody.safeParse({
+      ...(req.body ?? {}),
+      lineItemId: lineId,
+    });
+    if (!parsed.success) {
+      sendProblem(res, 400, "Invalid Body", parsed.error.message);
+      return;
+    }
+    const lineRow = (
+      await db
+        .select()
+        .from(lineItemsTable)
+        .where(eq(lineItemsTable.id, lineId))
+        .limit(1)
+    )[0];
+    if (!lineRow) {
+      sendProblem(res, 404, "Not Found");
+      return;
+    }
+    const report = await fetchReportOrThrow(
+      lineRow.reportId,
+      req.auth!.user.orgId,
+    );
+    if (req.auth!.user.id !== report.employeeId) {
+      sendProblem(res, 403, "Forbidden");
+      return;
+    }
+    const [receipt] = await db
+      .insert(receiptsTable)
+      .values({
+        orgId: req.auth!.user.orgId,
+        reportId: report.id,
+        lineItemId: lineId,
+        objectPath: parsed.data.objectPath,
+        filename: parsed.data.filename,
+        mimeType: parsed.data.mimeType,
+        sizeBytes: parsed.data.sizeBytes,
+        uploadedById: req.auth!.user.id,
+      })
+      .returning();
+    res.status(201).json(toReceiptDto(receipt));
   } catch (err) {
     handle(res, err);
   }

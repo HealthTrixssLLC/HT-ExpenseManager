@@ -162,6 +162,20 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/Department" }
 
+  /lookups/managers:
+    get:
+      operationId: listManagers
+      tags: [lookups]
+      summary: Active users eligible to manage / approve other employees
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ManagerOption" }
+
   /lookups/policy-rules:
     get:
       operationId: listPolicyRules
@@ -421,19 +435,19 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ExpenseReport" }
 
-  /reports/{id}/withdraw:
+  /reports/{id}/recall:
     parameters:
       - in: path
         name: id
         required: true
         schema: { type: string, format: uuid }
     post:
-      operationId: withdrawReport
+      operationId: recallReport
       tags: [reports]
-      summary: Withdraw a submitted report back to Draft
+      summary: Recall (withdraw) a submitted report back to Draft
       responses:
         "200":
-          description: Withdrawn
+          description: Recalled
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ExpenseReport" }
@@ -457,7 +471,7 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/ApprovalAction" }
 
-  /reports/{id}/line-items:
+  /reports/{id}/lines:
     parameters:
       - in: path
         name: id
@@ -489,12 +503,8 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/LineItem" }
 
-  /reports/{id}/line-items/{lineId}:
+  /lines/{lineId}:
     parameters:
-      - in: path
-        name: id
-        required: true
-        schema: { type: string, format: uuid }
       - in: path
         name: lineId
         required: true
@@ -519,6 +529,28 @@ paths:
       responses:
         "204":
           description: Deleted
+
+  /lines/{lineId}/receipts:
+    parameters:
+      - in: path
+        name: lineId
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: attachReceiptToLine
+      tags: [receipts]
+      summary: Attach an uploaded receipt object to a specific line item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterReceiptBody" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Receipt" }
 
   /reports/{id}/receipts:
     parameters:
@@ -566,11 +598,11 @@ paths:
         "204":
           description: Deleted
 
-  /storage/uploads/request-url:
+  /receipts/upload-url:
     post:
       operationId: requestUploadUrl
-      tags: [storage]
-      summary: Request a presigned upload URL for object storage
+      tags: [receipts]
+      summary: Request a presigned upload URL for a receipt
       requestBody:
         required: true
         content:
@@ -582,8 +614,18 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/RequestUploadUrlResponse" }
+        "413":
+          description: Receipt exceeds 10 MB
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "415":
+          description: Unsupported content type
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
 
-  /manager/queue:
+  /approvals/manager-queue:
     get:
       operationId: managerQueue
       tags: [manager]
@@ -618,7 +660,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ExpenseReport" }
 
-  /reports/{id}/manager-request-changes:
+  /reports/{id}/request-changes:
     parameters:
       - in: path
         name: id
@@ -639,7 +681,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ExpenseReport" }
 
-  /reports/{id}/manager-reject:
+  /reports/{id}/reject:
     parameters:
       - in: path
         name: id
@@ -660,7 +702,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ExpenseReport" }
 
-  /finance/queue:
+  /approvals/finance-queue:
     get:
       operationId: financeQueue
       tags: [finance]
@@ -733,7 +775,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/GlPreview" }
 
-  /reports/{id}/post-to-quickbooks:
+  /reports/{id}/post-to-qbo:
     parameters:
       - in: path
         name: id
@@ -755,7 +797,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/PostToQuickbooksResponse" }
 
-  /reports/{id}/retry-quickbooks:
+  /reports/{id}/retry-qbo:
     parameters:
       - in: path
         name: id
@@ -876,9 +918,10 @@ components:
         type: { type: string }
         title: { type: string }
         status: { type: integer }
+        code: { type: string, description: "Stable machine-readable error code" }
         detail: { type: string }
         instance: { type: string }
-      required: [title, status]
+      required: [title, status, code]
 
     HealthStatus:
       type: object
@@ -1115,6 +1158,15 @@ components:
         fullName: { type: string }
         role: { $ref: "#/components/schemas/Role" }
       required: [id, fullName, role]
+
+    ManagerOption:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        fullName: { type: string }
+        email: { type: string, format: email }
+        role: { $ref: "#/components/schemas/Role" }
+      required: [id, fullName, email, role]
 
     ExpenseReport:
       type: object

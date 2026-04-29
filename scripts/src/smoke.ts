@@ -6,8 +6,8 @@
  * exercises the queue endpoints, and verifies that key invariants hold:
  *   - login returns a session with the expected role
  *   - employee sees their own reports under /reports?scope=mine
- *   - manager sees Submitted/Manager Review reports under /manager/queue
- *   - finance sees Manager Approved/etc under /finance/queue
+ *   - manager sees Submitted/Manager Review reports under /approvals/manager-queue
+ *   - finance sees Manager Approved/etc under /approvals/finance-queue
  *   - finance sees Ready for Payroll Reimbursement under /payroll/queue
  *   - admin can list users
  *   - GL preview returns balanced debits/credits for a finance-approved report
@@ -110,7 +110,7 @@ async function main(): Promise<void> {
 
   // Manager queue
   const mq = (await getJson(
-    "/manager/queue",
+    "/approvals/manager-queue",
     sessions["manager@healthtrix.test"].token,
   )) as Array<{ id: string; status: string }>;
   assert(
@@ -118,11 +118,11 @@ async function main(): Promise<void> {
     "manager queue contains only Submitted/Manager Review",
   );
   assert(mq.length > 0, "manager queue non-empty");
-  console.log(`✓ manager /manager/queue returned ${mq.length} reports`);
+  console.log(`✓ manager /approvals/manager-queue returned ${mq.length} reports`);
 
   // Finance queue
   const fq = (await getJson(
-    "/finance/queue",
+    "/approvals/finance-queue",
     sessions["finance@healthtrix.test"].token,
   )) as Array<{ id: string; status: string; displayCode: string }>;
   assert(
@@ -137,7 +137,7 @@ async function main(): Promise<void> {
     "finance queue contains only finance-relevant statuses",
   );
   assert(fq.length > 0, "finance queue non-empty");
-  console.log(`✓ finance /finance/queue returned ${fq.length} reports`);
+  console.log(`✓ finance /approvals/finance-queue returned ${fq.length} reports`);
 
   // Payroll queue
   const pq = (await getJson(
@@ -188,14 +188,14 @@ async function main(): Promise<void> {
   console.log(`✓ /lookups/categories returned ${cats.length} categories`);
 
   // Negative: employee cannot view manager queue
-  const forbid = await fetch(`${BASE}/manager/queue`, {
+  const forbid = await fetch(`${BASE}/approvals/manager-queue`, {
     headers: {
       authorization: `Bearer ${sessions["priya@healthtrix.test"].token}`,
       "x-healthtrix-client": "ios",
     },
   });
   assert(forbid.status === 403, `employee blocked from manager queue (got ${forbid.status})`);
-  console.log(`✓ employee correctly blocked from /manager/queue (403)`);
+  console.log(`✓ employee correctly blocked from /approvals/manager-queue (403)`);
 
   // Negative IDOR: an employee cannot fetch another employee's report.
   // Find a Marcus-owned report via the admin's "all" scope.
@@ -249,7 +249,7 @@ async function main(): Promise<void> {
   console.log(`✓ unknown scope rejected with 400`);
 
   // Negative: unauthenticated upload-url request denied.
-  const noAuthUpload = await fetch(`${BASE}/storage/uploads/request-url`, {
+  const noAuthUpload = await fetch(`${BASE}/receipts/upload-url`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -261,7 +261,7 @@ async function main(): Promise<void> {
     noAuthUpload.status === 401,
     `upload URL denied without auth (got ${noAuthUpload.status})`,
   );
-  console.log(`✓ /storage/uploads/request-url denied without auth (401)`);
+  console.log(`✓ /receipts/upload-url denied without auth (401)`);
 
   console.log("\nAll smoke checks passed.");
 }

@@ -37,6 +37,7 @@ import type {
   LineItem,
   ListReportsParams,
   LoginBody,
+  ManagerOption,
   PayrollBatch,
   PolicyRule,
   PostToQuickbooksResponse,
@@ -746,6 +747,81 @@ export function useListDepartments<
   request?: SecondParameter<typeof customFetch>;
 }): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getListDepartmentsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Active users eligible to manage / approve other employees
+ */
+export const getListManagersUrl = () => {
+  return `/api/lookups/managers`;
+};
+
+export const listManagers = async (
+  options?: RequestInit,
+): Promise<ManagerOption[]> => {
+  return customFetch<ManagerOption[]>(getListManagersUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListManagersQueryKey = () => {
+  return [`/api/lookups/managers`] as const;
+};
+
+export const getListManagersQueryOptions = <
+  TData = Awaited<ReturnType<typeof listManagers>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listManagers>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListManagersQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listManagers>>> = ({
+    signal,
+  }) => listManagers({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listManagers>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListManagersQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listManagers>>
+>;
+export type ListManagersQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Active users eligible to manage / approve other employees
+ */
+
+export function useListManagers<
+  TData = Awaited<ReturnType<typeof listManagers>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listManagers>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListManagersQueryOptions(options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;
@@ -2093,40 +2169,40 @@ export const useSubmitReport = <
 };
 
 /**
- * @summary Withdraw a submitted report back to Draft
+ * @summary Recall (withdraw) a submitted report back to Draft
  */
-export const getWithdrawReportUrl = (id: string) => {
-  return `/api/reports/${id}/withdraw`;
+export const getRecallReportUrl = (id: string) => {
+  return `/api/reports/${id}/recall`;
 };
 
-export const withdrawReport = async (
+export const recallReport = async (
   id: string,
   options?: RequestInit,
 ): Promise<ExpenseReport> => {
-  return customFetch<ExpenseReport>(getWithdrawReportUrl(id), {
+  return customFetch<ExpenseReport>(getRecallReportUrl(id), {
     ...options,
     method: "POST",
   });
 };
 
-export const getWithdrawReportMutationOptions = <
+export const getRecallReportMutationOptions = <
   TError = ErrorType<unknown>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof withdrawReport>>,
+    Awaited<ReturnType<typeof recallReport>>,
     TError,
     { id: string },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
-  Awaited<ReturnType<typeof withdrawReport>>,
+  Awaited<ReturnType<typeof recallReport>>,
   TError,
   { id: string },
   TContext
 > => {
-  const mutationKey = ["withdrawReport"];
+  const mutationKey = ["recallReport"];
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -2136,44 +2212,44 @@ export const getWithdrawReportMutationOptions = <
     : { mutation: { mutationKey }, request: undefined };
 
   const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof withdrawReport>>,
+    Awaited<ReturnType<typeof recallReport>>,
     { id: string }
   > = (props) => {
     const { id } = props ?? {};
 
-    return withdrawReport(id, requestOptions);
+    return recallReport(id, requestOptions);
   };
 
   return { mutationFn, ...mutationOptions };
 };
 
-export type WithdrawReportMutationResult = NonNullable<
-  Awaited<ReturnType<typeof withdrawReport>>
+export type RecallReportMutationResult = NonNullable<
+  Awaited<ReturnType<typeof recallReport>>
 >;
 
-export type WithdrawReportMutationError = ErrorType<unknown>;
+export type RecallReportMutationError = ErrorType<unknown>;
 
 /**
- * @summary Withdraw a submitted report back to Draft
+ * @summary Recall (withdraw) a submitted report back to Draft
  */
-export const useWithdrawReport = <
+export const useRecallReport = <
   TError = ErrorType<unknown>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof withdrawReport>>,
+    Awaited<ReturnType<typeof recallReport>>,
     TError,
     { id: string },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationResult<
-  Awaited<ReturnType<typeof withdrawReport>>,
+  Awaited<ReturnType<typeof recallReport>>,
   TError,
   { id: string },
   TContext
 > => {
-  return useMutation(getWithdrawReportMutationOptions(options));
+  return useMutation(getRecallReportMutationOptions(options));
 };
 
 /**
@@ -2264,7 +2340,7 @@ export function useGetReportTimeline<
 }
 
 export const getListLineItemsUrl = (id: string) => {
-  return `/api/reports/${id}/line-items`;
+  return `/api/reports/${id}/lines`;
 };
 
 export const listLineItems = async (
@@ -2278,7 +2354,7 @@ export const listLineItems = async (
 };
 
 export const getListLineItemsQueryKey = (id: string) => {
-  return [`/api/reports/${id}/line-items`] as const;
+  return [`/api/reports/${id}/lines`] as const;
 };
 
 export const getListLineItemsQueryOptions = <
@@ -2344,7 +2420,7 @@ export function useListLineItems<
 }
 
 export const getCreateLineItemUrl = (id: string) => {
-  return `/api/reports/${id}/line-items`;
+  return `/api/reports/${id}/lines`;
 };
 
 export const createLineItem = async (
@@ -2424,17 +2500,16 @@ export const useCreateLineItem = <
   return useMutation(getCreateLineItemMutationOptions(options));
 };
 
-export const getUpdateLineItemUrl = (id: string, lineId: string) => {
-  return `/api/reports/${id}/line-items/${lineId}`;
+export const getUpdateLineItemUrl = (lineId: string) => {
+  return `/api/lines/${lineId}`;
 };
 
 export const updateLineItem = async (
-  id: string,
   lineId: string,
   updateLineItemBody: UpdateLineItemBody,
   options?: RequestInit,
 ): Promise<LineItem> => {
-  return customFetch<LineItem>(getUpdateLineItemUrl(id, lineId), {
+  return customFetch<LineItem>(getUpdateLineItemUrl(lineId), {
     ...options,
     method: "PATCH",
     headers: { "Content-Type": "application/json", ...options?.headers },
@@ -2449,14 +2524,14 @@ export const getUpdateLineItemMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof updateLineItem>>,
     TError,
-    { id: string; lineId: string; data: BodyType<UpdateLineItemBody> },
+    { lineId: string; data: BodyType<UpdateLineItemBody> },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof updateLineItem>>,
   TError,
-  { id: string; lineId: string; data: BodyType<UpdateLineItemBody> },
+  { lineId: string; data: BodyType<UpdateLineItemBody> },
   TContext
 > => {
   const mutationKey = ["updateLineItem"];
@@ -2470,11 +2545,11 @@ export const getUpdateLineItemMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof updateLineItem>>,
-    { id: string; lineId: string; data: BodyType<UpdateLineItemBody> }
+    { lineId: string; data: BodyType<UpdateLineItemBody> }
   > = (props) => {
-    const { id, lineId, data } = props ?? {};
+    const { lineId, data } = props ?? {};
 
-    return updateLineItem(id, lineId, data, requestOptions);
+    return updateLineItem(lineId, data, requestOptions);
   };
 
   return { mutationFn, ...mutationOptions };
@@ -2493,29 +2568,28 @@ export const useUpdateLineItem = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof updateLineItem>>,
     TError,
-    { id: string; lineId: string; data: BodyType<UpdateLineItemBody> },
+    { lineId: string; data: BodyType<UpdateLineItemBody> },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationResult<
   Awaited<ReturnType<typeof updateLineItem>>,
   TError,
-  { id: string; lineId: string; data: BodyType<UpdateLineItemBody> },
+  { lineId: string; data: BodyType<UpdateLineItemBody> },
   TContext
 > => {
   return useMutation(getUpdateLineItemMutationOptions(options));
 };
 
-export const getDeleteLineItemUrl = (id: string, lineId: string) => {
-  return `/api/reports/${id}/line-items/${lineId}`;
+export const getDeleteLineItemUrl = (lineId: string) => {
+  return `/api/lines/${lineId}`;
 };
 
 export const deleteLineItem = async (
-  id: string,
   lineId: string,
   options?: RequestInit,
 ): Promise<void> => {
-  return customFetch<void>(getDeleteLineItemUrl(id, lineId), {
+  return customFetch<void>(getDeleteLineItemUrl(lineId), {
     ...options,
     method: "DELETE",
   });
@@ -2528,14 +2602,14 @@ export const getDeleteLineItemMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof deleteLineItem>>,
     TError,
-    { id: string; lineId: string },
+    { lineId: string },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof deleteLineItem>>,
   TError,
-  { id: string; lineId: string },
+  { lineId: string },
   TContext
 > => {
   const mutationKey = ["deleteLineItem"];
@@ -2549,11 +2623,11 @@ export const getDeleteLineItemMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof deleteLineItem>>,
-    { id: string; lineId: string }
+    { lineId: string }
   > = (props) => {
-    const { id, lineId } = props ?? {};
+    const { lineId } = props ?? {};
 
-    return deleteLineItem(id, lineId, requestOptions);
+    return deleteLineItem(lineId, requestOptions);
   };
 
   return { mutationFn, ...mutationOptions };
@@ -2572,17 +2646,104 @@ export const useDeleteLineItem = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof deleteLineItem>>,
     TError,
-    { id: string; lineId: string },
+    { lineId: string },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationResult<
   Awaited<ReturnType<typeof deleteLineItem>>,
   TError,
-  { id: string; lineId: string },
+  { lineId: string },
   TContext
 > => {
   return useMutation(getDeleteLineItemMutationOptions(options));
+};
+
+/**
+ * @summary Attach an uploaded receipt object to a specific line item
+ */
+export const getAttachReceiptToLineUrl = (lineId: string) => {
+  return `/api/lines/${lineId}/receipts`;
+};
+
+export const attachReceiptToLine = async (
+  lineId: string,
+  registerReceiptBody: RegisterReceiptBody,
+  options?: RequestInit,
+): Promise<Receipt> => {
+  return customFetch<Receipt>(getAttachReceiptToLineUrl(lineId), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(registerReceiptBody),
+  });
+};
+
+export const getAttachReceiptToLineMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof attachReceiptToLine>>,
+    TError,
+    { lineId: string; data: BodyType<RegisterReceiptBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof attachReceiptToLine>>,
+  TError,
+  { lineId: string; data: BodyType<RegisterReceiptBody> },
+  TContext
+> => {
+  const mutationKey = ["attachReceiptToLine"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof attachReceiptToLine>>,
+    { lineId: string; data: BodyType<RegisterReceiptBody> }
+  > = (props) => {
+    const { lineId, data } = props ?? {};
+
+    return attachReceiptToLine(lineId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AttachReceiptToLineMutationResult = NonNullable<
+  Awaited<ReturnType<typeof attachReceiptToLine>>
+>;
+export type AttachReceiptToLineMutationBody = BodyType<RegisterReceiptBody>;
+export type AttachReceiptToLineMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Attach an uploaded receipt object to a specific line item
+ */
+export const useAttachReceiptToLine = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof attachReceiptToLine>>,
+    TError,
+    { lineId: string; data: BodyType<RegisterReceiptBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof attachReceiptToLine>>,
+  TError,
+  { lineId: string; data: BodyType<RegisterReceiptBody> },
+  TContext
+> => {
+  return useMutation(getAttachReceiptToLineMutationOptions(options));
 };
 
 export const getListReceiptsUrl = (id: string) => {
@@ -2831,10 +2992,10 @@ export const useDeleteReceipt = <
 };
 
 /**
- * @summary Request a presigned upload URL for object storage
+ * @summary Request a presigned upload URL for a receipt
  */
 export const getRequestUploadUrlUrl = () => {
-  return `/api/storage/uploads/request-url`;
+  return `/api/receipts/upload-url`;
 };
 
 export const requestUploadUrl = async (
@@ -2850,7 +3011,7 @@ export const requestUploadUrl = async (
 };
 
 export const getRequestUploadUrlMutationOptions = <
-  TError = ErrorType<unknown>,
+  TError = ErrorType<Problem>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -2891,13 +3052,13 @@ export type RequestUploadUrlMutationResult = NonNullable<
   Awaited<ReturnType<typeof requestUploadUrl>>
 >;
 export type RequestUploadUrlMutationBody = BodyType<RequestUploadUrlBody>;
-export type RequestUploadUrlMutationError = ErrorType<unknown>;
+export type RequestUploadUrlMutationError = ErrorType<Problem>;
 
 /**
- * @summary Request a presigned upload URL for object storage
+ * @summary Request a presigned upload URL for a receipt
  */
 export const useRequestUploadUrl = <
-  TError = ErrorType<unknown>,
+  TError = ErrorType<Problem>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -2920,7 +3081,7 @@ export const useRequestUploadUrl = <
  * @summary Reports awaiting the caller's manager review
  */
 export const getManagerQueueUrl = () => {
-  return `/api/manager/queue`;
+  return `/api/approvals/manager-queue`;
 };
 
 export const managerQueue = async (
@@ -2933,7 +3094,7 @@ export const managerQueue = async (
 };
 
 export const getManagerQueueQueryKey = () => {
-  return [`/api/manager/queue`] as const;
+  return [`/api/approvals/manager-queue`] as const;
 };
 
 export const getManagerQueueQueryOptions = <
@@ -3073,7 +3234,7 @@ export const useManagerApprove = <
 };
 
 export const getManagerRequestChangesUrl = (id: string) => {
-  return `/api/reports/${id}/manager-request-changes`;
+  return `/api/reports/${id}/request-changes`;
 };
 
 export const managerRequestChanges = async (
@@ -3154,7 +3315,7 @@ export const useManagerRequestChanges = <
 };
 
 export const getManagerRejectUrl = (id: string) => {
-  return `/api/reports/${id}/manager-reject`;
+  return `/api/reports/${id}/reject`;
 };
 
 export const managerReject = async (
@@ -3238,7 +3399,7 @@ export const useManagerReject = <
  * @summary Reports awaiting Finance review
  */
 export const getFinanceQueueUrl = () => {
-  return `/api/finance/queue`;
+  return `/api/approvals/finance-queue`;
 };
 
 export const financeQueue = async (
@@ -3251,7 +3412,7 @@ export const financeQueue = async (
 };
 
 export const getFinanceQueueQueryKey = () => {
-  return [`/api/finance/queue`] as const;
+  return [`/api/approvals/finance-queue`] as const;
 };
 
 export const getFinanceQueueQueryOptions = <
@@ -3562,7 +3723,7 @@ export function useGetGlPreview<
  * @summary Post an Approved report to QuickBooks (stub)
  */
 export const getPostToQuickbooksUrl = (id: string) => {
-  return `/api/reports/${id}/post-to-quickbooks`;
+  return `/api/reports/${id}/post-to-qbo`;
 };
 
 export const postToQuickbooks = async (
@@ -3649,7 +3810,7 @@ export const usePostToQuickbooks = <
  * @summary Retry a Sync Error report posting
  */
 export const getRetryQuickbooksPostUrl = (id: string) => {
-  return `/api/reports/${id}/retry-quickbooks`;
+  return `/api/reports/${id}/retry-qbo`;
 };
 
 export const retryQuickbooksPost = async (

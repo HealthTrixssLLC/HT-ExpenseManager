@@ -23,12 +23,14 @@ import { applyTransition, type TransitionName } from "../services/workflow";
 
 const router: IRouter = Router();
 
-const MANAGER_ROLES = ["Manager Approver", "Accounting Admin", "System Admin"];
+// Spec: only Manager Approver (and System Admin as escalation) act on the
+// manager queue. Accounting Admin owns finance/admin surface, not approvals.
+const MANAGER_ROLES = ["Manager Approver", "System Admin"];
 
 router.use(requireAuth);
 
 router.get(
-  "/manager/queue",
+  "/approvals/manager-queue",
   requireRole(...MANAGER_ROLES),
   async (req, res): Promise<void> => {
     const auth = req.auth!;
@@ -95,12 +97,12 @@ router.post(
   (req, res) => transitionRoute(req, res, "managerApprove"),
 );
 router.post(
-  "/reports/:id/manager-request-changes",
+  "/reports/:id/request-changes",
   requireRole(...MANAGER_ROLES),
   (req, res) => transitionRoute(req, res, "managerRequestChanges"),
 );
 router.post(
-  "/reports/:id/manager-reject",
+  "/reports/:id/reject",
   requireRole(...MANAGER_ROLES),
   (req, res) => transitionRoute(req, res, "managerReject"),
 );

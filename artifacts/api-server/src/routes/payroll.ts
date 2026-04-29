@@ -282,6 +282,10 @@ router.post(
       : [];
     const reportById = new Map(reports.map((r) => [r.id, r] as const));
 
+    // Build per-entry flag, persist a reconciliation record for every entry,
+    // and remember which reports came out matched so we can transition only
+    // those to "Reconciled".
+    const matchedReportIds = new Set<string>();
     await db.transaction(async (tx) => {
       for (const entry of parsed.data.entries) {
         const item = itemByReport.get(entry.reportId);
@@ -289,16 +293,20 @@ router.post(
         const expectedCents = Math.round(parseFloat(item.amount) * 100);
         const paidCents = Math.round(parseFloat(entry.paidAmount) * 100);
         const variance = paidCents - expectedCents;
-        const flag =
-          variance === 0
-            ? "matched"
-            : variance < 0
-              ? variance === -expectedCents
-                ? "missing"
-                : "under"
-              : variance > 0
-                ? "over"
-                : "partial";
+        // Flag taxonomy:
+        //   matched : paid == expected
+        //   missing : paid == 0 (no reimbursement landed)
+        //   partial : 0 < paid < expected (under-payment)
+        //   over    : paid > expected
+        //   under   : paid < expected, treated as a synonym of partial; kept
+        //             as an enum value for legacy data compatibility but not
+        //             produced by this code path.
+        let flag: "matched" | "missing" | "partial" | "over" | "under";
+        if (variance === 0) flag = "matched";
+        else if (paidCents === 0) flag = "missing";
+        else if (paidCents < expectedCents) flag = "partial";
+        else flag = "over";
+        if (flag === "matched") matchedReportIds.add(entry.reportId);
         await tx.insert(reconciliationRecordsTable).values({
           batchId: batch.id,
           reportId: entry.reportId,
@@ -311,15 +319,18 @@ router.post(
       }
     });
 
+    // Only matched reports advance to "Reconciled". Reports with a variance
+    // remain in "Paid Through Payroll" so finance can review and adjust.
     for (const r of reports) {
+      if (!matchedReportIds.has(r.id)) continue;
+      const fresh = reportById.get(r.id) ?? r;
       await applyTransition({
-        report: r,
+        report: fresh,
         actor: { id: req.auth!.user.id, role: req.auth!.user.role },
         transition: "reconcile",
         metadata: JSON.stringify({ batchId: batch.id }),
       });
     }
-    void reportById;
 
     const [updated] = await db
       .update(payrollBatchesTable)

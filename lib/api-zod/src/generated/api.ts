@@ -137,6 +137,23 @@ export const ListDepartmentsResponseItem = zod.object({
 export const ListDepartmentsResponse = zod.array(ListDepartmentsResponseItem);
 
 /**
+ * @summary Active users eligible to manage / approve other employees
+ */
+export const ListManagersResponseItem = zod.object({
+  id: zod.string().uuid(),
+  fullName: zod.string(),
+  email: zod.string().email(),
+  role: zod.enum([
+    "Employee",
+    "Manager Approver",
+    "Finance Approver",
+    "Accounting Admin",
+    "System Admin",
+  ]),
+});
+export const ListManagersResponse = zod.array(ListManagersResponseItem);
+
+/**
  * @summary Effective policy rules visible to all signed-in users
  */
 export const ListPolicyRulesResponseItem = zod.object({
@@ -650,13 +667,13 @@ export const SubmitReportResponse = zod.object({
 });
 
 /**
- * @summary Withdraw a submitted report back to Draft
+ * @summary Recall (withdraw) a submitted report back to Draft
  */
-export const WithdrawReportParams = zod.object({
+export const RecallReportParams = zod.object({
   id: zod.coerce.string().uuid(),
 });
 
-export const WithdrawReportResponse = zod.object({
+export const RecallReportResponse = zod.object({
   id: zod.string().uuid(),
   displayCode: zod.string(),
   title: zod.string(),
@@ -829,7 +846,6 @@ export const CreateLineItemBody = zod.object({
 });
 
 export const UpdateLineItemParams = zod.object({
-  id: zod.coerce.string().uuid(),
   lineId: zod.coerce.string().uuid(),
 });
 
@@ -857,8 +873,22 @@ export const UpdateLineItemResponse = zod.object({
 });
 
 export const DeleteLineItemParams = zod.object({
-  id: zod.coerce.string().uuid(),
   lineId: zod.coerce.string().uuid(),
+});
+
+/**
+ * @summary Attach an uploaded receipt object to a specific line item
+ */
+export const AttachReceiptToLineParams = zod.object({
+  lineId: zod.coerce.string().uuid(),
+});
+
+export const AttachReceiptToLineBody = zod.object({
+  objectPath: zod.string(),
+  filename: zod.string(),
+  mimeType: zod.string(),
+  sizeBytes: zod.number(),
+  lineItemId: zod.string().uuid().nullish(),
 });
 
 export const ListReceiptsParams = zod.object({
@@ -898,7 +928,7 @@ export const DeleteReceiptParams = zod.object({
 });
 
 /**
- * @summary Request a presigned upload URL for object storage
+ * @summary Request a presigned upload URL for a receipt
  */
 export const RequestUploadUrlBody = zod.object({
   name: zod.string(),
