@@ -643,6 +643,25 @@ router.post("/reports/:id/receipts", async (req, res): Promise<void> => {
       sendProblem(res, 403, "Forbidden");
       return;
     }
+    // If a lineItemId is supplied, the line MUST belong to this report and
+    // org — otherwise we'd let a caller cross-reference a receipt to a line
+    // on someone else's report. Validate before touching object storage.
+    if (parsed.data.lineItemId) {
+      const [line] = await db
+        .select()
+        .from(lineItemsTable)
+        .where(eq(lineItemsTable.id, parsed.data.lineItemId))
+        .limit(1);
+      if (!line || line.reportId !== report.id) {
+        sendProblem(
+          res,
+          400,
+          "Invalid Line Item",
+          "lineItemId does not belong to this report.",
+        );
+        return;
+      }
+    }
     const verified = await verifyReceiptUpload({
       objectStorage: objectStorageService,
       objectPath: parsed.data.objectPath,
