@@ -21,13 +21,23 @@ import type { WorkflowStatus } from "./_shared/types";
 import { SAMPLE_REPORTS } from "./_shared/data";
 import { Button } from "@/components/ui/button";
 
+type VarianceClass = "Reconciled" | "Underpaid" | "Overpaid" | "Missing payment";
+
 type ReconRow = {
   id: string;
   employee: string;
   approved: number;
   paid: number | null;
   variance: number;
+  varianceClass: VarianceClass;
   status: WorkflowStatus;
+};
+
+const VARIANCE_TONE: Record<VarianceClass, { bg: string; fg: string }> = {
+  "Reconciled":      { bg: "var(--ht-tint-success)", fg: "var(--ht-success)" },
+  "Underpaid":       { bg: "var(--ht-tint-danger)",  fg: "var(--ht-danger)" },
+  "Overpaid":        { bg: "var(--ht-tint-orange)",  fg: "var(--ht-warning)" },
+  "Missing payment": { bg: "var(--ht-tint-danger)",  fg: "var(--ht-danger)" },
 };
 
 export function FinancePosting() {
@@ -56,12 +66,12 @@ export function FinancePosting() {
   ];
 
   const reconRows: ReconRow[] = [
-    { id: "EXP-2603-098", employee: "Sarah Jenkins",  approved: 450.00,  paid: 450.00,  variance: 0,       status: "Reconciled" },
-    { id: "EXP-2603-097", employee: "Michael Chang",  approved: 1250.50, paid: 1250.50, variance: 0,       status: "Reconciled" },
-    { id: "EXP-2603-096", employee: "Emily Rostova",  approved: 890.20,  paid: 847.70,  variance: -42.50,  status: "Sync Error" },
-    { id: "EXP-2603-095", employee: "David Kim",      approved: 320.00,  paid: 325.00,  variance: 5.00,    status: "Sync Error" },
-    { id: "EXP-2603-094", employee: "Aisha Patel",    approved: 610.75,  paid: null,    variance: -610.75, status: "Sync Error" },
-    { id: "EXP-2603-093", employee: "Tom Wilson",     approved: 215.00,  paid: 215.00,  variance: 0,       status: "Reconciled" },
+    { id: "EXP-2603-098", employee: "Sarah Jenkins",  approved: 450.00,  paid: 450.00,  variance: 0,       varianceClass: "Reconciled",      status: "Reconciled" },
+    { id: "EXP-2603-097", employee: "Michael Chang",  approved: 1250.50, paid: 1250.50, variance: 0,       varianceClass: "Reconciled",      status: "Reconciled" },
+    { id: "EXP-2603-096", employee: "Emily Rostova",  approved: 890.20,  paid: 847.70,  variance: -42.50,  varianceClass: "Underpaid",       status: "Sync Error" },
+    { id: "EXP-2603-095", employee: "David Kim",      approved: 320.00,  paid: 325.00,  variance: 5.00,    varianceClass: "Overpaid",        status: "Sync Error" },
+    { id: "EXP-2603-094", employee: "Aisha Patel",    approved: 610.75,  paid: null,    variance: -610.75, varianceClass: "Missing payment", status: "Sync Error" },
+    { id: "EXP-2603-093", employee: "Tom Wilson",     approved: 215.00,  paid: 215.00,  variance: 0,       varianceClass: "Reconciled",      status: "Reconciled" },
   ];
 
   const [activeTab, setActiveTab] = useState("Post");
@@ -306,6 +316,7 @@ export function FinancePosting() {
                       <th style={{ padding: "12px 20px", fontWeight: 500, textAlign: "right" }}>Approved</th>
                       <th style={{ padding: "12px 20px", fontWeight: 500, textAlign: "right" }}>Paid</th>
                       <th style={{ padding: "12px 20px", fontWeight: 500, textAlign: "right" }}>Variance</th>
+                      <th style={{ padding: "12px 20px", fontWeight: 500 }}>Class</th>
                       <th style={{ padding: "12px 20px", fontWeight: 500 }}>Status</th>
                       <th style={{ padding: "12px 20px", fontWeight: 500 }}></th>
                     </tr>
@@ -325,6 +336,21 @@ export function FinancePosting() {
                         </td>
                         <td className="ht-mono ht-tabular" style={{ padding: "16px 20px", textAlign: "right", fontWeight: r.variance !== 0 ? 600 : 400, color: r.variance < 0 ? "var(--ht-danger)" : r.variance > 0 ? "var(--ht-warning)" : "var(--ht-success)" }}>
                           {r.variance !== 0 ? (r.variance > 0 ? `+$${r.variance.toFixed(2)}` : `-$${Math.abs(r.variance).toFixed(2)}`) : "$0.00"}
+                        </td>
+                        <td style={{ padding: "16px 20px" }}>
+                          <span style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            padding: "3px 9px",
+                            borderRadius: 999,
+                            fontSize: 11,
+                            fontWeight: 600,
+                            background: VARIANCE_TONE[r.varianceClass].bg,
+                            color: VARIANCE_TONE[r.varianceClass].fg,
+                            whiteSpace: "nowrap",
+                          }}>
+                            {r.varianceClass}
+                          </span>
                         </td>
                         <td style={{ padding: "16px 20px" }}>
                           <StatusPill status={r.status} size="xs" />
