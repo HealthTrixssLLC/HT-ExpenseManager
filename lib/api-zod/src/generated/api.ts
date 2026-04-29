@@ -406,6 +406,51 @@ export const AdminDisconnectQboResponse = zod.object({
 });
 
 /**
+ * @summary List manager delegations for the org (active or all)
+ */
+export const adminListDelegationsQueryActiveOnlyDefault = true;
+
+export const AdminListDelegationsQueryParams = zod.object({
+  activeOnly: zod.coerce
+    .boolean()
+    .default(adminListDelegationsQueryActiveOnlyDefault),
+});
+
+export const AdminListDelegationsResponseItem = zod.object({
+  id: zod.string().uuid(),
+  fromManagerId: zod.string().uuid(),
+  fromManagerName: zod.string(),
+  toManagerId: zod.string().uuid(),
+  toManagerName: zod.string(),
+  startsAt: zod.coerce.date(),
+  endsAt: zod.coerce.date().nullish(),
+  reason: zod.string().nullish(),
+  createdAt: zod.coerce.date(),
+  revokedAt: zod.coerce.date().nullish(),
+});
+export const AdminListDelegationsResponse = zod.array(
+  AdminListDelegationsResponseItem,
+);
+
+/**
+ * @summary Authorize manager B to act on behalf of manager A
+ */
+export const AdminCreateDelegationBody = zod.object({
+  fromManagerId: zod.string().uuid(),
+  toManagerId: zod.string().uuid(),
+  startsAt: zod.coerce.date().nullish(),
+  endsAt: zod.coerce.date().nullish(),
+  reason: zod.string().nullish(),
+});
+
+/**
+ * @summary Revoke an active delegation
+ */
+export const AdminRevokeDelegationParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+/**
  * @summary Approval-action audit trail (org-wide or per-report)
  */
 export const adminAuditLogQueryLimitDefault = 100;
@@ -804,6 +849,89 @@ export const RecallReportParams = zod.object({
 });
 
 export const RecallReportResponse = zod.object({
+  id: zod.string().uuid(),
+  displayCode: zod.string(),
+  title: zod.string(),
+  description: zod.string(),
+  employee: zod.object({
+    id: zod.string().uuid(),
+    fullName: zod.string(),
+    role: zod.enum([
+      "Employee",
+      "Manager Approver",
+      "Finance Approver",
+      "Accounting Admin",
+      "System Admin",
+    ]),
+  }),
+  departmentId: zod.string().uuid().nullish(),
+  departmentName: zod.string().nullish(),
+  policy: zod.string(),
+  periodStart: zod.coerce.date().nullish(),
+  periodEnd: zod.coerce.date().nullish(),
+  status: zod.enum([
+    "Draft",
+    "Submitted",
+    "Manager Review",
+    "Changes Requested",
+    "Manager Approved",
+    "Finance Review",
+    "Finance Approved",
+    "Posted to QuickBooks",
+    "Ready for Payroll Reimbursement",
+    "Paid Through Payroll",
+    "Reconciled",
+    "Rejected",
+    "Voided",
+    "Sync Error",
+  ]),
+  total: zod.string(),
+  submittedAt: zod.coerce.date().nullish(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+  lineItems: zod.array(
+    zod.object({
+      id: zod.string().uuid(),
+      reportId: zod.string().uuid(),
+      occurredOn: zod.coerce.date(),
+      merchant: zod.string(),
+      description: zod.string(),
+      category: zod.string(),
+      amount: zod.string(),
+      paymentMethod: zod.enum(["Personal Card", "Cash", "Company Card"]),
+      needsReview: zod.boolean(),
+      receiptCount: zod.number(),
+      createdAt: zod.coerce.date(),
+    }),
+  ),
+  receipts: zod.array(
+    zod.object({
+      id: zod.string().uuid(),
+      reportId: zod.string().uuid().nullish(),
+      lineItemId: zod.string().uuid().nullish(),
+      objectPath: zod.string(),
+      filename: zod.string(),
+      mimeType: zod.string(),
+      sizeBytes: zod.number(),
+      uploadedById: zod.string().uuid(),
+      createdAt: zod.coerce.date(),
+    }),
+  ),
+});
+
+/**
+ * Owner can void their own Draft or Changes Requested report. Accounting Admin / System Admin can void any pre-payroll status.
+ * @summary Void a report (terminal Voided status)
+ */
+export const VoidReportParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+export const VoidReportBody = zod.object({
+  comment: zod.string().nullish(),
+});
+
+export const VoidReportResponse = zod.object({
   id: zod.string().uuid(),
   displayCode: zod.string(),
   title: zod.string(),

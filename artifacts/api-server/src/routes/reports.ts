@@ -312,6 +312,25 @@ router.post("/reports/:id/recall", async (req, res): Promise<void> => {
   }
 });
 
+router.post("/reports/:id/void", async (req, res): Promise<void> => {
+  try {
+    const id = pathId(req, "id");
+    const report = await fetchReportOrThrow(id, req.auth!.user.orgId);
+    // Owner can void editable statuses; admins handle everything else.
+    // applyTransition's per-status actor whitelist enforces the matrix.
+    const result = await applyTransition({
+      report,
+      actor: { id: req.auth!.user.id, role: req.auth!.user.role },
+      transition: "voidReport",
+      allowSelf: true,
+      comment: typeof req.body?.comment === "string" ? req.body.comment : null,
+    });
+    res.json(ExpenseReportResponse.parse(await loadFullReport(result.report)));
+  } catch (err) {
+    handle(res, err);
+  }
+});
+
 router.get("/reports/:id/timeline", async (req, res): Promise<void> => {
   try {
     const id = pathId(req, "id");

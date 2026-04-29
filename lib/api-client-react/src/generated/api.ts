@@ -18,12 +18,14 @@ import type {
 
 import type {
   AdminAuditLogParams,
+  AdminListDelegationsParams,
   ApprovalAction,
   ApprovalActionBody,
   AuthSession,
   BootstrapBody,
   BootstrapStatus,
   CategoryOption,
+  CreateDelegationBody,
   CreateLineItemBody,
   CreatePayrollBatchBody,
   CreateReportBody,
@@ -38,6 +40,7 @@ import type {
   LineItem,
   ListReportsParams,
   LoginBody,
+  ManagerDelegation,
   ManagerOption,
   PatchPolicyRuleBody,
   PayrollBatch,
@@ -56,6 +59,7 @@ import type {
   UpdateReportBody,
   UpdateUserBody,
   User,
+  VoidReportBody,
 } from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
@@ -1897,6 +1901,276 @@ export const useAdminDisconnectQbo = <
 };
 
 /**
+ * @summary List manager delegations for the org (active or all)
+ */
+export const getAdminListDelegationsUrl = (
+  params?: AdminListDelegationsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/admin/delegations?${stringifiedParams}`
+    : `/api/admin/delegations`;
+};
+
+export const adminListDelegations = async (
+  params?: AdminListDelegationsParams,
+  options?: RequestInit,
+): Promise<ManagerDelegation[]> => {
+  return customFetch<ManagerDelegation[]>(getAdminListDelegationsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getAdminListDelegationsQueryKey = (
+  params?: AdminListDelegationsParams,
+) => {
+  return [`/api/admin/delegations`, ...(params ? [params] : [])] as const;
+};
+
+export const getAdminListDelegationsQueryOptions = <
+  TData = Awaited<ReturnType<typeof adminListDelegations>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: AdminListDelegationsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof adminListDelegations>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getAdminListDelegationsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof adminListDelegations>>
+  > = ({ signal }) =>
+    adminListDelegations(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof adminListDelegations>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type AdminListDelegationsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof adminListDelegations>>
+>;
+export type AdminListDelegationsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List manager delegations for the org (active or all)
+ */
+
+export function useAdminListDelegations<
+  TData = Awaited<ReturnType<typeof adminListDelegations>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: AdminListDelegationsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof adminListDelegations>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getAdminListDelegationsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Authorize manager B to act on behalf of manager A
+ */
+export const getAdminCreateDelegationUrl = () => {
+  return `/api/admin/delegations`;
+};
+
+export const adminCreateDelegation = async (
+  createDelegationBody: CreateDelegationBody,
+  options?: RequestInit,
+): Promise<ManagerDelegation> => {
+  return customFetch<ManagerDelegation>(getAdminCreateDelegationUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createDelegationBody),
+  });
+};
+
+export const getAdminCreateDelegationMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminCreateDelegation>>,
+    TError,
+    { data: BodyType<CreateDelegationBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminCreateDelegation>>,
+  TError,
+  { data: BodyType<CreateDelegationBody> },
+  TContext
+> => {
+  const mutationKey = ["adminCreateDelegation"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminCreateDelegation>>,
+    { data: BodyType<CreateDelegationBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return adminCreateDelegation(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminCreateDelegationMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminCreateDelegation>>
+>;
+export type AdminCreateDelegationMutationBody = BodyType<CreateDelegationBody>;
+export type AdminCreateDelegationMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Authorize manager B to act on behalf of manager A
+ */
+export const useAdminCreateDelegation = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminCreateDelegation>>,
+    TError,
+    { data: BodyType<CreateDelegationBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminCreateDelegation>>,
+  TError,
+  { data: BodyType<CreateDelegationBody> },
+  TContext
+> => {
+  return useMutation(getAdminCreateDelegationMutationOptions(options));
+};
+
+/**
+ * @summary Revoke an active delegation
+ */
+export const getAdminRevokeDelegationUrl = (id: string) => {
+  return `/api/admin/delegations/${id}`;
+};
+
+export const adminRevokeDelegation = async (
+  id: string,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getAdminRevokeDelegationUrl(id), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getAdminRevokeDelegationMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminRevokeDelegation>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminRevokeDelegation>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["adminRevokeDelegation"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminRevokeDelegation>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return adminRevokeDelegation(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminRevokeDelegationMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminRevokeDelegation>>
+>;
+
+export type AdminRevokeDelegationMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Revoke an active delegation
+ */
+export const useAdminRevokeDelegation = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminRevokeDelegation>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminRevokeDelegation>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getAdminRevokeDelegationMutationOptions(options));
+};
+
+/**
  * @summary Approval-action audit trail (org-wide or per-report)
  */
 export const getAdminAuditLogUrl = (params?: AdminAuditLogParams) => {
@@ -2592,6 +2866,94 @@ export const useRecallReport = <
   TContext
 > => {
   return useMutation(getRecallReportMutationOptions(options));
+};
+
+/**
+ * Owner can void their own Draft or Changes Requested report. Accounting Admin / System Admin can void any pre-payroll status.
+ * @summary Void a report (terminal Voided status)
+ */
+export const getVoidReportUrl = (id: string) => {
+  return `/api/reports/${id}/void`;
+};
+
+export const voidReport = async (
+  id: string,
+  voidReportBody?: VoidReportBody,
+  options?: RequestInit,
+): Promise<ExpenseReport> => {
+  return customFetch<ExpenseReport>(getVoidReportUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(voidReportBody),
+  });
+};
+
+export const getVoidReportMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof voidReport>>,
+    TError,
+    { id: string; data: BodyType<VoidReportBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof voidReport>>,
+  TError,
+  { id: string; data: BodyType<VoidReportBody> },
+  TContext
+> => {
+  const mutationKey = ["voidReport"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof voidReport>>,
+    { id: string; data: BodyType<VoidReportBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return voidReport(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type VoidReportMutationResult = NonNullable<
+  Awaited<ReturnType<typeof voidReport>>
+>;
+export type VoidReportMutationBody = BodyType<VoidReportBody>;
+export type VoidReportMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Void a report (terminal Voided status)
+ */
+export const useVoidReport = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof voidReport>>,
+    TError,
+    { id: string; data: BodyType<VoidReportBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof voidReport>>,
+  TError,
+  { id: string; data: BodyType<VoidReportBody> },
+  TContext
+> => {
+  return useMutation(getVoidReportMutationOptions(options));
 };
 
 /**

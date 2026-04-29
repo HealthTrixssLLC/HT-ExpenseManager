@@ -187,6 +187,38 @@ export interface PatchPolicyRuleBody {
   description?: string | null;
 }
 
+export interface ManagerDelegation {
+  id: string;
+  fromManagerId: string;
+  fromManagerName: string;
+  toManagerId: string;
+  toManagerName: string;
+  startsAt: string;
+  /** @nullable */
+  endsAt?: string | null;
+  /** @nullable */
+  reason?: string | null;
+  createdAt: string;
+  /** @nullable */
+  revokedAt?: string | null;
+}
+
+export interface CreateDelegationBody {
+  fromManagerId: string;
+  toManagerId: string;
+  /** @nullable */
+  startsAt?: string | null;
+  /** @nullable */
+  endsAt?: string | null;
+  /** @nullable */
+  reason?: string | null;
+}
+
+export interface VoidReportBody {
+  /** @nullable */
+  comment?: string | null;
+}
+
 export interface GlMapping {
   id: string;
   code: string;
@@ -534,6 +566,10 @@ export interface ReconcileBatchBody {
   /** @minItems 1 */
   entries: ReconcileBatchEntry[];
 }
+
+export type AdminListDelegationsParams = {
+  activeOnly?: boolean;
+};
 
 export type AdminAuditLogParams = {
   reportId?: string;

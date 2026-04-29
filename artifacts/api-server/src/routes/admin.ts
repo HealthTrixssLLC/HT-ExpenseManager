@@ -4,9 +4,10 @@ import {
   type Request,
   type Response,
 } from "express";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull, or } from "drizzle-orm";
 import {
   AdminCreateUserBody as CreateUserBody,
+  AdminCreateDelegationBody as CreateDelegationBody,
   AdminGetQboConnectionResponse,
   AdminListGlMappingsResponse,
   AdminListUsersResponse,
@@ -20,6 +21,7 @@ import {
   departmentsTable,
   expenseReportsTable,
   glMappingsTable,
+  managerDelegationsTable,
   policyRulesTable,
   usersTable,
 } from "../lib/db";
@@ -361,6 +363,164 @@ router.get(
     );
   },
 );
+
+// ---------------------------------------------------------------------------
+// Manager delegations
+//
+// A delegation row says "manager FROM authorizes manager TO to act on their
+// queue between startsAt and endsAt". The manager routes consult this table
+// when honoring the `?delegateOf=` query param. Created/managed by System
+// Admin so a single role owns the audit trail.
+// ---------------------------------------------------------------------------
+
+router.get(
+  "/admin/delegations",
+  requireRole(...SYSADMIN_ROLES),
+  async (req, res): Promise<void> => {
+    const orgId = req.auth!.user.orgId;
+    const activeOnly =
+      String(req.query["activeOnly"] ?? "true").toLowerCase() !== "false";
+    const rows = await db
+      .select()
+      .from(managerDelegationsTable)
+      .where(eq(managerDelegationsTable.orgId, orgId))
+      .orderBy(desc(managerDelegationsTable.createdAt));
+    const userIds = new Set<string>();
+    for (const row of rows) {
+      userIds.add(row.fromManagerId);
+      userIds.add(row.toManagerId);
+    }
+    const users = userIds.size
+      ? await db
+          .select()
+          .from(usersTable)
+          .where(eq(usersTable.orgId, orgId))
+      : [];
+    const nameById = new Map(users.map((u) => [u.id, u.fullName] as const));
+    const now = new Date();
+    const filtered = activeOnly
+      ? rows.filter(
+          (r) =>
+            r.revokedAt === null &&
+            r.startsAt <= now &&
+            (r.endsAt === null || r.endsAt > now),
+        )
+      : rows;
+    res.json(
+      filtered.map((r) => ({
+        id: r.id,
+        fromManagerId: r.fromManagerId,
+        fromManagerName: nameById.get(r.fromManagerId) ?? "Unknown",
+        toManagerId: r.toManagerId,
+        toManagerName: nameById.get(r.toManagerId) ?? "Unknown",
+        startsAt: r.startsAt.toISOString(),
+        endsAt: r.endsAt ? r.endsAt.toISOString() : null,
+        reason: r.reason,
+        createdAt: r.createdAt.toISOString(),
+        revokedAt: r.revokedAt ? r.revokedAt.toISOString() : null,
+      })),
+    );
+  },
+);
+
+router.post(
+  "/admin/delegations",
+  requireRole(...SYSADMIN_ROLES),
+  async (req, res): Promise<void> => {
+    const orgId = req.auth!.user.orgId;
+    const parsed = CreateDelegationBody.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      sendProblem(res, 400, "Invalid Body", parsed.error.message);
+      return;
+    }
+    const { fromManagerId, toManagerId, startsAt, endsAt, reason } = parsed.data;
+    if (fromManagerId === toManagerId) {
+      sendProblem(
+        res,
+        400,
+        "Invalid Delegation",
+        "fromManagerId and toManagerId must differ.",
+      );
+      return;
+    }
+    const userRows = await db
+      .select()
+      .from(usersTable)
+      .where(eq(usersTable.orgId, orgId));
+    const from = userRows.find((u) => u.id === fromManagerId);
+    const to = userRows.find((u) => u.id === toManagerId);
+    if (!from || !to) {
+      sendProblem(res, 404, "Not Found", "from/to manager not in org.");
+      return;
+    }
+    const okRoles = new Set(["Manager Approver", "System Admin"]);
+    if (!okRoles.has(from.role) || !okRoles.has(to.role)) {
+      sendProblem(
+        res,
+        400,
+        "Invalid Delegation",
+        "Both users must be Manager Approver or System Admin.",
+      );
+      return;
+    }
+    const [row] = await db
+      .insert(managerDelegationsTable)
+      .values({
+        orgId,
+        fromManagerId,
+        toManagerId,
+        startsAt: startsAt ? new Date(startsAt) : new Date(),
+        endsAt: endsAt ? new Date(endsAt) : null,
+        reason: reason ?? null,
+        createdById: req.auth!.user.id,
+      })
+      .returning();
+    res.status(201).json({
+      id: row.id,
+      fromManagerId: row.fromManagerId,
+      fromManagerName: from.fullName,
+      toManagerId: row.toManagerId,
+      toManagerName: to.fullName,
+      startsAt: row.startsAt.toISOString(),
+      endsAt: row.endsAt ? row.endsAt.toISOString() : null,
+      reason: row.reason,
+      createdAt: row.createdAt.toISOString(),
+      revokedAt: null,
+    });
+  },
+);
+
+router.delete(
+  "/admin/delegations/:id",
+  requireRole(...SYSADMIN_ROLES),
+  async (req, res): Promise<void> => {
+    const id = pathId(req, "id");
+    const orgId = req.auth!.user.orgId;
+    const [existing] = await db
+      .select()
+      .from(managerDelegationsTable)
+      .where(
+        and(
+          eq(managerDelegationsTable.id, id),
+          eq(managerDelegationsTable.orgId, orgId),
+        ),
+      )
+      .limit(1);
+    if (!existing) {
+      sendProblem(res, 404, "Not Found");
+      return;
+    }
+    await db
+      .update(managerDelegationsTable)
+      .set({ revokedAt: new Date() })
+      .where(eq(managerDelegationsTable.id, id));
+    res.status(204).end();
+  },
+);
+
+// Suppress unused-import lint for or/isNull (kept for future SQL filters).
+void or;
+void isNull;
 
 function pathId(req: Request, key: string): string {
   const raw = (req.params as Record<string, string | string[]>)[key];

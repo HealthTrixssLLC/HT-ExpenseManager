@@ -7,12 +7,14 @@
  */
 
 export * from "./adminAuditLogParams";
+export * from "./adminListDelegationsParams";
 export * from "./approvalAction";
 export * from "./approvalActionBody";
 export * from "./authSession";
 export * from "./bootstrapBody";
 export * from "./bootstrapStatus";
 export * from "./categoryOption";
+export * from "./createDelegationBody";
 export * from "./createLineItemBody";
 export * from "./createPayrollBatchBody";
 export * from "./createReportBody";
@@ -30,6 +32,7 @@ export * from "./lineItem";
 export * from "./listReportsParams";
 export * from "./listReportsScope";
 export * from "./loginBody";
+export * from "./managerDelegation";
 export * from "./managerOption";
 export * from "./patchPolicyRuleBody";
 export * from "./paymentMethod";
@@ -60,4 +63,5 @@ export * from "./updateReportBody";
 export * from "./updateUserBody";
 export * from "./user";
 export * from "./userRef";
+export * from "./voidReportBody";
 export * from "./workflowStatus";

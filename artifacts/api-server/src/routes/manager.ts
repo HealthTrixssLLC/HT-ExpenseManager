@@ -10,7 +10,12 @@ import {
   GetReportResponse as ExpenseReportResponse,
   ManagerQueueResponse,
 } from "@workspace/api-zod";
-import { db, expenseReportsTable, usersTable } from "../lib/db";
+import {
+  db,
+  expenseReportsTable,
+  managerDelegationsTable,
+  usersTable,
+} from "../lib/db";
 import { sendProblem } from "../lib/problem";
 import { requireAuth, requireRole } from "../middlewares/session";
 import {
@@ -30,11 +35,11 @@ const MANAGER_ROLES = ["Manager Approver", "System Admin"];
 router.use(requireAuth);
 
 // Resolve the effective manager id for queue/action endpoints. If the request
-// has `?delegateOf=<userId>`, the caller is acting on behalf of that other
-// manager. Both caller and target must be Manager Approvers in the same org
-// (System Admin may delegate too). Returns the user id whose direct reports
-// should drive queue / authorization, plus the delegate target user (or null
-// if the caller is acting as themselves) so audit trails can stamp it.
+// has `?delegateOf=<userId>`, the caller is claiming delegated authority from
+// that other manager. We require an active row in `manager_delegations`
+// (fromManagerId=<delegateOf>, toManagerId=caller, current time within
+// startsAt/endsAt, not revoked) before honoring the claim. System Admins
+// bypass the delegation table since their role already covers the queue.
 async function resolveDelegate(
   req: Request,
 ): Promise<
@@ -71,6 +76,35 @@ async function resolveDelegate(
       title: "Invalid Delegate",
       detail: "delegateOf must be a Manager Approver or System Admin.",
     };
+  }
+  // System Admin can act for anyone — their role is already org-wide.
+  if (auth.user.role !== "System Admin") {
+    const now = new Date();
+    const rows = await db
+      .select()
+      .from(managerDelegationsTable)
+      .where(
+        and(
+          eq(managerDelegationsTable.orgId, auth.user.orgId),
+          eq(managerDelegationsTable.fromManagerId, target.id),
+          eq(managerDelegationsTable.toManagerId, auth.user.id),
+        ),
+      );
+    const active = rows.find(
+      (r) =>
+        r.revokedAt === null &&
+        r.startsAt <= now &&
+        (r.endsAt === null || r.endsAt > now),
+    );
+    if (!active) {
+      return {
+        ok: false,
+        status: 403,
+        title: "Forbidden",
+        detail:
+          "No active delegation from this manager authorizes you to act on their behalf.",
+      };
+    }
   }
   return {
     ok: true,

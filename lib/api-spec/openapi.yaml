@@ -390,6 +390,54 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/QboConnection" }
 
+  /admin/delegations:
+    get:
+      operationId: adminListDelegations
+      tags: [admin]
+      summary: List manager delegations for the org (active or all)
+      parameters:
+        - in: query
+          name: activeOnly
+          required: false
+          schema: { type: boolean, default: true }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ManagerDelegation" }
+    post:
+      operationId: adminCreateDelegation
+      tags: [admin]
+      summary: Authorize manager B to act on behalf of manager A
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateDelegationBody" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ManagerDelegation" }
+
+  /admin/delegations/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      operationId: adminRevokeDelegation
+      tags: [admin]
+      summary: Revoke an active delegation
+      responses:
+        "204":
+          description: Revoked
+
   /admin/audit-log:
     get:
       operationId: adminAuditLog
@@ -528,6 +576,31 @@ paths:
       responses:
         "200":
           description: Recalled
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExpenseReport" }
+
+  /reports/{id}/void:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: voidReport
+      tags: [reports]
+      summary: Void a report (terminal Voided status)
+      description: >-
+        Owner can void their own Draft or Changes Requested report.
+        Accounting Admin / System Admin can void any pre-payroll status.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VoidReportBody" }
+      responses:
+        "200":
+          description: Voided
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ExpenseReport" }
@@ -1192,6 +1265,45 @@ components:
         value: {}
         description: { type: ["string", "null"] }
       required: [name, value]
+
+    ManagerDelegation:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        fromManagerId: { type: string, format: uuid }
+        fromManagerName: { type: string }
+        toManagerId: { type: string, format: uuid }
+        toManagerName: { type: string }
+        startsAt: { type: string, format: date-time }
+        endsAt: { type: ["string", "null"], format: date-time }
+        reason: { type: ["string", "null"] }
+        createdAt: { type: string, format: date-time }
+        revokedAt: { type: ["string", "null"], format: date-time }
+      required:
+        [
+          id,
+          fromManagerId,
+          fromManagerName,
+          toManagerId,
+          toManagerName,
+          startsAt,
+          createdAt,
+        ]
+
+    CreateDelegationBody:
+      type: object
+      properties:
+        fromManagerId: { type: string, format: uuid }
+        toManagerId: { type: string, format: uuid }
+        startsAt: { type: ["string", "null"], format: date-time }
+        endsAt: { type: ["string", "null"], format: date-time }
+        reason: { type: ["string", "null"] }
+      required: [fromManagerId, toManagerId]
+
+    VoidReportBody:
+      type: object
+      properties:
+        comment: { type: ["string", "null"] }
 
     GlMapping:
       type: object

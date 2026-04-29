@@ -155,6 +155,39 @@ export const TRANSITIONS = {
       "reconcile",
     ),
   ],
+  // Voiding terminates a report short of payment. Owner can void from
+  // editable statuses; Accounting Admin / System Admin can void anything
+  // before money has gone out the door.
+  voidReport: [
+    T("Draft", "Voided", ["self", "Accounting Admin", "System Admin"], "void"),
+    T(
+      "Changes Requested",
+      "Voided",
+      ["self", "Accounting Admin", "System Admin"],
+      "void",
+    ),
+    T("Submitted", "Voided", ["Accounting Admin", "System Admin"], "void"),
+    T("Manager Review", "Voided", ["Accounting Admin", "System Admin"], "void"),
+    T(
+      "Manager Approved",
+      "Voided",
+      ["Accounting Admin", "System Admin"],
+      "void",
+    ),
+    T(
+      "Finance Review",
+      "Voided",
+      ["Accounting Admin", "System Admin"],
+      "void",
+    ),
+    T(
+      "Finance Approved",
+      "Voided",
+      ["Accounting Admin", "System Admin"],
+      "void",
+    ),
+    T("Sync Error", "Voided", ["Accounting Admin", "System Admin"], "void"),
+  ],
 } as const satisfies Record<string, ReadonlyArray<Transition>>;
 
 export type TransitionName = keyof typeof TRANSITIONS;

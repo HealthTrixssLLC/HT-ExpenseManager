@@ -10,3 +10,4 @@ export * from "./policyRules";
 export * from "./reports";
 export * from "./payroll";
 export * from "./qbo";
+export * from "./managerDelegations";
