@@ -56,5 +56,45 @@ export function sendError(res: Response, err: unknown): void {
     sendProblem(res, err.status, err.title, err.detail, err.code);
     return;
   }
+  // Normalise raw Postgres constraint errors into deterministic
+  // problem+json responses so admin/auth flows that hit a unique or
+  // foreign-key violation never leak as a generic 500. Postgres SQLSTATE
+  // codes: 23505 unique_violation, 23503 foreign_key_violation,
+  // 23502 not_null_violation, 23514 check_violation.
+  const pg = err as { code?: unknown; detail?: unknown; constraint?: unknown };
+  if (pg && typeof pg.code === "string") {
+    if (pg.code === "23505") {
+      sendProblem(
+        res,
+        409,
+        "Conflict",
+        typeof pg.detail === "string" ? pg.detail : "Resource already exists.",
+        "unique_violation",
+      );
+      return;
+    }
+    if (pg.code === "23503") {
+      sendProblem(
+        res,
+        400,
+        "Invalid Reference",
+        typeof pg.detail === "string"
+          ? pg.detail
+          : "Referenced row does not exist.",
+        "foreign_key_violation",
+      );
+      return;
+    }
+    if (pg.code === "23502" || pg.code === "23514") {
+      sendProblem(
+        res,
+        400,
+        "Invalid Body",
+        typeof pg.detail === "string" ? pg.detail : "Constraint violation.",
+        pg.code === "23502" ? "not_null_violation" : "check_violation",
+      );
+      return;
+    }
+  }
   sendProblem(res, 500, "Internal Server Error");
 }

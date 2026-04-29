@@ -84,6 +84,14 @@ router.post(
       return;
     }
     const orgId = req.auth!.user.orgId;
+    const refError = await assertSameOrgRefs(orgId, {
+      departmentId: parsed.data.departmentId ?? null,
+      managerId: parsed.data.managerId ?? null,
+    });
+    if (refError) {
+      sendProblem(res, 400, "Invalid Reference", refError);
+      return;
+    }
     const passwordHash = await hashPassword(parsed.data.password);
     const [user] = await db
       .insert(usersTable)
@@ -141,6 +149,16 @@ router.patch(
     )[0];
     if (!existing) {
       sendProblem(res, 404, "Not Found");
+      return;
+    }
+    const refError = await assertSameOrgRefs(orgId, {
+      departmentId:
+        parsed.data.departmentId !== undefined ? parsed.data.departmentId : undefined,
+      managerId:
+        parsed.data.managerId !== undefined ? parsed.data.managerId : undefined,
+    });
+    if (refError) {
+      sendProblem(res, 400, "Invalid Reference", refError);
       return;
     }
     const updates: Partial<typeof existing> = {};
@@ -525,6 +543,46 @@ void isNull;
 function pathId(req: Request, key: string): string {
   const raw = (req.params as Record<string, string | string[]>)[key];
   return Array.isArray(raw) ? raw[0] : raw;
+}
+
+// Validate that an admin-supplied departmentId / managerId actually belongs
+// to the caller's org before we write — closes a multi-tenant cross-org
+// reference edge case that the FK alone would not catch (since FKs only
+// require the row to exist *somewhere*, not in this org).
+//   - undefined: field is absent from the request, skip check
+//   - null:      caller is clearing the value, allowed
+//   - string:    must resolve to a row in the same org
+async function assertSameOrgRefs(
+  orgId: string,
+  refs: {
+    departmentId?: string | null;
+    managerId?: string | null;
+  },
+): Promise<string | null> {
+  if (refs.departmentId) {
+    const [dept] = await db
+      .select({ id: departmentsTable.id })
+      .from(departmentsTable)
+      .where(
+        and(
+          eq(departmentsTable.id, refs.departmentId),
+          eq(departmentsTable.orgId, orgId),
+        ),
+      )
+      .limit(1);
+    if (!dept) return "departmentId does not belong to your organisation.";
+  }
+  if (refs.managerId) {
+    const [mgr] = await db
+      .select({ id: usersTable.id })
+      .from(usersTable)
+      .where(
+        and(eq(usersTable.id, refs.managerId), eq(usersTable.orgId, orgId)),
+      )
+      .limit(1);
+    if (!mgr) return "managerId does not belong to your organisation.";
+  }
+  return null;
 }
 
 export default router;
