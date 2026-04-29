@@ -206,6 +206,11 @@ export type ApplyTransitionInput = {
   // When true, allow self-acting actors (the report's own employee). Used for
   // the "submit" / "withdraw" transitions.
   allowSelf?: boolean;
+  // Optional ambient transaction. When supplied, applyTransition writes
+  // through this tx instead of opening its own — letting callers like
+  // POST /payroll/batches/:id/mark-paid wrap many transitions + a batch
+  // update in a single all-or-nothing transaction.
+  tx?: Parameters<Parameters<typeof db.transaction>[0]>[0];
 };
 
 export type TransitionResult = {
@@ -216,7 +221,7 @@ export type TransitionResult = {
 export async function applyTransition(
   input: ApplyTransitionInput,
 ): Promise<TransitionResult> {
-  const { report, actor, transition, comment, metadata, allowSelf } = input;
+  const { report, actor, transition, comment, metadata, allowSelf, tx: ambientTx } = input;
   const candidates = TRANSITIONS[transition];
 
   const match = candidates.find((c) => {
@@ -235,7 +240,9 @@ export async function applyTransition(
     );
   }
 
-  const result = await db.transaction(async (tx) => {
+  const run = async (
+    tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  ): Promise<TransitionResult> => {
     const updateValues: Partial<ExpenseReport> = { status: match.to };
     if (transition === "submit" && report.status === "Draft") {
       updateValues.submittedAt = new Date();
@@ -268,7 +275,7 @@ export async function applyTransition(
       .returning();
 
     return { report: updated, action };
-  });
+  };
 
-  return result;
+  return ambientTx ? run(ambientTx) : db.transaction(run);
 }

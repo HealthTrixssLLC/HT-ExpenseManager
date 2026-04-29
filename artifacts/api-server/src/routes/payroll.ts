@@ -224,19 +224,26 @@ router.post(
           .from(expenseReportsTable)
           .where(inArray(expenseReportsTable.id, reportIds))
       : [];
-    for (const r of reports) {
-      await applyTransition({
-        report: r,
-        actor: { id: req.auth!.user.id, role: req.auth!.user.role },
-        transition: "markPaid",
-        metadata: JSON.stringify({ batchId: batch.id }),
-      });
-    }
-    const [updated] = await db
-      .update(payrollBatchesTable)
-      .set({ status: "Marked Paid", paidAt: new Date() })
-      .where(eq(payrollBatchesTable.id, batch.id))
-      .returning();
+    // Wrap every per-report transition AND the batch update in a single
+    // transaction — if any one report can't transition, the entire mark-paid
+    // is rolled back, so we never end up with a half-paid batch.
+    const updated = await db.transaction(async (tx) => {
+      for (const r of reports) {
+        await applyTransition({
+          report: r,
+          actor: { id: req.auth!.user.id, role: req.auth!.user.role },
+          transition: "markPaid",
+          metadata: JSON.stringify({ batchId: batch.id }),
+          tx,
+        });
+      }
+      const [u] = await tx
+        .update(payrollBatchesTable)
+        .set({ status: "Marked Paid", paidAt: new Date() })
+        .where(eq(payrollBatchesTable.id, batch.id))
+        .returning();
+      return u;
+    });
     res.json(GetPayrollBatchResponse.parse(await loadBatchDto(updated)));
   },
 );
@@ -279,6 +286,13 @@ router.post(
       : [];
     const reportById = new Map(reports.map((r) => [r.id, r] as const));
 
+    // CONTRACT: This endpoint only writes reconciliation rows for the
+    // reports actually included in `entries`. Reports that belong to the
+    // batch but are absent from the payload are intentionally treated as
+    // "no information yet" rather than implicitly $0 / `missing`. Clients
+    // that want every batch report flagged must POST an entry for every
+    // report (use `paidAmount: "0.00"` to record a true missing payment).
+    //
     // Build per-entry flag, persist a reconciliation record for every entry,
     // and remember which reports came out matched so we can transition only
     // those to "Reconciled".
