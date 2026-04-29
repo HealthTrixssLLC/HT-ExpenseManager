@@ -1,25 +1,23 @@
+import htLogoUrl from "@assets/HT_Logo_Small_+_Orange_1777491030760.png";
+
 export function HealthtrixMark({ size = 28 }: { size?: number }) {
-  // Compact wordmark + caduceus-style ribbon mark, no third-party assets.
+  // The supplied PNG is the bracketed "H+" glyph only. We keep the typeset
+  // wordmark next to it so the product name stays legible at every size.
   return (
     <div style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
-      <svg
+      <img
+        src={htLogoUrl}
+        alt="Healthtrix"
         width={size}
         height={size}
-        viewBox="0 0 32 32"
-        fill="none"
-        aria-hidden
-      >
-        <rect width="32" height="32" rx="8" fill="var(--ht-navy)" />
-        <path
-          d="M9 22 L13 10 L16 18 L19 10 L23 22"
-          stroke="var(--ht-orange)"
-          strokeWidth="2.4"
-          strokeLinejoin="round"
-          strokeLinecap="round"
-          fill="none"
-        />
-        <circle cx="16" cy="22.5" r="1.6" fill="var(--ht-tan)" />
-      </svg>
+        style={{
+          width: size,
+          height: size,
+          display: "block",
+          objectFit: "contain",
+          flexShrink: 0,
+        }}
+      />
       <div style={{ display: "flex", flexDirection: "column", lineHeight: 1 }}>
         <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: -0.2, color: "var(--ht-navy)" }}>
           Healthtrix
