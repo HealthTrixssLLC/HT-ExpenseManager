@@ -15,7 +15,12 @@ import {
 import { db, expenseReportsTable } from "../lib/db";
 import { requireAuth, requireRole } from "../middlewares/session";
 import { sendProblem } from "../lib/problem";
-import { fetchReportOrThrow, loadFullReport, loadReportSummaries } from "../lib/reports";
+import {
+  canView,
+  fetchReportOrThrow,
+  loadFullReport,
+  loadReportSummaries,
+} from "../lib/reports";
 import { applyTransition, type TransitionName } from "../services/workflow";
 import { buildGlPreview, postReportToQbo } from "../services/qbo";
 
@@ -91,6 +96,12 @@ router.get(
   async (req, res): Promise<void> => {
     const id = pathId(req, "id");
     const report = await fetchReportOrThrow(id, req.auth!.user.orgId);
+    // Same row-level access enforcement as /reports/:id — without this, a
+    // Finance Approver who guesses a Draft report id would get its GL.
+    if (!(await canView(report, req.auth!.user))) {
+      sendProblem(res, 403, "Forbidden");
+      return;
+    }
     res.json(GetGlPreviewResponse.parse(await buildGlPreview(report)));
   },
 );

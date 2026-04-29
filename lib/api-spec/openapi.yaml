@@ -1569,13 +1569,13 @@ components:
 
     CreatePayrollBatchBody:
       type: object
+      description: >
+        Creates a new payroll batch from EVERY report currently in
+        "Ready for Payroll Reimbursement" status for the caller's org.
+        The server collects the reports — clients do not pass IDs.
       properties:
         label: { type: string, minLength: 1 }
-        reportIds:
-          type: array
-          items: { type: string, format: uuid }
-          minItems: 1
-      required: [label, reportIds]
+      required: [label]
 
     ReconcileBatchEntry:
       type: object

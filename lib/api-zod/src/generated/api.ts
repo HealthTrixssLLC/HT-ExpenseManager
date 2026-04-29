@@ -1890,10 +1890,13 @@ export const ListPayrollBatchesResponse = zod.array(
   ListPayrollBatchesResponseItem,
 );
 
-export const CreatePayrollBatchBody = zod.object({
-  label: zod.string().min(1),
-  reportIds: zod.array(zod.string().uuid()).min(1),
-});
+export const CreatePayrollBatchBody = zod
+  .object({
+    label: zod.string().min(1),
+  })
+  .describe(
+    'Creates a new payroll batch from EVERY report currently in \"Ready for Payroll Reimbursement\" status for the caller\'s org. The server collects the reports — clients do not pass IDs.\n',
+  );
 
 export const GetPayrollBatchParams = zod.object({
   id: zod.coerce.string().uuid(),

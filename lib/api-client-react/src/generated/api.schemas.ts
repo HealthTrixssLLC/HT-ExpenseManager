@@ -508,11 +508,13 @@ export interface PayrollBatch {
   reconciliation: ReconciliationRecord[];
 }
 
+/**
+ * Creates a new payroll batch from EVERY report currently in "Ready for Payroll Reimbursement" status for the caller's org. The server collects the reports — clients do not pass IDs.
+
+ */
 export interface CreatePayrollBatchBody {
   /** @minLength 1 */
   label: string;
-  /** @minItems 1 */
-  reportIds: string[];
 }
 
 export interface ReconcileBatchEntry {

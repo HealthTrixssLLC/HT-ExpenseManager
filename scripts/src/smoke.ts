@@ -285,7 +285,43 @@ async function main(): Promise<void> {
     console.log(
       `✓ finance correctly blocked from Draft report by id (403)`,
     );
+
+    // Same row-level rule must apply to /reports/:id/gl-preview, not just the
+    // top-level read. A Finance Approver guessing a Draft id should NOT get
+    // its general-ledger preview either.
+    const financeGlDraft = await fetch(
+      `${BASE}/reports/${draft.id}/gl-preview`,
+      {
+        headers: {
+          authorization: `Bearer ${sessions["finance@healthtrix.test"].token}`,
+          "x-healthtrix-client": "ios",
+        },
+      },
+    );
+    assert(
+      financeGlDraft.status === 403,
+      `finance blocked from Draft GL preview (got ${financeGlDraft.status})`,
+    );
+    console.log(
+      `✓ finance correctly blocked from Draft /gl-preview by id (403)`,
+    );
   }
+
+  // A made-up report id must return 404 (RFC-7807 problem+json), NOT 500.
+  const ghost = await fetch(
+    `${BASE}/reports/00000000-0000-0000-0000-000000000000`,
+    {
+      headers: {
+        authorization: `Bearer ${sessions["admin@healthtrix.test"].token}`,
+        "x-healthtrix-client": "ios",
+      },
+    },
+  );
+  assert(
+    ghost.status === 404,
+    `unknown report id should be 404 (got ${ghost.status})`,
+  );
+  console.log(`✓ unknown report id returns 404 (problem+json)`);
 
   // Negative: unknown scope is rejected, not silently broadened.
   const badScope = await fetch(`${BASE}/reports?scope=everything`, {

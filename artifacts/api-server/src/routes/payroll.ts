@@ -131,30 +131,27 @@ router.post(
     }
     const orgId = req.auth!.user.orgId;
 
+    // Collect EVERY report currently Ready for Payroll Reimbursement in this
+    // org. The client does not supply ids — the queue itself is the input,
+    // which matches the mockup workflow ("Create batch from queue").
     const reports = await db
       .select()
       .from(expenseReportsTable)
       .where(
         and(
           eq(expenseReportsTable.orgId, orgId),
-          inArray(expenseReportsTable.id, parsed.data.reportIds),
+          eq(expenseReportsTable.status, "Ready for Payroll Reimbursement"),
         ),
       );
 
-    if (reports.length !== parsed.data.reportIds.length) {
-      sendProblem(res, 400, "Invalid Body", "Some reportIds do not exist.");
+    if (reports.length === 0) {
+      sendProblem(
+        res,
+        409,
+        "Empty Queue",
+        "No reports are currently Ready for Payroll Reimbursement.",
+      );
       return;
-    }
-    for (const r of reports) {
-      if (r.status !== "Ready for Payroll Reimbursement") {
-        sendProblem(
-          res,
-          409,
-          "Invalid Transition",
-          `Report ${r.displayCode} is not Ready for Payroll Reimbursement.`,
-        );
-        return;
-      }
     }
 
     const summariesArr = await loadReportSummaries(reports);

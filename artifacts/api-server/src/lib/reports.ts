@@ -22,6 +22,7 @@ import {
   type ExpenseReportDto,
   type ExpenseReportSummaryDto,
 } from "./serializers";
+import { HttpError } from "./problem";
 
 // Statuses a Finance Approver is allowed to see. Anything pre-manager-approval
 // is invisible to finance — the manager queue owns the editable funnel and
@@ -179,9 +180,7 @@ export async function fetchReportOrThrow(
     .limit(1);
   const report = rows[0];
   if (!report) {
-    const err = new Error("Report not found");
-    (err as Error & { status?: number }).status = 404;
-    throw err;
+    throw new HttpError(404, "Not Found", "Report not found in this organization.");
   }
   return report;
 }
