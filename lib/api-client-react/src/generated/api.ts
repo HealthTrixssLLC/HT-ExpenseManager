@@ -39,6 +39,7 @@ import type {
   ListReportsParams,
   LoginBody,
   ManagerOption,
+  PatchPolicyRuleBody,
   PayrollBatch,
   PolicyRule,
   PostToQuickbooksResponse,
@@ -52,7 +53,6 @@ import type {
   RequestUploadUrlResponse,
   UpdateGlMappingBody,
   UpdateLineItemBody,
-  UpdatePolicyRuleBody,
   UpdateReportBody,
   UpdateUserBody,
   User,
@@ -1493,43 +1493,117 @@ export const useAdminUpdateGlMapping = <
 };
 
 /**
- * @summary Set a policy rule by name
+ * @summary List all policy rules for the caller's org
  */
-export const getAdminUpdatePolicyRuleUrl = (name: string) => {
-  return `/api/admin/policy-rules/${name}`;
+export const getAdminListPolicyRulesUrl = () => {
+  return `/api/admin/policy-rules`;
 };
 
-export const adminUpdatePolicyRule = async (
-  name: string,
-  updatePolicyRuleBody: UpdatePolicyRuleBody,
+export const adminListPolicyRules = async (
   options?: RequestInit,
-): Promise<PolicyRule> => {
-  return customFetch<PolicyRule>(getAdminUpdatePolicyRuleUrl(name), {
+): Promise<PolicyRule[]> => {
+  return customFetch<PolicyRule[]>(getAdminListPolicyRulesUrl(), {
     ...options,
-    method: "PUT",
-    headers: { "Content-Type": "application/json", ...options?.headers },
-    body: JSON.stringify(updatePolicyRuleBody),
+    method: "GET",
   });
 };
 
-export const getAdminUpdatePolicyRuleMutationOptions = <
+export const getAdminListPolicyRulesQueryKey = () => {
+  return [`/api/admin/policy-rules`] as const;
+};
+
+export const getAdminListPolicyRulesQueryOptions = <
+  TData = Awaited<ReturnType<typeof adminListPolicyRules>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof adminListPolicyRules>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getAdminListPolicyRulesQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof adminListPolicyRules>>
+  > = ({ signal }) => adminListPolicyRules({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof adminListPolicyRules>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type AdminListPolicyRulesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof adminListPolicyRules>>
+>;
+export type AdminListPolicyRulesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List all policy rules for the caller's org
+ */
+
+export function useAdminListPolicyRules<
+  TData = Awaited<ReturnType<typeof adminListPolicyRules>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof adminListPolicyRules>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getAdminListPolicyRulesQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Upsert a policy rule by name
+ */
+export const getAdminPatchPolicyRuleUrl = () => {
+  return `/api/admin/policy-rules`;
+};
+
+export const adminPatchPolicyRule = async (
+  patchPolicyRuleBody: PatchPolicyRuleBody,
+  options?: RequestInit,
+): Promise<PolicyRule> => {
+  return customFetch<PolicyRule>(getAdminPatchPolicyRuleUrl(), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(patchPolicyRuleBody),
+  });
+};
+
+export const getAdminPatchPolicyRuleMutationOptions = <
   TError = ErrorType<unknown>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof adminUpdatePolicyRule>>,
+    Awaited<ReturnType<typeof adminPatchPolicyRule>>,
     TError,
-    { name: string; data: BodyType<UpdatePolicyRuleBody> },
+    { data: BodyType<PatchPolicyRuleBody> },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
-  Awaited<ReturnType<typeof adminUpdatePolicyRule>>,
+  Awaited<ReturnType<typeof adminPatchPolicyRule>>,
   TError,
-  { name: string; data: BodyType<UpdatePolicyRuleBody> },
+  { data: BodyType<PatchPolicyRuleBody> },
   TContext
 > => {
-  const mutationKey = ["adminUpdatePolicyRule"];
+  const mutationKey = ["adminPatchPolicyRule"];
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -1539,44 +1613,44 @@ export const getAdminUpdatePolicyRuleMutationOptions = <
     : { mutation: { mutationKey }, request: undefined };
 
   const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof adminUpdatePolicyRule>>,
-    { name: string; data: BodyType<UpdatePolicyRuleBody> }
+    Awaited<ReturnType<typeof adminPatchPolicyRule>>,
+    { data: BodyType<PatchPolicyRuleBody> }
   > = (props) => {
-    const { name, data } = props ?? {};
+    const { data } = props ?? {};
 
-    return adminUpdatePolicyRule(name, data, requestOptions);
+    return adminPatchPolicyRule(data, requestOptions);
   };
 
   return { mutationFn, ...mutationOptions };
 };
 
-export type AdminUpdatePolicyRuleMutationResult = NonNullable<
-  Awaited<ReturnType<typeof adminUpdatePolicyRule>>
+export type AdminPatchPolicyRuleMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminPatchPolicyRule>>
 >;
-export type AdminUpdatePolicyRuleMutationBody = BodyType<UpdatePolicyRuleBody>;
-export type AdminUpdatePolicyRuleMutationError = ErrorType<unknown>;
+export type AdminPatchPolicyRuleMutationBody = BodyType<PatchPolicyRuleBody>;
+export type AdminPatchPolicyRuleMutationError = ErrorType<unknown>;
 
 /**
- * @summary Set a policy rule by name
+ * @summary Upsert a policy rule by name
  */
-export const useAdminUpdatePolicyRule = <
+export const useAdminPatchPolicyRule = <
   TError = ErrorType<unknown>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof adminUpdatePolicyRule>>,
+    Awaited<ReturnType<typeof adminPatchPolicyRule>>,
     TError,
-    { name: string; data: BodyType<UpdatePolicyRuleBody> },
+    { data: BodyType<PatchPolicyRuleBody> },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationResult<
-  Awaited<ReturnType<typeof adminUpdatePolicyRule>>,
+  Awaited<ReturnType<typeof adminPatchPolicyRule>>,
   TError,
-  { name: string; data: BodyType<UpdatePolicyRuleBody> },
+  { data: BodyType<PatchPolicyRuleBody> },
   TContext
 > => {
-  return useMutation(getAdminUpdatePolicyRuleMutationOptions(options));
+  return useMutation(getAdminPatchPolicyRuleMutationOptions(options));
 };
 
 /**

@@ -307,6 +307,45 @@ async function main(): Promise<void> {
     );
   }
 
+  // /lookups/categories must surface ONLY active GL mappings (admins see
+  // the full list including inactive at /admin/gl-mappings).
+  const cats2 = (await getJson(
+    "/lookups/categories",
+    sessions["priya@healthtrix.test"].token,
+  )) as Array<{ code: string; active: boolean }>;
+  assert(
+    cats2.every((c) => c.active === true),
+    `/lookups/categories must only return active mappings`,
+  );
+  console.log(
+    `✓ /lookups/categories returns only active mappings (${cats2.length})`,
+  );
+
+  // Admin policy rules: list + upsert via PATCH.
+  const ruleList = (await getJson(
+    "/admin/policy-rules",
+    sessions["admin@healthtrix.test"].token,
+  )) as Array<{ name: string; value: unknown }>;
+  assert(Array.isArray(ruleList), "GET /admin/policy-rules returns array");
+  const patchRule = await fetch(`${BASE}/admin/policy-rules`, {
+    method: "PATCH",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${sessions["admin@healthtrix.test"].token}`,
+      "x-healthtrix-client": "ios",
+    },
+    body: JSON.stringify({
+      name: "smoke.test.rule",
+      value: { hello: "world" },
+      description: "smoke",
+    }),
+  });
+  assert(
+    patchRule.status === 200,
+    `PATCH /admin/policy-rules ok (got ${patchRule.status})`,
+  );
+  console.log(`✓ admin policy rules GET + PATCH work`);
+
   // A made-up report id must return 404 (RFC-7807 problem+json), NOT 500.
   const ghost = await fetch(
     `${BASE}/reports/00000000-0000-0000-0000-000000000000`,

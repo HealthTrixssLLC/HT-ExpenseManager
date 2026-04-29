@@ -11,7 +11,7 @@ import {
   AdminListGlMappingsResponse,
   AdminListUsersResponse,
   AdminUpdateGlMappingBody as UpdateGlMappingBody,
-  AdminUpdatePolicyRuleBody as UpdatePolicyRuleBody,
+  AdminPatchPolicyRuleBody as PatchPolicyRuleBody,
   AdminUpdateUserBody as UpdateUserBody,
 } from "@workspace/api-zod";
 import {
@@ -224,17 +224,37 @@ router.patch(
   },
 );
 
-router.put(
-  "/admin/policy-rules/:name",
+// Admin policy-rules surface. The collection endpoint serves both shapes:
+//   GET   /admin/policy-rules  → list every rule (including unset defaults
+//                                via the lookups view if needed).
+//   PATCH /admin/policy-rules  → upsert one rule by { name, value, description? }.
+//                                We use PATCH because the collection's
+//                                aggregate state is mutated; the patch body
+//                                names the specific rule to upsert.
+router.get(
+  "/admin/policy-rules",
   requireRole(...ADMIN_ROLES),
   async (req, res): Promise<void> => {
-    const name = pathId(req, "name");
-    const parsed = UpdatePolicyRuleBody.safeParse(req.body);
+    const orgId = req.auth!.user.orgId;
+    const rows = await db
+      .select()
+      .from(policyRulesTable)
+      .where(eq(policyRulesTable.orgId, orgId));
+    res.json(rows.map(toPolicyRuleDto));
+  },
+);
+
+router.patch(
+  "/admin/policy-rules",
+  requireRole(...ADMIN_ROLES),
+  async (req, res): Promise<void> => {
+    const parsed = PatchPolicyRuleBody.safeParse(req.body);
     if (!parsed.success) {
       sendProblem(res, 400, "Invalid Body", parsed.error.message);
       return;
     }
     const orgId = req.auth!.user.orgId;
+    const name = parsed.data.name;
     const existing = (
       await db
         .select()

@@ -175,7 +175,13 @@ export interface PolicyRule {
   updatedAt: string;
 }
 
-export interface UpdatePolicyRuleBody {
+/**
+ * Upserts a policy rule by name within the caller's org. If a rule with the given name does not exist, it is created; otherwise its value and (optionally) description are replaced.
+
+ */
+export interface PatchPolicyRuleBody {
+  /** @minLength 1 */
+  name: string;
   value: unknown;
   /** @nullable */
   description?: string | null;

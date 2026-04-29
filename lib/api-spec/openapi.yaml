@@ -322,24 +322,31 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/GlMapping" }
 
-  /admin/policy-rules/{name}:
-    parameters:
-      - in: path
-        name: name
-        required: true
-        schema: { type: string }
-    put:
-      operationId: adminUpdatePolicyRule
+  /admin/policy-rules:
+    get:
+      operationId: adminListPolicyRules
       tags: [admin]
-      summary: Set a policy rule by name
+      summary: List all policy rules for the caller's org
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/PolicyRule" }
+    patch:
+      operationId: adminPatchPolicyRule
+      tags: [admin]
+      summary: Upsert a policy rule by name
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/UpdatePolicyRuleBody" }
+            schema: { $ref: "#/components/schemas/PatchPolicyRuleBody" }
       responses:
         "200":
-          description: Updated
+          description: Upserted
           content:
             application/json:
               schema: { $ref: "#/components/schemas/PolicyRule" }
@@ -1174,12 +1181,17 @@ components:
         updatedAt: { type: string, format: date-time }
       required: [name, value, updatedAt]
 
-    UpdatePolicyRuleBody:
+    PatchPolicyRuleBody:
       type: object
+      description: >
+        Upserts a policy rule by name within the caller's org. If a rule with
+        the given name does not exist, it is created; otherwise its value
+        and (optionally) description are replaced.
       properties:
+        name: { type: string, minLength: 1 }
         value: {}
         description: { type: ["string", "null"] }
-      required: [value]
+      required: [name, value]
 
     GlMapping:
       type: object

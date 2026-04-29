@@ -333,18 +333,33 @@ export const AdminUpdateGlMappingResponse = zod.object({
 });
 
 /**
- * @summary Set a policy rule by name
+ * @summary List all policy rules for the caller's org
  */
-export const AdminUpdatePolicyRuleParams = zod.object({
-  name: zod.coerce.string(),
-});
-
-export const AdminUpdatePolicyRuleBody = zod.object({
+export const AdminListPolicyRulesResponseItem = zod.object({
+  name: zod.string(),
   value: zod.unknown(),
   description: zod.string().nullish(),
+  updatedAt: zod.coerce.date(),
 });
+export const AdminListPolicyRulesResponse = zod.array(
+  AdminListPolicyRulesResponseItem,
+);
 
-export const AdminUpdatePolicyRuleResponse = zod.object({
+/**
+ * @summary Upsert a policy rule by name
+ */
+
+export const AdminPatchPolicyRuleBody = zod
+  .object({
+    name: zod.string().min(1),
+    value: zod.unknown(),
+    description: zod.string().nullish(),
+  })
+  .describe(
+    "Upserts a policy rule by name within the caller's org. If a rule with the given name does not exist, it is created; otherwise its value and (optionally) description are replaced.\n",
+  );
+
+export const AdminPatchPolicyRuleResponse = zod.object({
   name: zod.string(),
   value: zod.unknown(),
   description: zod.string().nullish(),

@@ -20,10 +20,15 @@ const router: IRouter = Router();
 
 router.get("/lookups/categories", requireAuth, async (req, res): Promise<void> => {
   const orgId = req.auth!.user.orgId;
+  // /lookups/categories is the picker the line-item form binds to. It must
+  // surface ONLY active GL mappings so users cannot pick a deprecated code.
+  // Admins maintain the full list (including inactive) at /admin/gl-mappings.
   const rows = await db
     .select()
     .from(glMappingsTable)
-    .where(eq(glMappingsTable.orgId, orgId));
+    .where(
+      and(eq(glMappingsTable.orgId, orgId), eq(glMappingsTable.active, true)),
+    );
   res.json(
     ListCategoriesResponse.parse(
       rows.map((m) => ({

@@ -290,19 +290,20 @@ router.post(
         const expectedCents = Math.round(parseFloat(item.amount) * 100);
         const paidCents = Math.round(parseFloat(entry.paidAmount) * 100);
         const variance = paidCents - expectedCents;
-        // Flag taxonomy:
-        //   matched : paid == expected
-        //   missing : paid == 0 (no reimbursement landed)
-        //   partial : 0 < paid < expected (under-payment)
-        //   over    : paid > expected
-        //   under   : paid < expected, treated as a synonym of partial; kept
-        //             as an enum value for legacy data compatibility but not
-        //             produced by this code path.
+        // Flag taxonomy (the four variance flags + matched):
+        //   matched : paid == expected (no variance)
+        //   missing : paid == 0 (no reimbursement landed at all)
+        //   over    : paid > expected (over-payment)
+        //   under   : 0 < paid < expected and paid < 50% of expected
+        //             (substantial under-payment — needs adjustment)
+        //   partial : 50% <= paid < expected (partial reimbursement —
+        //             accepted but flagged for review)
         let flag: "matched" | "missing" | "partial" | "over" | "under";
         if (variance === 0) flag = "matched";
         else if (paidCents === 0) flag = "missing";
-        else if (paidCents < expectedCents) flag = "partial";
-        else flag = "over";
+        else if (paidCents > expectedCents) flag = "over";
+        else if (paidCents * 2 < expectedCents) flag = "under";
+        else flag = "partial";
         if (flag === "matched") matchedReportIds.add(entry.reportId);
         await tx.insert(reconciliationRecordsTable).values({
           batchId: batch.id,
