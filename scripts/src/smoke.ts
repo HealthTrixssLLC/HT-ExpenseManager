@@ -235,6 +235,58 @@ async function main(): Promise<void> {
   );
   console.log(`✓ employee correctly blocked from /reports?scope=payroll (403)`);
 
+  // Positive: scope=finance is status-restricted. A Finance Approver must NOT
+  // see Draft / Submitted / Manager Review / Changes Requested / Rejected.
+  // (Admins can see those via scope=all; finance has no business with them.)
+  const FINANCE_VISIBLE = new Set([
+    "Manager Approved",
+    "Finance Review",
+    "Finance Approved",
+    "Posted to QuickBooks",
+    "Ready for Payroll Reimbursement",
+    "Paid Through Payroll",
+    "Reconciled",
+    "Sync Error",
+    "Voided",
+  ]);
+  const financeScope = (await getJson(
+    "/reports?scope=finance",
+    sessions["finance@healthtrix.test"].token,
+  )) as Array<{ id: string; status: string }>;
+  assert(
+    financeScope.every((r) => FINANCE_VISIBLE.has(r.status)),
+    `finance scope leaks pre-manager-approval reports: ${financeScope
+      .filter((r) => !FINANCE_VISIBLE.has(r.status))
+      .map((r) => r.status)
+      .join(", ")}`,
+  );
+  console.log(
+    `✓ finance /reports?scope=finance returned ${financeScope.length} reports, all in finance-visible statuses`,
+  );
+
+  // Positive: a Finance Approver requesting a specific Draft report by id is
+  // also rejected (canView enforcement, not just listing). We use the admin's
+  // scope=all view to find a Draft id.
+  const draft = allReports.find(
+    (r: { id: string; status?: string }) =>
+      (r as { status?: string }).status === "Draft",
+  ) as { id: string; status?: string } | undefined;
+  if (draft) {
+    const financeReadDraft = await fetch(`${BASE}/reports/${draft.id}`, {
+      headers: {
+        authorization: `Bearer ${sessions["finance@healthtrix.test"].token}`,
+        "x-healthtrix-client": "ios",
+      },
+    });
+    assert(
+      financeReadDraft.status === 403,
+      `finance blocked from Draft report (got ${financeReadDraft.status})`,
+    );
+    console.log(
+      `✓ finance correctly blocked from Draft report by id (403)`,
+    );
+  }
+
   // Negative: unknown scope is rejected, not silently broadened.
   const badScope = await fetch(`${BASE}/reports?scope=everything`, {
     headers: {

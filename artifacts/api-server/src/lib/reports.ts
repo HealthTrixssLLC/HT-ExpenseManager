@@ -11,6 +11,7 @@ import {
   type Receipt,
   type User,
 } from "../lib/db";
+import type { WorkflowStatus } from "@workspace/db";
 import {
   ageInDays,
   formatPeriod,
@@ -21,6 +22,28 @@ import {
   type ExpenseReportDto,
   type ExpenseReportSummaryDto,
 } from "./serializers";
+
+// Statuses a Finance Approver is allowed to see. Anything pre-manager-approval
+// is invisible to finance — the manager queue owns the editable funnel and
+// finance has no business reading drafts/submissions/changes-requested. Once a
+// manager has approved (or finance has subsequently acted, posted, paid,
+// reconciled, or hit a sync error), the report is fair game for finance.
+// Voided reports are intentionally included because finance may need to audit
+// a once-approved report that was later voided. Rejected reports are NOT
+// included because rejection is purely a manager-side outcome.
+export const FINANCE_VISIBLE_STATUSES: ReadonlyArray<WorkflowStatus> = [
+  "Manager Approved",
+  "Finance Review",
+  "Finance Approved",
+  "Posted to QuickBooks",
+  "Ready for Payroll Reimbursement",
+  "Paid Through Payroll",
+  "Reconciled",
+  "Sync Error",
+  "Voided",
+];
+
+const FINANCE_VISIBLE_SET = new Set<WorkflowStatus>(FINANCE_VISIBLE_STATUSES);
 
 export async function loadReportSummaries(
   reports: ExpenseReport[],
@@ -173,8 +196,15 @@ export async function canView(
   if (report.orgId !== user.orgId) return false;
   if (user.role === "System Admin" || user.role === "Accounting Admin")
     return true;
-  if (user.role === "Finance Approver") return true;
+  // The employee always sees their own report regardless of status.
   if (user.id === report.employeeId) return true;
+  // Finance only sees reports that have at least cleared manager approval.
+  // Drafts, Submitted, Manager Review, Changes Requested, and Rejected
+  // reports are invisible to finance — they belong to the employee/manager
+  // half of the workflow.
+  if (user.role === "Finance Approver") {
+    return FINANCE_VISIBLE_SET.has(report.status);
+  }
   if (user.role === "Manager Approver") {
     const employee = await db
       .select({ managerId: usersTable.managerId })

@@ -23,6 +23,7 @@ import { sendError, sendProblem } from "../lib/problem";
 import { requireAuth } from "../middlewares/session";
 import {
   canView,
+  FINANCE_VISIBLE_STATUSES,
   fetchReportOrThrow,
   loadFullReport,
   loadReportSummaries,
@@ -94,6 +95,18 @@ router.get("/reports", async (req: Request, res: Response): Promise<void> => {
       sendProblem(res, 403, "Forbidden");
       return;
     }
+    // Finance Approvers can ONLY see reports that have at least cleared
+    // manager approval. Admins/Accounting can see everything in the org;
+    // they should use scope=all if they want truly everything, but when
+    // they explicitly ask for the finance queue we still constrain to the
+    // finance-relevant statuses to mirror what the finance UI shows.
+    where = and(
+      where,
+      inArray(
+        expenseReportsTable.status,
+        FINANCE_VISIBLE_STATUSES as WorkflowStatus[],
+      ),
+    );
   } else if (scope === "payroll") {
     if (
       auth.user.role !== "Finance Approver" &&
