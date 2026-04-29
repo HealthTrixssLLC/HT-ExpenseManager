@@ -1,4 +1,4 @@
-import { Check, X as XIcon, RotateCcw } from "lucide-react";
+import { Check, X as XIcon, RotateCcw, Ban } from "lucide-react";
 import { WORKFLOW_ORDER, type WorkflowStatus } from "./types";
 
 /**
@@ -21,6 +21,9 @@ type OffRamp = {
 const OFFRAMPS: OffRamp[] = [
   { status: "Changes Requested", fromStep: "Manager Review", tone: "warning", Icon: RotateCcw },
   { status: "Rejected",          fromStep: "Manager Review", tone: "danger",  Icon: XIcon },
+  // Voided can be triggered by an admin from any in-flight step; we anchor it on Submitted
+  // so it always shows in the diagram. When current === "Voided" the side branch highlights.
+  { status: "Voided",            fromStep: "Submitted",      tone: "muted",   Icon: Ban },
 ];
 
 const TONE_COLOR: Record<"warning" | "danger" | "muted", { fg: string; bg: string; border: string }> = {
