@@ -150,24 +150,43 @@ async function main(): Promise<void> {
   );
   console.log(`✓ finance /payroll/queue returned ${pq.length} reports`);
 
-  // GL preview balances on the first Manager Approved report
+  // GL preview balances on the first Manager Approved report. We also assert
+  // that the GL preview has ONE debit line PER CATEGORY (not per account),
+  // matching the gl_mappings contract — distinct categories that happen to
+  // map to the same account must remain distinct lines.
   const ma = fq.find((r) => r.status === "Manager Approved");
   if (ma) {
+    const fullReport = (await getJson(
+      `/reports/${ma.id}`,
+      sessions["finance@healthtrix.test"].token,
+    )) as { lineItems: Array<{ category: string }> };
+    const distinctCategories = new Set(
+      fullReport.lineItems.map((l) => l.category),
+    );
     const preview = (await getJson(
       `/reports/${ma.id}/gl-preview`,
       sessions["finance@healthtrix.test"].token,
     )) as {
       totalDebits: string;
       totalCredits: string;
-      debits: Array<{ account: string; amount: string }>;
+      debits: Array<{ account: string; category: string; amount: string }>;
     };
     assert(
       preview.totalDebits === preview.totalCredits,
       `GL preview balances (${preview.totalDebits} vs ${preview.totalCredits})`,
     );
     assert(preview.debits.length > 0, "GL preview has debits");
+    const debitCats = new Set(preview.debits.map((d) => d.category));
+    assert(
+      debitCats.size === preview.debits.length,
+      `GL preview debits must be one-per-category, got ${preview.debits.length} lines for ${debitCats.size} unique categories`,
+    );
+    assert(
+      preview.debits.length === distinctCategories.size,
+      `GL preview debit count (${preview.debits.length}) must equal distinct line-item categories (${distinctCategories.size})`,
+    );
     console.log(
-      `✓ GL preview for ${ma.displayCode}: ${preview.totalDebits} balanced across ${preview.debits.length} accounts`,
+      `✓ GL preview for ${ma.displayCode}: ${preview.totalDebits} balanced; ${preview.debits.length} debit line(s) = distinct categories`,
     );
   }
 

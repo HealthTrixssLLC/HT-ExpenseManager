@@ -65,26 +65,26 @@ export async function buildGlPreview(
     mappings.map((m) => [m.code, m.qboAccount] as const),
   );
 
-  // Group debits by GL account so the journal entry has one debit per account.
-  const debitsByAccount = new Map<string, { category: string; cents: number }>();
+  // One debit line per CATEGORY total (not per account). If two categories
+  // happen to map to the same QBO account, they remain distinct debit lines
+  // in the GL preview — this preserves category-level fidelity for finance
+  // review and downstream reconciliation. The category→account lookup happens
+  // per category, so the journal entry still references the right account.
+  const debitsByCategory = new Map<string, number>();
   let totalCents = 0;
   for (const line of lines) {
-    const account =
-      accountByCategory.get(line.category) ?? FALLBACK_ACCOUNT;
     const cents = Math.round(parseFloat(line.amount) * 100);
     totalCents += cents;
-    const existing = debitsByAccount.get(account);
-    if (existing) {
-      existing.cents += cents;
-    } else {
-      debitsByAccount.set(account, { category: line.category, cents });
-    }
+    debitsByCategory.set(
+      line.category,
+      (debitsByCategory.get(line.category) ?? 0) + cents,
+    );
   }
 
-  const debits: GlPreviewLine[] = [...debitsByAccount.entries()]
+  const debits: GlPreviewLine[] = [...debitsByCategory.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([account, { category, cents }]) => ({
-      account,
+    .map(([category, cents]) => ({
+      account: accountByCategory.get(category) ?? FALLBACK_ACCOUNT,
       category,
       amount: centsToDecimal(cents),
     }));
