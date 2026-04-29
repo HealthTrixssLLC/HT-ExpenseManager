@@ -31,10 +31,38 @@ app.use(
   }),
 );
 
-const allowedOrigin = process.env["WEB_ORIGIN"];
+// CORS: only the explicitly configured WEB_ORIGIN(s) are allowed for
+// cross-origin browser sessions, since cookies + CSRF require credentials.
+// Same-origin requests (the workspace proxy, Expo bearer-token clients,
+// curl-style integration tests) bypass the CORS check entirely.
+const rawOrigin = process.env["WEB_ORIGIN"]?.trim();
+const allowedOrigins = rawOrigin
+  ? rawOrigin
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+  : [];
+if (allowedOrigins.length === 0) {
+  logger.warn(
+    "WEB_ORIGIN is not set; cross-origin browser requests will be rejected. " +
+      "Set WEB_ORIGIN to the SPA origin (e.g. https://app.example.com) when " +
+      "deploying.",
+  );
+}
 app.use(
   cors({
-    origin: allowedOrigin ? allowedOrigin.split(",") : true,
+    origin: (origin, callback) => {
+      // Same-origin / non-browser requests (e.g. mobile, curl) have no Origin.
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(null, false);
+    },
     credentials: true,
     allowedHeaders: [
       "Content-Type",
@@ -42,7 +70,7 @@ app.use(
       "X-CSRF-Token",
       "X-Healthtrix-Client",
     ],
-    exposedHeaders: ["X-Healthtrix-Client"],
+    exposedHeaders: ["X-Healthtrix-Client", "X-New-Session-Token"],
   }),
 );
 

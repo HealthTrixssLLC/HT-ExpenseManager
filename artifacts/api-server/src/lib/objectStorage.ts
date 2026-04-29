@@ -1,6 +1,5 @@
 import { Storage, File } from "@google-cloud/storage";
 import { Readable } from "stream";
-import { randomUUID } from "crypto";
 import {
   ObjectAclPolicy,
   ObjectPermission,
@@ -106,26 +105,89 @@ export class ObjectStorageService {
     return new Response(webStream, { headers });
   }
 
-  async getObjectEntityUploadURL(): Promise<string> {
+  /**
+   * Build the canonical receipt key:
+   *
+   *   ${PRIVATE_OBJECT_DIR}/org/{orgId}/reports/{reportId}/receipts/{receiptId}.{ext}
+   *
+   * and return both the signed PUT URL and the `objectPath` the client should
+   * pass back when registering the receipt row. The receipt id is generated
+   * server-side so clients cannot collide their own keys with someone else's.
+   */
+  async getReceiptUploadURL(args: {
+    orgId: string;
+    reportId: string;
+    receiptId: string;
+    ext: string;
+  }): Promise<{ uploadURL: string; objectPath: string; expiresAt: Date }> {
     const privateObjectDir = this.getPrivateObjectDir();
-    if (!privateObjectDir) {
-      throw new Error(
-        "PRIVATE_OBJECT_DIR not set. Create a bucket in 'Object Storage' " +
-          "tool and set PRIVATE_OBJECT_DIR env var."
-      );
+    const cleanExt = args.ext.replace(/^\.+/, "").toLowerCase();
+    if (!cleanExt || !/^[a-z0-9]{1,8}$/.test(cleanExt)) {
+      throw new Error(`Invalid receipt extension: ${args.ext}`);
     }
-
-    const objectId = randomUUID();
-    const fullPath = `${privateObjectDir}/uploads/${objectId}`;
-
+    const tail = `org/${args.orgId}/reports/${args.reportId}/receipts/${args.receiptId}.${cleanExt}`;
+    const fullPath = `${privateObjectDir.replace(/\/+$/, "")}/${tail}`;
     const { bucketName, objectName } = parseObjectPath(fullPath);
-
-    return signObjectURL({
+    const ttlSec = 900;
+    const uploadURL = await signObjectURL({
       bucketName,
       objectName,
       method: "PUT",
-      ttlSec: 900,
+      ttlSec,
     });
+    return {
+      uploadURL,
+      objectPath: `/objects/${tail}`,
+      expiresAt: new Date(Date.now() + ttlSec * 1000),
+    };
+  }
+
+  /**
+   * Returns a short-lived signed GET URL for an existing object. Used by the
+   * `GET /receipts/{id}/download-url` endpoint after the caller has been
+   * authorized via the report-level ACL check in the route handler.
+   */
+  async getSignedDownloadURL(
+    objectPath: string,
+    ttlSec = 600,
+  ): Promise<{ downloadURL: string; expiresAt: Date }> {
+    if (!objectPath.startsWith("/objects/")) {
+      throw new ObjectNotFoundError();
+    }
+    const tail = objectPath.slice("/objects/".length);
+    const privateObjectDir = this.getPrivateObjectDir().replace(/\/+$/, "");
+    const fullPath = `${privateObjectDir}/${tail}`;
+    const { bucketName, objectName } = parseObjectPath(fullPath);
+    const downloadURL = await signObjectURL({
+      bucketName,
+      objectName,
+      method: "GET",
+      ttlSec,
+    });
+    return {
+      downloadURL,
+      expiresAt: new Date(Date.now() + ttlSec * 1000),
+    };
+  }
+
+  /**
+   * Look up the actual size + content type the storage backend recorded for an
+   * uploaded object. Used at receipt-registration time so we never trust the
+   * client's claimed `mimeType`/`sizeBytes` — the signed PUT URL itself does
+   * not constrain these, so the only place we can authoritatively enforce the
+   * 10 MB / allowed-MIME rules is here, after the upload has actually landed.
+   */
+  async getObjectMetadata(
+    objectPath: string,
+  ): Promise<{ contentType: string; size: number }> {
+    const file = await this.getObjectEntityFile(objectPath);
+    const [metadata] = await file.getMetadata();
+    return {
+      contentType:
+        (metadata.contentType as string | undefined) ??
+        "application/octet-stream",
+      size: Number(metadata.size ?? 0),
+    };
   }
 
   async getObjectEntityFile(objectPath: string): Promise<File> {

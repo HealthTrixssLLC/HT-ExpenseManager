@@ -1,70 +1,32 @@
 import { File } from "@google-cloud/storage";
 
+/**
+ * Object-level ACL helpers for receipts.
+ *
+ * Authorization for receipts is enforced at the *application* layer — every
+ * download goes through an Express handler that checks the parent report's
+ * visibility. This file only stores a tiny owner/visibility metadata blob on
+ * the object so we can:
+ *
+ *   - Mark a small set of objects as world-readable (org logos, etc.).
+ *   - Recover the uploader id without a DB lookup if we ever need to.
+ *
+ * We deliberately do *not* implement a generic group-based ACL system here.
+ * Receipt access is governed by the report state machine, not by per-object
+ * group membership.
+ */
+
 const ACL_POLICY_METADATA_KEY = "custom:aclPolicy";
-
-// Can be flexibly defined according to the use case.
-//
-// Examples:
-// - USER_LIST: the users from a list stored in the database;
-// - EMAIL_DOMAIN: the users whose email is in a specific domain;
-// - GROUP_MEMBER: the users who are members of a specific group;
-// - SUBSCRIBER: the users who are subscribers of a specific service / content
-//   creator.
-export enum ObjectAccessGroupType {}
-
-export interface ObjectAccessGroup {
-  type: ObjectAccessGroupType;
-  // The logic id that identifies qualified group members. Format depends on the
-  // ObjectAccessGroupType — e.g. a user-list DB id, an email domain, a group id.
-  id: string;
-}
 
 export enum ObjectPermission {
   READ = "read",
   WRITE = "write",
 }
 
-export interface ObjectAclRule {
-  group: ObjectAccessGroup;
-  permission: ObjectPermission;
-}
-
 // Stored as object custom metadata under "custom:aclPolicy" (JSON string).
 export interface ObjectAclPolicy {
   owner: string;
   visibility: "public" | "private";
-  aclRules?: Array<ObjectAclRule>;
-}
-
-function isPermissionAllowed(
-  requested: ObjectPermission,
-  granted: ObjectPermission,
-): boolean {
-  if (requested === ObjectPermission.READ) {
-    return [ObjectPermission.READ, ObjectPermission.WRITE].includes(granted);
-  }
-  return granted === ObjectPermission.WRITE;
-}
-
-abstract class BaseObjectAccessGroup implements ObjectAccessGroup {
-  constructor(
-    public readonly type: ObjectAccessGroupType,
-    public readonly id: string,
-  ) {}
-
-  public abstract hasMember(userId: string): Promise<boolean>;
-}
-
-function createObjectAccessGroup(
-  group: ObjectAccessGroup,
-): BaseObjectAccessGroup {
-  switch (group.type) {
-    // Implement per access group type, e.g.:
-    // case "USER_LIST":
-    //   return new UserListAccessGroup(group.id);
-    default:
-      throw new Error(`Unknown access group type: ${group.type}`);
-  }
 }
 
 export async function setObjectAclPolicy(
@@ -104,34 +66,13 @@ export async function canAccessObject({
   requestedPermission: ObjectPermission;
 }): Promise<boolean> {
   const aclPolicy = await getObjectAclPolicy(objectFile);
-  if (!aclPolicy) {
-    return false;
-  }
-
+  if (!aclPolicy) return false;
   if (
     aclPolicy.visibility === "public" &&
     requestedPermission === ObjectPermission.READ
   ) {
     return true;
   }
-
-  if (!userId) {
-    return false;
-  }
-
-  if (aclPolicy.owner === userId) {
-    return true;
-  }
-
-  for (const rule of aclPolicy.aclRules || []) {
-    const accessGroup = createObjectAccessGroup(rule.group);
-    if (
-      (await accessGroup.hasMember(userId)) &&
-      isPermissionAllowed(requestedPermission, rule.permission)
-    ) {
-      return true;
-    }
-  }
-
-  return false;
+  if (!userId) return false;
+  return aclPolicy.owner === userId;
 }

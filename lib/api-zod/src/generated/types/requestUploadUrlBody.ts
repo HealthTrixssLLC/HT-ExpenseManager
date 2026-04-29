@@ -7,7 +7,11 @@
  */
 
 export interface RequestUploadUrlBody {
+  /** Owning report */
+  reportId: string;
   name: string;
+  /** Bytes; max 10485760 (10 MB) */
   size: number;
+  /** Allowed: image/jpeg, image/png, image/heic, application/pdf */
   contentType: string;
 }

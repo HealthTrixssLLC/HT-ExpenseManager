@@ -503,11 +503,17 @@ async function main(): Promise<void> {
       description: "When true, automatically post to QBO without manual click.",
     },
   ]);
+  // Mirror what `POST /admin/qbo-connection/connect-stub` would do for this
+  // org: random realm id + the org's own company name. This avoids hardcoded
+  // "STUB-REALM-1234567890" / "Healthtrix Sandbox Co." appearing in fixtures.
+  const seedRealm = Array.from({ length: 16 }, () =>
+    Math.floor(Math.random() * 10).toString(),
+  ).join("");
   await db.insert(qboConnectionTable).values({
     orgId: org.id,
     status: "connected",
-    realmId: "STUB-REALM-1234567890",
-    companyName: "Healthtrix Sandbox Co.",
+    realmId: seedRealm,
+    companyName: org.name,
     connectedAt: new Date(),
   });
 

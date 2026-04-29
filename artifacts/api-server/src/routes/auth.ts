@@ -1,6 +1,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { and, count, eq, gte } from "drizzle-orm";
 import {
+  RegisterUserBody,
   BootstrapAdminBody,
   GetBootstrapStatusResponse,
   LoginResponse as AuthSessionResponse,
@@ -15,17 +16,17 @@ import {
 } from "../lib/db";
 import {
   createSession,
-  destroySession,
   hashPassword,
-  hashToken,
   verifyPassword,
   CSRF_COOKIE,
   SESSION_COOKIE,
 } from "../lib/auth";
 import { sendProblem } from "../lib/problem";
-import { requireAuth } from "../middlewares/session";
+import { requireAuth, requireRole } from "../middlewares/session";
 import { toUserDto } from "../lib/serializers";
 import { departmentsTable } from "@workspace/db";
+
+const ADMIN_ROLES = ["Accounting Admin", "System Admin"];
 
 const router: IRouter = Router();
 
@@ -265,15 +266,56 @@ router.get("/auth/me", requireAuth, async (req: Request, res: Response): Promise
   );
 });
 
-// Helper used by tests/seed scripts to mint a session for a user. Not exposed
-// over HTTP.
-export async function _mintSessionForUser(userId: string): Promise<string> {
-  const { rawToken } = await createSession(userId, null, "smoke-test");
-  // Touch helpers so isolated-module tooling sees them as referenced; they
-  // remain exported for use by future test plumbing.
-  void hashToken;
-  void destroySession;
-  return rawToken;
-}
+// Distinct from /auth/bootstrap (the one-shot first-System-Admin flow), this
+// is the "admin invites another user" endpoint. The caller must already be
+// signed in as an admin; the new user is created under the caller's org with
+// the requested role and is *not* logged in as a side effect.
+router.post(
+  "/auth/register",
+  requireAuth,
+  requireRole(...ADMIN_ROLES),
+  async (req: Request, res: Response): Promise<void> => {
+    const parsed = RegisterUserBody.safeParse(req.body);
+    if (!parsed.success) {
+      sendProblem(res, 400, "Invalid Body", parsed.error.message);
+      return;
+    }
+    const orgId = req.auth!.user.orgId;
+    const email = parsed.data.email.toLowerCase();
+    const existing = (
+      await db
+        .select({ id: usersTable.id })
+        .from(usersTable)
+        .where(and(eq(usersTable.orgId, orgId), eq(usersTable.email, email)))
+        .limit(1)
+    )[0];
+    if (existing) {
+      sendProblem(
+        res,
+        409,
+        "Email Taken",
+        `A user with email ${email} already exists in this organization.`,
+      );
+      return;
+    }
+    const passwordHash = await hashPassword(parsed.data.password);
+    const [user] = await db
+      .insert(usersTable)
+      .values({
+        orgId,
+        email,
+        passwordHash,
+        fullName: parsed.data.fullName,
+        title: parsed.data.title ?? null,
+        role: parsed.data.role,
+        isAlsoEmployee: parsed.data.isAlsoEmployee ?? false,
+        departmentId: parsed.data.departmentId ?? null,
+        managerId: parsed.data.managerId ?? null,
+      })
+      .returning();
+    const { user: loaded, department } = await loadAuthBundle(user.id);
+    res.status(201).json(toUserDto(loaded, department, null));
+  },
+);
 
 export default router;

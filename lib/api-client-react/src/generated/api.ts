@@ -17,6 +17,7 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
+  AdminAuditLogParams,
   ApprovalAction,
   ApprovalActionBody,
   AuthSession,
@@ -44,6 +45,7 @@ import type {
   Problem,
   QboConnection,
   Receipt,
+  ReceiptDownloadUrlResponse,
   ReconcileBatchBody,
   RegisterReceiptBody,
   RequestUploadUrlBody,
@@ -51,7 +53,6 @@ import type {
   UpdateGlMappingBody,
   UpdateLineItemBody,
   UpdatePolicyRuleBody,
-  UpdateQboConnectionBody,
   UpdateReportBody,
   UpdateUserBody,
   User,
@@ -375,6 +376,98 @@ export const useBootstrapAdmin = <
   TContext
 > => {
   return useMutation(getBootstrapAdminMutationOptions(options));
+};
+
+/**
+ * Distinct from `/auth/bootstrap`, which is one-shot for the very first
+System Admin. `/auth/register` lets an Accounting Admin or System
+Admin add additional users (employees, managers, finance approvers).
+The caller must be authenticated and authorized; the new user does
+not log in as a side effect.
+
+ * @summary Admin-invoked: create a new user under the caller's org
+ */
+export const getRegisterUserUrl = () => {
+  return `/api/auth/register`;
+};
+
+export const registerUser = async (
+  createUserBody: CreateUserBody,
+  options?: RequestInit,
+): Promise<User> => {
+  return customFetch<User>(getRegisterUserUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createUserBody),
+  });
+};
+
+export const getRegisterUserMutationOptions = <
+  TError = ErrorType<Problem>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof registerUser>>,
+    TError,
+    { data: BodyType<CreateUserBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof registerUser>>,
+  TError,
+  { data: BodyType<CreateUserBody> },
+  TContext
+> => {
+  const mutationKey = ["registerUser"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof registerUser>>,
+    { data: BodyType<CreateUserBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return registerUser(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RegisterUserMutationResult = NonNullable<
+  Awaited<ReturnType<typeof registerUser>>
+>;
+export type RegisterUserMutationBody = BodyType<CreateUserBody>;
+export type RegisterUserMutationError = ErrorType<Problem>;
+
+/**
+ * @summary Admin-invoked: create a new user under the caller's org
+ */
+export const useRegisterUser = <
+  TError = ErrorType<Problem>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof registerUser>>,
+    TError,
+    { data: BodyType<CreateUserBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof registerUser>>,
+  TError,
+  { data: BodyType<CreateUserBody> },
+  TContext
+> => {
+  return useMutation(getRegisterUserMutationOptions(options));
 };
 
 /**
@@ -1490,7 +1583,7 @@ export const useAdminUpdatePolicyRule = <
  * @summary Get QuickBooks Online connection status
  */
 export const getAdminGetQboConnectionUrl = () => {
-  return `/api/admin/qbo/connection`;
+  return `/api/admin/qbo-connection`;
 };
 
 export const adminGetQboConnection = async (
@@ -1503,7 +1596,7 @@ export const adminGetQboConnection = async (
 };
 
 export const getAdminGetQboConnectionQueryKey = () => {
-  return [`/api/admin/qbo/connection`] as const;
+  return [`/api/admin/qbo-connection`] as const;
 };
 
 export const getAdminGetQboConnectionQueryOptions = <
@@ -1562,42 +1655,42 @@ export function useAdminGetQboConnection<
 }
 
 /**
- * @summary Toggle the QuickBooks connection (stub OAuth)
+ * @summary Establish a stubbed QuickBooks Online connection for development.
+Generates a fresh realm id and uses the caller's org name as the
+connected company name.
+
  */
-export const getAdminUpdateQboConnectionUrl = () => {
-  return `/api/admin/qbo/connection`;
+export const getAdminConnectQboStubUrl = () => {
+  return `/api/admin/qbo-connection/connect-stub`;
 };
 
-export const adminUpdateQboConnection = async (
-  updateQboConnectionBody: UpdateQboConnectionBody,
+export const adminConnectQboStub = async (
   options?: RequestInit,
 ): Promise<QboConnection> => {
-  return customFetch<QboConnection>(getAdminUpdateQboConnectionUrl(), {
+  return customFetch<QboConnection>(getAdminConnectQboStubUrl(), {
     ...options,
-    method: "PUT",
-    headers: { "Content-Type": "application/json", ...options?.headers },
-    body: JSON.stringify(updateQboConnectionBody),
+    method: "POST",
   });
 };
 
-export const getAdminUpdateQboConnectionMutationOptions = <
+export const getAdminConnectQboStubMutationOptions = <
   TError = ErrorType<unknown>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof adminUpdateQboConnection>>,
+    Awaited<ReturnType<typeof adminConnectQboStub>>,
     TError,
-    { data: BodyType<UpdateQboConnectionBody> },
+    void,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
-  Awaited<ReturnType<typeof adminUpdateQboConnection>>,
+  Awaited<ReturnType<typeof adminConnectQboStub>>,
   TError,
-  { data: BodyType<UpdateQboConnectionBody> },
+  void,
   TContext
 > => {
-  const mutationKey = ["adminUpdateQboConnection"];
+  const mutationKey = ["adminConnectQboStub"];
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -1607,46 +1700,221 @@ export const getAdminUpdateQboConnectionMutationOptions = <
     : { mutation: { mutationKey }, request: undefined };
 
   const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof adminUpdateQboConnection>>,
-    { data: BodyType<UpdateQboConnectionBody> }
-  > = (props) => {
-    const { data } = props ?? {};
-
-    return adminUpdateQboConnection(data, requestOptions);
+    Awaited<ReturnType<typeof adminConnectQboStub>>,
+    void
+  > = () => {
+    return adminConnectQboStub(requestOptions);
   };
 
   return { mutationFn, ...mutationOptions };
 };
 
-export type AdminUpdateQboConnectionMutationResult = NonNullable<
-  Awaited<ReturnType<typeof adminUpdateQboConnection>>
+export type AdminConnectQboStubMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminConnectQboStub>>
 >;
-export type AdminUpdateQboConnectionMutationBody =
-  BodyType<UpdateQboConnectionBody>;
-export type AdminUpdateQboConnectionMutationError = ErrorType<unknown>;
+
+export type AdminConnectQboStubMutationError = ErrorType<unknown>;
 
 /**
- * @summary Toggle the QuickBooks connection (stub OAuth)
+ * @summary Establish a stubbed QuickBooks Online connection for development.
+Generates a fresh realm id and uses the caller's org name as the
+connected company name.
+
  */
-export const useAdminUpdateQboConnection = <
+export const useAdminConnectQboStub = <
   TError = ErrorType<unknown>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof adminUpdateQboConnection>>,
+    Awaited<ReturnType<typeof adminConnectQboStub>>,
     TError,
-    { data: BodyType<UpdateQboConnectionBody> },
+    void,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationResult<
-  Awaited<ReturnType<typeof adminUpdateQboConnection>>,
+  Awaited<ReturnType<typeof adminConnectQboStub>>,
   TError,
-  { data: BodyType<UpdateQboConnectionBody> },
+  void,
   TContext
 > => {
-  return useMutation(getAdminUpdateQboConnectionMutationOptions(options));
+  return useMutation(getAdminConnectQboStubMutationOptions(options));
 };
+
+/**
+ * @summary Disconnect the stubbed QuickBooks Online connection
+ */
+export const getAdminDisconnectQboUrl = () => {
+  return `/api/admin/qbo-connection/disconnect`;
+};
+
+export const adminDisconnectQbo = async (
+  options?: RequestInit,
+): Promise<QboConnection> => {
+  return customFetch<QboConnection>(getAdminDisconnectQboUrl(), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getAdminDisconnectQboMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminDisconnectQbo>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminDisconnectQbo>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["adminDisconnectQbo"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminDisconnectQbo>>,
+    void
+  > = () => {
+    return adminDisconnectQbo(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminDisconnectQboMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminDisconnectQbo>>
+>;
+
+export type AdminDisconnectQboMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Disconnect the stubbed QuickBooks Online connection
+ */
+export const useAdminDisconnectQbo = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminDisconnectQbo>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminDisconnectQbo>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getAdminDisconnectQboMutationOptions(options));
+};
+
+/**
+ * @summary Approval-action audit trail (org-wide or per-report)
+ */
+export const getAdminAuditLogUrl = (params?: AdminAuditLogParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/admin/audit-log?${stringifiedParams}`
+    : `/api/admin/audit-log`;
+};
+
+export const adminAuditLog = async (
+  params?: AdminAuditLogParams,
+  options?: RequestInit,
+): Promise<ApprovalAction[]> => {
+  return customFetch<ApprovalAction[]>(getAdminAuditLogUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getAdminAuditLogQueryKey = (params?: AdminAuditLogParams) => {
+  return [`/api/admin/audit-log`, ...(params ? [params] : [])] as const;
+};
+
+export const getAdminAuditLogQueryOptions = <
+  TData = Awaited<ReturnType<typeof adminAuditLog>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: AdminAuditLogParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof adminAuditLog>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getAdminAuditLogQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof adminAuditLog>>> = ({
+    signal,
+  }) => adminAuditLog(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof adminAuditLog>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type AdminAuditLogQueryResult = NonNullable<
+  Awaited<ReturnType<typeof adminAuditLog>>
+>;
+export type AdminAuditLogQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Approval-action audit trail (org-wide or per-report)
+ */
+
+export function useAdminAuditLog<
+  TData = Awaited<ReturnType<typeof adminAuditLog>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: AdminAuditLogParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof adminAuditLog>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getAdminAuditLogQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * @summary List expense reports the caller can see
@@ -2990,6 +3258,97 @@ export const useDeleteReceipt = <
 > => {
   return useMutation(getDeleteReceiptMutationOptions(options));
 };
+
+/**
+ * @summary Short-lived signed GET URL for the underlying object
+ */
+export const getGetReceiptDownloadUrlUrl = (id: string) => {
+  return `/api/receipts/${id}/download-url`;
+};
+
+export const getReceiptDownloadUrl = async (
+  id: string,
+  options?: RequestInit,
+): Promise<ReceiptDownloadUrlResponse> => {
+  return customFetch<ReceiptDownloadUrlResponse>(
+    getGetReceiptDownloadUrlUrl(id),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetReceiptDownloadUrlQueryKey = (id: string) => {
+  return [`/api/receipts/${id}/download-url`] as const;
+};
+
+export const getGetReceiptDownloadUrlQueryOptions = <
+  TData = Awaited<ReturnType<typeof getReceiptDownloadUrl>>,
+  TError = ErrorType<Problem>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getReceiptDownloadUrl>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetReceiptDownloadUrlQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getReceiptDownloadUrl>>
+  > = ({ signal }) => getReceiptDownloadUrl(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getReceiptDownloadUrl>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetReceiptDownloadUrlQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getReceiptDownloadUrl>>
+>;
+export type GetReceiptDownloadUrlQueryError = ErrorType<Problem>;
+
+/**
+ * @summary Short-lived signed GET URL for the underlying object
+ */
+
+export function useGetReceiptDownloadUrl<
+  TData = Awaited<ReturnType<typeof getReceiptDownloadUrl>>,
+  TError = ErrorType<Problem>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getReceiptDownloadUrl>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetReceiptDownloadUrlQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * @summary Request a presigned upload URL for a receipt

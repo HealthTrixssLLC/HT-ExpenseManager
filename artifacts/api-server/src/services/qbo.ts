@@ -5,11 +5,15 @@ import {
   expenseReportsTable,
   glMappingsTable,
   lineItemsTable,
+  orgsTable,
+  qboConnectionTable,
   qboPostingEventsTable,
   type ExpenseReport,
+  type QboConnection,
 } from "@workspace/db";
 
 const NANOID = customAlphabet("0123456789ABCDEFGHJKMNPQRSTVWXYZ", 8);
+const REALM_NANOID = customAlphabet("0123456789", 16);
 
 const FALLBACK_ACCOUNT = "Uncategorized Expense";
 const PAYABLE_ACCOUNT = "Employee Reimbursement Payable";
@@ -158,9 +162,17 @@ export async function postReportToQbo(
     },
   };
 
-  // Deterministic-ish failure: hash the report id and fail when it matches a
-  // narrow window. This stays the same across retries unless forceSuccess.
-  const shouldFail = !options.forceSuccess && hashFailureBucket(report.id) === 0;
+  // Stub QuickBooks sync errors are gated behind a feature flag so production
+  // deploys never inject random failures. The default error rate is 0; demo /
+  // dev environments can set QBO_STUB_SYNC_ERROR_RATE=0.02 to exercise the
+  // retry path. The failure bucket is deterministic per (report) so retries
+  // hit the same outcome unless `forceSuccess` is set.
+  const errorRate = parseStubErrorRate(process.env["QBO_STUB_SYNC_ERROR_RATE"]);
+  const failThreshold = Math.round(errorRate * 50);
+  const shouldFail =
+    !options.forceSuccess &&
+    failThreshold > 0 &&
+    hashFailureBucket(report.id) < failThreshold;
   if (shouldFail) {
     await db.insert(qboPostingEventsTable).values({
       orgId: report.orgId,
@@ -195,6 +207,74 @@ function hashFailureBucket(s: string): number {
     h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   }
   return h % 50;
+}
+
+function parseStubErrorRate(raw: string | undefined): number {
+  if (!raw) return 0;
+  const v = Number(raw);
+  if (!Number.isFinite(v) || v <= 0) return 0;
+  return Math.min(v, 1);
+}
+
+/**
+ * Find or create the org's QuickBooks connection row, then mark it as
+ * connected with a freshly-generated realm id and the org's actual company
+ * name. This is the stub equivalent of completing the Intuit OAuth dance.
+ */
+export async function connectQboStub(orgId: string): Promise<QboConnection> {
+  const [org] = await db
+    .select({ name: orgsTable.name })
+    .from(orgsTable)
+    .where(eq(orgsTable.id, orgId))
+    .limit(1);
+  if (!org) {
+    throw new Error(`Org ${orgId} not found while connecting QuickBooks stub`);
+  }
+  const realmId = REALM_NANOID();
+  await ensureConnectionRow(orgId);
+  const [updated] = await db
+    .update(qboConnectionTable)
+    .set({
+      status: "connected",
+      realmId,
+      companyName: org.name,
+      connectedAt: new Date(),
+      lastSyncError: null,
+    })
+    .where(eq(qboConnectionTable.orgId, orgId))
+    .returning();
+  return updated;
+}
+
+export async function disconnectQboStub(orgId: string): Promise<QboConnection> {
+  await ensureConnectionRow(orgId);
+  const [updated] = await db
+    .update(qboConnectionTable)
+    .set({
+      status: "disconnected",
+      realmId: null,
+      companyName: null,
+      connectedAt: null,
+    })
+    .where(eq(qboConnectionTable.orgId, orgId))
+    .returning();
+  return updated;
+}
+
+export async function ensureConnectionRow(orgId: string): Promise<QboConnection> {
+  const existing = (
+    await db
+      .select()
+      .from(qboConnectionTable)
+      .where(eq(qboConnectionTable.orgId, orgId))
+      .limit(1)
+  )[0];
+  if (existing) return existing;
+  const [created] = await db
+    .insert(qboConnectionTable)
+    .values({ orgId })
+    .returning();
+  return created;
 }
 
 export async function loadLastPostingEvent(

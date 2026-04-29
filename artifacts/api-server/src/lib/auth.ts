@@ -17,6 +17,11 @@ export const BEARER_PREFIX = "Bearer ";
 
 const ABSOLUTE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const ROLLING_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours of inactivity
+// Rotate the session token (the secret stored in the cookie / Bearer header)
+// at most once per hour. The session row, the user binding, and the absolute
+// expiry stay the same — only the secret rotates, so a leaked token is short
+// lived. Issued via a new Set-Cookie + X-New-Session-Token response header.
+const ROTATION_THRESHOLD_MS = 60 * 60 * 1000;
 
 const BCRYPT_ROUNDS = 11;
 
@@ -92,6 +97,12 @@ export async function destroySession(rawToken: string): Promise<void> {
 export type SessionLookup = {
   session: Session;
   user: User;
+  /**
+   * Populated when the session secret was rotated as part of this lookup. The
+   * caller (the session middleware) is responsible for emitting the new token
+   * to the client via Set-Cookie and the X-New-Session-Token header.
+   */
+  rotated: { rawToken: string; expiresAt: Date } | null;
 };
 
 export async function lookupSession(
@@ -126,11 +137,48 @@ export async function lookupSession(
     return null;
   }
 
+  // Decide whether to rotate the session secret. We rotate based on the
+  // session's createdAt (which doubles as "token issued at" because the
+  // tokenHash column is updated atomically with createdAt on rotation).
+  const sessionAgeMs = now.getTime() - row.sessions.createdAt.getTime();
+  if (sessionAgeMs >= ROTATION_THRESHOLD_MS) {
+    const newRawToken = generateToken(32);
+    const newHash = hashToken(newRawToken);
+    // Compare-and-swap on the OLD tokenHash so concurrent requests with the
+    // same session token cannot both rotate. Whichever request wins gets the
+    // new secret; the loser falls back to a non-rotating "touch" path so the
+    // already-issued new secret remains valid for the winner's response.
+    const [rotated] = await db
+      .update(sessionsTable)
+      .set({
+        tokenHash: newHash,
+        createdAt: now,
+        lastUsedAt: now,
+      })
+      .where(
+        and(
+          eq(sessionsTable.id, row.sessions.id),
+          eq(sessionsTable.tokenHash, tokenHash),
+        ),
+      )
+      .returning();
+    if (rotated) {
+      return {
+        session: rotated,
+        user: row.users,
+        rotated: { rawToken: newRawToken, expiresAt: rotated.expiresAt },
+      };
+    }
+    // Lost the rotation race; another request already issued a new secret.
+    // Fall through and behave as a normal touch on the (now stale-from-our-
+    // perspective) session row.
+  }
+
   // Touch lastUsedAt asynchronously; don't block on the result.
   void db
     .update(sessionsTable)
     .set({ lastUsedAt: now })
     .where(eq(sessionsTable.id, row.sessions.id));
 
-  return { session: row.sessions, user: row.users };
+  return { session: row.sessions, user: row.users, rotated: null };
 }

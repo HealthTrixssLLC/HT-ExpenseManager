@@ -4,7 +4,7 @@ import {
   type Request,
   type Response,
 } from "express";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import {
   AdminCreateUserBody as CreateUserBody,
   AdminGetQboConnectionResponse,
@@ -12,26 +12,32 @@ import {
   AdminListUsersResponse,
   AdminUpdateGlMappingBody as UpdateGlMappingBody,
   AdminUpdatePolicyRuleBody as UpdatePolicyRuleBody,
-  AdminUpdateQboConnectionBody as UpdateQboConnectionBody,
   AdminUpdateUserBody as UpdateUserBody,
 } from "@workspace/api-zod";
 import {
+  approvalActionsTable,
   db,
   departmentsTable,
+  expenseReportsTable,
   glMappingsTable,
   policyRulesTable,
-  qboConnectionTable,
   usersTable,
 } from "../lib/db";
 import { hashPassword } from "../lib/auth";
 import { sendProblem } from "../lib/problem";
 import { requireAuth, requireRole } from "../middlewares/session";
 import {
+  toApprovalActionDto,
   toGlMappingDto,
   toPolicyRuleDto,
   toQboConnectionDto,
   toUserDto,
 } from "../lib/serializers";
+import {
+  connectQboStub,
+  disconnectQboStub,
+  ensureConnectionRow,
+} from "../services/qbo";
 
 const router: IRouter = Router();
 
@@ -263,66 +269,78 @@ router.put(
   },
 );
 
+// Canonical QuickBooks-stub admin endpoints. Connect/disconnect are POSTs (not
+// a single PUT with an action discriminator) so each operation has a stable
+// URL the UI can hit, and so the mocked OAuth dance reads like a real one.
 router.get(
-  "/admin/qbo/connection",
+  "/admin/qbo-connection",
   requireRole(...ADMIN_ROLES),
   async (req, res): Promise<void> => {
     const orgId = req.auth!.user.orgId;
-    const conn = await ensureQboConnection(orgId);
+    const conn = await ensureConnectionRow(orgId);
     res.json(AdminGetQboConnectionResponse.parse(toQboConnectionDto(conn)));
   },
 );
 
-router.put(
-  "/admin/qbo/connection",
+router.post(
+  "/admin/qbo-connection/connect-stub",
   requireRole(...ADMIN_ROLES),
-  async (req: Request, res: Response): Promise<void> => {
-    const parsed = UpdateQboConnectionBody.safeParse(req.body);
-    if (!parsed.success) {
-      sendProblem(res, 400, "Invalid Body", parsed.error.message);
-      return;
-    }
-    const orgId = req.auth!.user.orgId;
-    await ensureQboConnection(orgId);
-    const updates =
-      parsed.data.action === "connect"
-        ? {
-            status: "connected" as const,
-            realmId: "STUB-REALM-1234567890",
-            companyName: "Healthtrix Sandbox Co.",
-            connectedAt: new Date(),
-            lastSyncError: null,
-          }
-        : {
-            status: "disconnected" as const,
-            realmId: null,
-            companyName: null,
-            connectedAt: null,
-          };
-    const [updated] = await db
-      .update(qboConnectionTable)
-      .set(updates)
-      .where(eq(qboConnectionTable.orgId, orgId))
-      .returning();
-    res.json(toQboConnectionDto(updated));
+  async (req, res): Promise<void> => {
+    const conn = await connectQboStub(req.auth!.user.orgId);
+    res.json(toQboConnectionDto(conn));
   },
 );
 
-async function ensureQboConnection(orgId: string) {
-  const existing = (
-    await db
+router.post(
+  "/admin/qbo-connection/disconnect",
+  requireRole(...ADMIN_ROLES),
+  async (req, res): Promise<void> => {
+    const conn = await disconnectQboStub(req.auth!.user.orgId);
+    res.json(toQboConnectionDto(conn));
+  },
+);
+
+// Approval-action audit trail. Defaults to org-wide; pass ?reportId=<uuid> to
+// scope to a single report (which is what the report detail page shows in the
+// timeline tab).
+router.get(
+  "/admin/audit-log",
+  requireRole(...ADMIN_ROLES),
+  async (req: Request, res: Response): Promise<void> => {
+    const orgId = req.auth!.user.orgId;
+    const reportIdParam = (req.query["reportId"] as string | undefined) ?? null;
+    const limitParam = Number(req.query["limit"] ?? "100");
+    const limit = Number.isFinite(limitParam)
+      ? Math.min(Math.max(Math.trunc(limitParam), 1), 500)
+      : 100;
+    // approval_actions has no org column directly; join through expense_reports
+    // to enforce org isolation (and to support the optional reportId filter).
+    const where = reportIdParam
+      ? and(
+          eq(expenseReportsTable.orgId, orgId),
+          eq(approvalActionsTable.reportId, reportIdParam),
+        )
+      : eq(expenseReportsTable.orgId, orgId);
+    // Order by createdAt DESC (a wall-clock timestamp), not by `sequence` —
+    // sequence is per-report and is meaningless across multiple reports.
+    // Pushing ORDER BY + LIMIT into SQL avoids loading the full org history
+    // into memory just to slice it.
+    const rows = await db
       .select()
-      .from(qboConnectionTable)
-      .where(eq(qboConnectionTable.orgId, orgId))
-      .limit(1)
-  )[0];
-  if (existing) return existing;
-  const [created] = await db
-    .insert(qboConnectionTable)
-    .values({ orgId })
-    .returning();
-  return created;
-}
+      .from(approvalActionsTable)
+      .innerJoin(
+        expenseReportsTable,
+        eq(approvalActionsTable.reportId, expenseReportsTable.id),
+      )
+      .innerJoin(usersTable, eq(approvalActionsTable.actorId, usersTable.id))
+      .where(where)
+      .orderBy(desc(approvalActionsTable.createdAt))
+      .limit(limit);
+    res.json(
+      rows.map((row) => toApprovalActionDto(row.approval_actions, row.users)),
+    );
+  },
+);
 
 function pathId(req: Request, key: string): string {
   const raw = (req.params as Record<string, string | string[]>)[key];

@@ -7,6 +7,10 @@
  */
 
 export interface RequestUploadUrlResponse {
+  /** Time-limited signed PUT URL */
   uploadURL: string;
+  /** /objects/<receiptId>.<ext>; pass back to register the receipt */
   objectPath: string;
+  receiptId: string;
+  expiresAt: Date;
 }

@@ -376,14 +376,28 @@ export interface RegisterReceiptBody {
 }
 
 export interface RequestUploadUrlBody {
+  /** Owning report */
+  reportId: string;
   name: string;
+  /** Bytes; max 10485760 (10 MB) */
   size: number;
+  /** Allowed: image/jpeg, image/png, image/heic, application/pdf */
   contentType: string;
 }
 
 export interface RequestUploadUrlResponse {
+  /** Time-limited signed PUT URL */
   uploadURL: string;
+  /** /objects/<receiptId>.<ext>; pass back to register the receipt */
   objectPath: string;
+  receiptId: string;
+  expiresAt: string;
+}
+
+export interface ReceiptDownloadUrlResponse {
+  /** Time-limited signed GET URL */
+  downloadURL: string;
+  expiresAt: string;
 }
 
 export interface ApprovalActionBody {
@@ -512,6 +526,15 @@ export interface ReconcileBatchBody {
   /** @minItems 1 */
   entries: ReconcileBatchEntry[];
 }
+
+export type AdminAuditLogParams = {
+  reportId?: string;
+  /**
+   * @minimum 1
+   * @maximum 500
+   */
+  limit?: number;
+};
 
 export type ListReportsParams = {
   scope?: ListReportsScope;

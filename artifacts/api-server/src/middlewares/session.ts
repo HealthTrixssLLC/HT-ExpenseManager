@@ -11,6 +11,15 @@ import {
 } from "../lib/auth";
 import { sendProblem } from "../lib/problem";
 
+const COOKIE_BASE = {
+  httpOnly: true as const,
+  secure: true as const,
+  sameSite: "lax" as const,
+  path: "/",
+};
+
+const NEW_SESSION_TOKEN_HEADER = "X-New-Session-Token";
+
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
@@ -37,7 +46,7 @@ function getRawToken(req: Request): string | null {
 
 export async function attachSession(
   req: Request,
-  _res: Response,
+  res: Response,
   next: NextFunction,
 ): Promise<void> {
   req.isIosClient = req.headers[CLIENT_HEADER] === "ios";
@@ -49,6 +58,21 @@ export async function attachSession(
   const session = await lookupSession(token);
   if (session) {
     req.auth = session;
+    if (session.rotated) {
+      if (req.isIosClient) {
+        // Mobile/iOS clients (Bearer auth) read the rotated secret out of the
+        // X-New-Session-Token response header on every request.
+        res.setHeader(NEW_SESSION_TOKEN_HEADER, session.rotated.rawToken);
+      } else {
+        // Web clients pick up the rotated secret via the HttpOnly Set-Cookie.
+        // We deliberately do NOT echo the secret in a JS-readable response
+        // header here — that would defeat the HttpOnly protection.
+        res.cookie(SESSION_COOKIE, session.rotated.rawToken, {
+          ...COOKIE_BASE,
+          expires: session.rotated.expiresAt,
+        });
+      }
+    }
   }
   next();
 }

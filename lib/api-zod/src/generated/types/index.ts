@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from "./adminAuditLogParams";
 export * from "./approvalAction";
 export * from "./approvalActionBody";
 export * from "./authSession";
@@ -41,6 +42,7 @@ export * from "./problem";
 export * from "./qboConnection";
 export * from "./qboConnectionStatus";
 export * from "./receipt";
+export * from "./receiptDownloadUrlResponse";
 export * from "./reconcileBatchBody";
 export * from "./reconcileBatchEntry";
 export * from "./reconciliationRecord";

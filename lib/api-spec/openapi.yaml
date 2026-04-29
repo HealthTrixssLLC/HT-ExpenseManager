@@ -81,6 +81,44 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Problem" }
 
+  /auth/register:
+    post:
+      operationId: registerUser
+      tags: [auth]
+      summary: "Admin-invoked: create a new user under the caller's org"
+      description: |
+        Distinct from `/auth/bootstrap`, which is one-shot for the very first
+        System Admin. `/auth/register` lets an Accounting Admin or System
+        Admin add additional users (employees, managers, finance approvers).
+        The caller must be authenticated and authorized; the new user does
+        not log in as a side effect.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateUserBody" }
+      responses:
+        "201":
+          description: User created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "401":
+          description: Not signed in
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "403":
+          description: Caller lacks admin role
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "409":
+          description: Email already taken in this org
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
   /auth/login:
     post:
       operationId: login
@@ -306,7 +344,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/PolicyRule" }
 
-  /admin/qbo/connection:
+  /admin/qbo-connection:
     get:
       operationId: adminGetQboConnection
       tags: [admin]
@@ -317,21 +355,56 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/QboConnection" }
-    put:
-      operationId: adminUpdateQboConnection
+
+  /admin/qbo-connection/connect-stub:
+    post:
+      operationId: adminConnectQboStub
       tags: [admin]
-      summary: Toggle the QuickBooks connection (stub OAuth)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/UpdateQboConnectionBody" }
+      summary: |
+        Establish a stubbed QuickBooks Online connection for development.
+        Generates a fresh realm id and uses the caller's org name as the
+        connected company name.
       responses:
         "200":
-          description: Updated
+          description: Connected
           content:
             application/json:
               schema: { $ref: "#/components/schemas/QboConnection" }
+
+  /admin/qbo-connection/disconnect:
+    post:
+      operationId: adminDisconnectQbo
+      tags: [admin]
+      summary: Disconnect the stubbed QuickBooks Online connection
+      responses:
+        "200":
+          description: Disconnected
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QboConnection" }
+
+  /admin/audit-log:
+    get:
+      operationId: adminAuditLog
+      tags: [admin]
+      summary: Approval-action audit trail (org-wide or per-report)
+      parameters:
+        - in: query
+          name: reportId
+          required: false
+          schema: { type: string, format: uuid }
+        - in: query
+          name: limit
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ApprovalAction" }
 
   /reports:
     get:
@@ -597,6 +670,33 @@ paths:
       responses:
         "204":
           description: Deleted
+
+  /receipts/{id}/download-url:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getReceiptDownloadUrl
+      tags: [receipts]
+      summary: Short-lived signed GET URL for the underlying object
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReceiptDownloadUrlResponse" }
+        "403":
+          description: Caller cannot view the parent report
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "404":
+          description: Receipt not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
 
   /receipts/upload-url:
     post:
@@ -1309,17 +1409,31 @@ components:
     RequestUploadUrlBody:
       type: object
       properties:
+        reportId: { type: string, format: uuid, description: "Owning report" }
         name: { type: string }
-        size: { type: integer }
-        contentType: { type: string }
-      required: [name, size, contentType]
+        size: { type: integer, description: "Bytes; max 10485760 (10 MB)" }
+        contentType:
+          type: string
+          description: "Allowed: image/jpeg, image/png, image/heic, application/pdf"
+      required: [reportId, name, size, contentType]
 
     RequestUploadUrlResponse:
       type: object
       properties:
-        uploadURL: { type: string }
-        objectPath: { type: string }
-      required: [uploadURL, objectPath]
+        uploadURL: { type: string, description: "Time-limited signed PUT URL" }
+        objectPath:
+          type: string
+          description: "/objects/<receiptId>.<ext>; pass back to register the receipt"
+        receiptId: { type: string, format: uuid }
+        expiresAt: { type: string, format: date-time }
+      required: [uploadURL, objectPath, receiptId, expiresAt]
+
+    ReceiptDownloadUrlResponse:
+      type: object
+      properties:
+        downloadURL: { type: string, description: "Time-limited signed GET URL" }
+        expiresAt: { type: string, format: date-time }
+      required: [downloadURL, expiresAt]
 
     ApprovalActionBody:
       type: object

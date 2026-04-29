@@ -44,6 +44,35 @@ export const BootstrapAdminBody = zod.object({
 });
 
 /**
+ * Distinct from `/auth/bootstrap`, which is one-shot for the very first
+System Admin. `/auth/register` lets an Accounting Admin or System
+Admin add additional users (employees, managers, finance approvers).
+The caller must be authenticated and authorized; the new user does
+not log in as a side effect.
+
+ * @summary Admin-invoked: create a new user under the caller's org
+ */
+
+export const registerUserBodyPasswordMin = 8;
+
+export const RegisterUserBody = zod.object({
+  email: zod.string().email(),
+  fullName: zod.string().min(1),
+  title: zod.string().nullish(),
+  password: zod.string().min(registerUserBodyPasswordMin),
+  role: zod.enum([
+    "Employee",
+    "Manager Approver",
+    "Finance Approver",
+    "Accounting Admin",
+    "System Admin",
+  ]),
+  isAlsoEmployee: zod.boolean().optional(),
+  departmentId: zod.string().uuid().nullish(),
+  managerId: zod.string().uuid().nullish(),
+});
+
+/**
  * @summary Email + password login
  */
 
@@ -335,13 +364,12 @@ export const AdminGetQboConnectionResponse = zod.object({
 });
 
 /**
- * @summary Toggle the QuickBooks connection (stub OAuth)
- */
-export const AdminUpdateQboConnectionBody = zod.object({
-  action: zod.enum(["connect", "disconnect"]),
-});
+ * @summary Establish a stubbed QuickBooks Online connection for development.
+Generates a fresh realm id and uses the caller's org name as the
+connected company name.
 
-export const AdminUpdateQboConnectionResponse = zod.object({
+ */
+export const AdminConnectQboStubResponse = zod.object({
   status: zod.enum(["connected", "disconnected", "error"]),
   realmId: zod.string().nullish(),
   companyName: zod.string().nullish(),
@@ -349,6 +377,93 @@ export const AdminUpdateQboConnectionResponse = zod.object({
   lastSyncAt: zod.coerce.date().nullish(),
   lastSyncError: zod.string().nullish(),
 });
+
+/**
+ * @summary Disconnect the stubbed QuickBooks Online connection
+ */
+export const AdminDisconnectQboResponse = zod.object({
+  status: zod.enum(["connected", "disconnected", "error"]),
+  realmId: zod.string().nullish(),
+  companyName: zod.string().nullish(),
+  connectedAt: zod.coerce.date().nullish(),
+  lastSyncAt: zod.coerce.date().nullish(),
+  lastSyncError: zod.string().nullish(),
+});
+
+/**
+ * @summary Approval-action audit trail (org-wide or per-report)
+ */
+export const adminAuditLogQueryLimitDefault = 100;
+export const adminAuditLogQueryLimitMax = 500;
+
+export const AdminAuditLogQueryParams = zod.object({
+  reportId: zod.coerce.string().uuid().optional(),
+  limit: zod.coerce
+    .number()
+    .min(1)
+    .max(adminAuditLogQueryLimitMax)
+    .default(adminAuditLogQueryLimitDefault),
+});
+
+export const AdminAuditLogResponseItem = zod.object({
+  id: zod.string().uuid(),
+  reportId: zod.string().uuid(),
+  actor: zod.object({
+    id: zod.string().uuid(),
+    fullName: zod.string(),
+    role: zod.enum([
+      "Employee",
+      "Manager Approver",
+      "Finance Approver",
+      "Accounting Admin",
+      "System Admin",
+    ]),
+  }),
+  actorRole: zod.enum([
+    "Employee",
+    "Manager Approver",
+    "Finance Approver",
+    "Accounting Admin",
+    "System Admin",
+  ]),
+  fromStatus: zod.enum([
+    "Draft",
+    "Submitted",
+    "Manager Review",
+    "Changes Requested",
+    "Manager Approved",
+    "Finance Review",
+    "Finance Approved",
+    "Posted to QuickBooks",
+    "Ready for Payroll Reimbursement",
+    "Paid Through Payroll",
+    "Reconciled",
+    "Rejected",
+    "Voided",
+    "Sync Error",
+  ]),
+  toStatus: zod.enum([
+    "Draft",
+    "Submitted",
+    "Manager Review",
+    "Changes Requested",
+    "Manager Approved",
+    "Finance Review",
+    "Finance Approved",
+    "Posted to QuickBooks",
+    "Ready for Payroll Reimbursement",
+    "Paid Through Payroll",
+    "Reconciled",
+    "Rejected",
+    "Voided",
+    "Sync Error",
+  ]),
+  comment: zod.string().nullish(),
+  metadata: zod.string().nullish(),
+  sequence: zod.number(),
+  createdAt: zod.coerce.date(),
+});
+export const AdminAuditLogResponse = zod.array(AdminAuditLogResponseItem);
 
 /**
  * @summary List expense reports the caller can see
@@ -928,17 +1043,40 @@ export const DeleteReceiptParams = zod.object({
 });
 
 /**
+ * @summary Short-lived signed GET URL for the underlying object
+ */
+export const GetReceiptDownloadUrlParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+export const GetReceiptDownloadUrlResponse = zod.object({
+  downloadURL: zod.string().describe("Time-limited signed GET URL"),
+  expiresAt: zod.coerce.date(),
+});
+
+/**
  * @summary Request a presigned upload URL for a receipt
  */
 export const RequestUploadUrlBody = zod.object({
+  reportId: zod.string().uuid().describe("Owning report"),
   name: zod.string(),
-  size: zod.number(),
-  contentType: zod.string(),
+  size: zod.number().describe("Bytes; max 10485760 (10 MB)"),
+  contentType: zod
+    .string()
+    .describe(
+      "Allowed: image\/jpeg, image\/png, image\/heic, application\/pdf",
+    ),
 });
 
 export const RequestUploadUrlResponse = zod.object({
-  uploadURL: zod.string(),
-  objectPath: zod.string(),
+  uploadURL: zod.string().describe("Time-limited signed PUT URL"),
+  objectPath: zod
+    .string()
+    .describe(
+      "\/objects\/<receiptId>.<ext>; pass back to register the receipt",
+    ),
+  receiptId: zod.string().uuid(),
+  expiresAt: zod.coerce.date(),
 });
 
 /**

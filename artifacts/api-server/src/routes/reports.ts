@@ -28,6 +28,8 @@ import {
   loadReportSummaries,
   nextDisplayCode,
 } from "../lib/reports";
+import { ObjectStorageService } from "../lib/objectStorage";
+import { verifyReceiptUpload } from "../lib/receipts";
 import {
   toApprovalActionDto,
   toLineItemDto,
@@ -37,6 +39,7 @@ import { applyTransition } from "../services/workflow";
 import type { WorkflowStatus } from "@workspace/db";
 
 const router: IRouter = Router();
+const objectStorageService = new ObjectStorageService();
 
 const EDITABLE_STATUSES: WorkflowStatus[] = ["Draft", "Changes Requested"];
 
@@ -562,6 +565,20 @@ router.post("/lines/:lineId/receipts", async (req, res): Promise<void> => {
       sendProblem(res, 403, "Forbidden");
       return;
     }
+    // Authoritative server-side check: re-derive size + content type from the
+    // actual object the client uploaded, and verify the canonical key embeds
+    // *this* org and report. We persist the storage-reported values, never
+    // the client-claimed ones.
+    const verified = await verifyReceiptUpload({
+      objectStorage: objectStorageService,
+      objectPath: parsed.data.objectPath,
+      expectedOrgId: req.auth!.user.orgId,
+      expectedReportId: report.id,
+    });
+    if (!verified.ok) {
+      sendProblem(res, verified.status, verified.title, verified.detail);
+      return;
+    }
     const [receipt] = await db
       .insert(receiptsTable)
       .values({
@@ -570,8 +587,8 @@ router.post("/lines/:lineId/receipts", async (req, res): Promise<void> => {
         lineItemId: lineId,
         objectPath: parsed.data.objectPath,
         filename: parsed.data.filename,
-        mimeType: parsed.data.mimeType,
-        sizeBytes: parsed.data.sizeBytes,
+        mimeType: verified.contentType,
+        sizeBytes: verified.sizeBytes,
         uploadedById: req.auth!.user.id,
       })
       .returning();
@@ -594,6 +611,16 @@ router.post("/reports/:id/receipts", async (req, res): Promise<void> => {
       sendProblem(res, 403, "Forbidden");
       return;
     }
+    const verified = await verifyReceiptUpload({
+      objectStorage: objectStorageService,
+      objectPath: parsed.data.objectPath,
+      expectedOrgId: req.auth!.user.orgId,
+      expectedReportId: report.id,
+    });
+    if (!verified.ok) {
+      sendProblem(res, verified.status, verified.title, verified.detail);
+      return;
+    }
     const [receipt] = await db
       .insert(receiptsTable)
       .values({
@@ -602,8 +629,8 @@ router.post("/reports/:id/receipts", async (req, res): Promise<void> => {
         lineItemId: parsed.data.lineItemId ?? null,
         objectPath: parsed.data.objectPath,
         filename: parsed.data.filename,
-        mimeType: parsed.data.mimeType,
-        sizeBytes: parsed.data.sizeBytes,
+        mimeType: verified.contentType,
+        sizeBytes: verified.sizeBytes,
         uploadedById: req.auth!.user.id,
       })
       .returning();
