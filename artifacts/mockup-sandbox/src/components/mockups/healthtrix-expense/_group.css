@@ -1,0 +1,104 @@
+/* Healthtrix Expense Management — brand tokens
+ * Scoped to .ht-root only so this CSS never leaks into other mockup groups.
+ * Every component in this folder must wrap its tree in <div className="ht-root">.
+ */
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap");
+
+.ht-root {
+  /* Brand palette */
+  --ht-navy: #2E456B;
+  --ht-orange: #FEA002;
+  --ht-teal: #277493;
+  --ht-tan: #F3DBB1;
+  --ht-light-orange: #FFCA4B;
+  --ht-light-teal: #67AABF;
+  --ht-light-green: #88ABA2;
+  --ht-light-grey: #ABAFA5;
+
+  /* Derived neutrals */
+  --ht-canvas: #F6F4EF;          /* warm off-white app background */
+  --ht-surface: #FFFFFF;          /* card surface */
+  --ht-surface-2: #FBF8F2;        /* subtle alt surface */
+  --ht-border: #E5E1D8;           /* hairline border */
+  --ht-border-strong: #C9C4B7;    /* divider */
+  --ht-ink: #14233B;              /* primary text */
+  --ht-ink-2: #4B5A75;            /* secondary text */
+  --ht-ink-3: #7C8497;            /* tertiary text */
+  --ht-success: #2F7D5C;
+  --ht-warning: #B86E00;
+  --ht-danger: #B23B3B;
+
+  /* Status pill background tints (8% mix) */
+  --ht-tint-navy: #E6EAF1;
+  --ht-tint-orange: #FFF1D6;
+  --ht-tint-teal: #DEEBF1;
+  --ht-tint-tan: #FBF1DC;
+  --ht-tint-green: #E1ECE7;
+  --ht-tint-grey: #ECEDEA;
+  --ht-tint-danger: #F4DEDE;
+  --ht-tint-success: #DCEDE3;
+
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+  color: var(--ht-ink);
+  background: var(--ht-canvas);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.ht-root .ht-mono {
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.ht-root .ht-tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Soft elevations tuned for a calm/clinical surface */
+.ht-root .ht-elev-1 { box-shadow: 0 1px 2px rgba(20, 35, 59, 0.04), 0 1px 0 rgba(20, 35, 59, 0.02); }
+.ht-root .ht-elev-2 { box-shadow: 0 4px 12px rgba(20, 35, 59, 0.06), 0 1px 2px rgba(20, 35, 59, 0.04); }
+.ht-root .ht-elev-3 { box-shadow: 0 14px 40px rgba(20, 35, 59, 0.10), 0 2px 4px rgba(20, 35, 59, 0.04); }
+
+.ht-root .ht-divider {
+  height: 1px;
+  background: var(--ht-border);
+}
+
+/* Mobile shell (iPhone-ish) */
+.ht-mobile-shell {
+  width: 390px;
+  min-height: 844px;
+  background: var(--ht-canvas);
+  position: relative;
+  overflow: hidden;
+}
+
+.ht-mobile-statusbar {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 22px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ht-ink);
+}
+
+.ht-mobile-homeindicator {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 134px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--ht-ink);
+  opacity: 0.55;
+}
+
+/* Focus ring helper */
+.ht-root .ht-focus:focus-visible {
+  outline: 2px solid var(--ht-orange);
+  outline-offset: 2px;
+}
