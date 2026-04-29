@@ -296,8 +296,12 @@ router.post(
     // Build per-entry flag, persist a reconciliation record for every entry,
     // and remember which reports came out matched so we can transition only
     // those to "Reconciled".
-    const matchedReportIds = new Set<string>();
-    await db.transaction(async (tx) => {
+    // One ambient transaction wraps every reconciliation_records insert,
+    // every "matched" report transition, and the batch row update — so the
+    // batch is either fully reconciled or fully untouched. No partial state
+    // can be observed mid-failure.
+    const updated = await db.transaction(async (tx) => {
+      const matchedReportIds = new Set<string>();
       for (const entry of parsed.data.entries) {
         const item = itemByReport.get(entry.reportId);
         if (!item) continue;
@@ -329,26 +333,28 @@ router.post(
           note: entry.note ?? null,
         });
       }
+
+      // Only matched reports advance to "Reconciled". Reports with a variance
+      // remain in "Paid Through Payroll" so finance can review and adjust.
+      for (const r of reports) {
+        if (!matchedReportIds.has(r.id)) continue;
+        const fresh = reportById.get(r.id) ?? r;
+        await applyTransition({
+          report: fresh,
+          actor: { id: req.auth!.user.id, role: req.auth!.user.role },
+          transition: "reconcile",
+          metadata: JSON.stringify({ batchId: batch.id }),
+          tx,
+        });
+      }
+
+      const [u] = await tx
+        .update(payrollBatchesTable)
+        .set({ status: "Reconciled", reconciledAt: new Date() })
+        .where(eq(payrollBatchesTable.id, batch.id))
+        .returning();
+      return u;
     });
-
-    // Only matched reports advance to "Reconciled". Reports with a variance
-    // remain in "Paid Through Payroll" so finance can review and adjust.
-    for (const r of reports) {
-      if (!matchedReportIds.has(r.id)) continue;
-      const fresh = reportById.get(r.id) ?? r;
-      await applyTransition({
-        report: fresh,
-        actor: { id: req.auth!.user.id, role: req.auth!.user.role },
-        transition: "reconcile",
-        metadata: JSON.stringify({ batchId: batch.id }),
-      });
-    }
-
-    const [updated] = await db
-      .update(payrollBatchesTable)
-      .set({ status: "Reconciled", reconciledAt: new Date() })
-      .where(eq(payrollBatchesTable.id, batch.id))
-      .returning();
     res.json(GetPayrollBatchResponse.parse(await loadBatchDto(updated)));
   },
 );
