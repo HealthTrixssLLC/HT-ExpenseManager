@@ -15,6 +15,12 @@ export type RequestInterceptor = (context: {
   init: RequestInit;
 }) => void | Promise<void>;
 
+export type ResponseInterceptor = (context: {
+  response: Response;
+  method: string;
+  url: string;
+}) => void | Promise<void>;
+
 const NO_BODY_STATUS = new Set([204, 205, 304]);
 const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
 
@@ -25,6 +31,7 @@ const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
 let _baseUrl: string | null = null;
 let _authTokenGetter: AuthTokenGetter | null = null;
 let _requestInterceptor: RequestInterceptor | null = null;
+let _responseInterceptor: ResponseInterceptor | null = null;
 let _defaultCredentials: RequestCredentials | null = null;
 
 /**
@@ -62,6 +69,16 @@ export function setAuthTokenGetter(getter: AuthTokenGetter | null): void {
  */
 export function setRequestInterceptor(interceptor: RequestInterceptor | null): void {
   _requestInterceptor = interceptor;
+}
+
+/**
+ * Register an interceptor that runs after every fetch resolves (success or
+ * failure). Useful for capturing rotated session tokens from response headers.
+ *
+ * Pass `null` to clear the interceptor.
+ */
+export function setResponseInterceptor(interceptor: ResponseInterceptor | null): void {
+  _responseInterceptor = interceptor;
 }
 
 /**
@@ -401,6 +418,14 @@ export async function customFetch<T = unknown>(
   }
 
   const response = await fetch(input, finalInit);
+
+  if (_responseInterceptor) {
+    try {
+      await _responseInterceptor({ response, method, url: requestInfo.url });
+    } catch {
+      // Response interceptors must never break the response pipeline.
+    }
+  }
 
   if (!response.ok) {
     const errorData = await parseErrorBody(response, method);

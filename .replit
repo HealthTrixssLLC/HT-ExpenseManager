@@ -52,8 +52,17 @@ localPort = 8082
 externalPort = 3000
 
 [[ports]]
+localPort = 18115
+externalPort = 3002
+
+[[ports]]
 localPort = 22333
 externalPort = 3001
 
 [nix]
 channel = "stable-25_05"
+
+[userenv]
+
+[userenv.development]
+WEB_ORIGIN = "https://0431ccd1-5990-4a57-9390-13c470740eec-00-1lq5qaomj0rdf.expo.picard.replit.dev,https://0431ccd1-5990-4a57-9390-13c470740eec-00-1lq5qaomj0rdf.picard.replit.dev"

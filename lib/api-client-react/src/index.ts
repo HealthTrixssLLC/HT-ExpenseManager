@@ -4,8 +4,13 @@ export {
   setBaseUrl,
   setAuthTokenGetter,
   setRequestInterceptor,
+  setResponseInterceptor,
   setDefaultCredentials,
   ApiError,
   ResponseParseError,
 } from "./custom-fetch";
-export type { AuthTokenGetter, RequestInterceptor } from "./custom-fetch";
+export type {
+  AuthTokenGetter,
+  RequestInterceptor,
+  ResponseInterceptor,
+} from "./custom-fetch";
