@@ -1,4 +1,9 @@
-import { ApiError } from "@workspace/api-client-react";
+import { Feather } from "@expo/vector-icons";
+import {
+  ApiError,
+  getGetBootstrapStatusQueryKey,
+  useGetBootstrapStatus,
+} from "@workspace/api-client-react";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useState } from "react";
 import {
@@ -34,6 +39,15 @@ export default function LoginScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showPwd, setShowPwd] = useState(false);
+
+  const bootstrapQ = useGetBootstrapStatus({
+    query: {
+      staleTime: 30_000,
+      retry: 1,
+      queryKey: getGetBootstrapStatusQueryKey(),
+    },
+  });
+  const needsBootstrap = bootstrapQ.data?.bootstrapped === false;
 
   const submit = async () => {
     Keyboard.dismiss();
@@ -87,6 +101,21 @@ export default function LoginScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <Text style={styles.sectionTitle}>Sign in</Text>
+
+        {needsBootstrap ? (
+          <View style={styles.bootstrapBanner}>
+            <View style={styles.bootstrapIconWrap}>
+              <Feather name="shield" size={18} color="#FFFFFF" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.bootstrapTitle}>Set up your organization</Text>
+              <Text style={styles.bootstrapBody}>
+                No System Admin exists yet. Use the Healthtrix web app to
+                bootstrap the first admin, then sign in here.
+              </Text>
+            </View>
+          </View>
+        ) : null}
 
         <View style={styles.field}>
           <Text style={styles.label}>Work email</Text>
@@ -275,4 +304,35 @@ const styles = StyleSheet.create({
     borderColor: HT.border,
   },
   demoChipText: { fontFamily: "Inter_600SemiBold", fontSize: 13, color: HT.navy },
+  bootstrapBanner: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    backgroundColor: HT.tintNavy,
+    borderRadius: 12,
+    padding: 12,
+    gap: 10,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: HT.navy,
+  },
+  bootstrapIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: HT.navy,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bootstrapTitle: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 14,
+    color: HT.navy,
+  },
+  bootstrapBody: {
+    fontFamily: "Inter_500Medium",
+    fontSize: 12,
+    color: HT.ink2,
+    marginTop: 4,
+    lineHeight: 16,
+  },
 });

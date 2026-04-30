@@ -35,6 +35,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Money, formatUsd } from "@/components/ui/Money";
 import { PrimaryButton } from "@/components/ui/PrimaryButton";
 import { ReceiptThumb } from "@/components/ui/ReceiptThumb";
+import { ReceiptViewer } from "@/components/ui/ReceiptViewer";
 import { Section } from "@/components/ui/Section";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { StatusTracker } from "@/components/ui/StatusTracker";
@@ -42,6 +43,7 @@ import { HT } from "@/constants/colors";
 import { isEditable } from "@/constants/status";
 import { useAuth } from "@/contexts/AuthContext";
 import { confirmAction } from "@/lib/confirm";
+import type { Receipt } from "@workspace/api-client-react";
 
 function showError(title: string, message: string) {
   if (Platform.OS === "web" && typeof window !== "undefined") {
@@ -74,6 +76,7 @@ export default function ReportDetailScreen() {
   >(null);
   const [actionComment, setActionComment] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
+  const [viewerReceipt, setViewerReceipt] = useState<Receipt | null>(null);
 
   if (!id) return null;
 
@@ -364,13 +367,34 @@ export default function ReportDetailScreen() {
           )}
         </Section>
 
-        {unattachedReceipts.length > 0 ? (
-          <Section title="Unattached receipts">
+        {report.receipts.length > 0 ? (
+          <Section title={`Receipts (${report.receipts.length})`}>
             <View style={styles.thumbGrid}>
-              {unattachedReceipts.map((r) => (
-                <ReceiptThumb key={r.id} receipt={r} size={84} />
+              {report.receipts.map((r) => (
+                <View key={r.id} style={{ alignItems: "center" }}>
+                  <ReceiptThumb
+                    receipt={r}
+                    size={84}
+                    onPress={() => setViewerReceipt(r)}
+                  />
+                  {r.lineItemId ? (
+                    <Text style={styles.thumbBadge} numberOfLines={1}>
+                      Attached
+                    </Text>
+                  ) : (
+                    <Text style={[styles.thumbBadge, { color: HT.warning }]} numberOfLines={1}>
+                      Unattached
+                    </Text>
+                  )}
+                </View>
               ))}
             </View>
+            {unattachedReceipts.length > 0 && editable ? (
+              <Text style={styles.unattachedHint}>
+                Tap a receipt to view it. To attach an unattached receipt, open
+                the line item from "Line items" above.
+              </Text>
+            ) : null}
           </Section>
         ) : null}
 
@@ -573,6 +597,12 @@ export default function ReportDetailScreen() {
           </View>
         </View>
       </Modal>
+
+      <ReceiptViewer
+        receipt={viewerReceipt}
+        visible={viewerReceipt !== null}
+        onClose={() => setViewerReceipt(null)}
+      />
     </View>
   );
 }
@@ -651,6 +681,22 @@ const styles = StyleSheet.create({
   flagText: { fontFamily: "Inter_600SemiBold", fontSize: 10, color: HT.warning },
   emptyText: { fontFamily: "Inter_500Medium", fontSize: 13, color: HT.ink3, marginTop: 8 },
   thumbGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, padding: 14 },
+  thumbBadge: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 10,
+    color: HT.ink3,
+    marginTop: 4,
+    textAlign: "center",
+    maxWidth: 84,
+  },
+  unattachedHint: {
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+    fontFamily: "Inter_500Medium",
+    fontSize: 12,
+    color: HT.ink3,
+    lineHeight: 16,
+  },
   activityRow: { flexDirection: "row", padding: 14, gap: 10 },
   activityDot: {
     width: 8,

@@ -5,16 +5,18 @@ import {
 } from "@workspace/api-client-react";
 import { Image } from "expo-image";
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { HT } from "@/constants/colors";
 
 export function ReceiptThumb({
   receipt,
   size = 96,
+  onPress,
 }: {
   receipt: Receipt;
   size?: number;
+  onPress?: () => void;
 }) {
   const isImage = receipt.mimeType.startsWith("image/");
   const isPdf = receipt.mimeType === "application/pdf";
@@ -22,13 +24,29 @@ export function ReceiptThumb({
     query: { enabled: isImage, staleTime: 60_000 },
   });
 
+  const Wrapper: React.ComponentType<{ children: React.ReactNode }> = onPress
+    ? ({ children }) => (
+        <Pressable
+          onPress={onPress}
+          style={({ pressed }) => [
+            styles.wrap,
+            { width: size, height: size, borderRadius: 12 },
+            pressed && { opacity: 0.7 },
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel={`Open receipt ${receipt.filename}`}
+        >
+          {children}
+        </Pressable>
+      )
+    : ({ children }) => (
+        <View style={[styles.wrap, { width: size, height: size, borderRadius: 12 }]}>
+          {children}
+        </View>
+      );
+
   return (
-    <View
-      style={[
-        styles.wrap,
-        { width: size, height: size, borderRadius: 12 },
-      ]}
-    >
+    <Wrapper>
       {isImage && data?.downloadURL ? (
         <Image
           source={{ uri: data.downloadURL }}
@@ -50,7 +68,7 @@ export function ReceiptThumb({
           <Feather name="paperclip" size={22} color={HT.ink4} />
         </View>
       )}
-    </View>
+    </Wrapper>
   );
 }
 

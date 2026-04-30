@@ -41,3 +41,38 @@ export function confirmAction(opts: {
     },
   ]);
 }
+
+/**
+ * Promise-based variant. Resolves true if confirmed, false otherwise.
+ */
+export function confirmAsync(opts: {
+  title: string;
+  message?: string;
+  confirmText?: string;
+  cancelText?: string;
+  destructive?: boolean;
+}): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const {
+      title,
+      message,
+      confirmText = "Confirm",
+      cancelText = "Cancel",
+      destructive,
+    } = opts;
+    if (Platform.OS === "web") {
+      const text = message ? `${title}\n\n${message}` : title;
+      const ok = typeof window !== "undefined" ? window.confirm(text) : false;
+      resolve(ok);
+      return;
+    }
+    Alert.alert(title, message, [
+      { text: cancelText, style: "cancel", onPress: () => resolve(false) },
+      {
+        text: confirmText,
+        style: destructive ? "destructive" : "default",
+        onPress: () => resolve(true),
+      },
+    ]);
+  });
+}

@@ -1,4 +1,5 @@
 import { Feather } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
   Pressable,
@@ -18,8 +19,11 @@ import { confirmAction } from "@/lib/confirm";
 
 export default function ProfileTab() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const { user, signOut } = useAuth();
   const [signingOut, setSigningOut] = useState(false);
+  const isManagerOrAdmin =
+    !!user?.role && (user.role.includes("Manager") || user.role.includes("Admin"));
 
   const initials = (user?.fullName ?? "U")
     .split(" ")
@@ -72,6 +76,19 @@ export default function ProfileTab() {
         <Row label="Department" value={user?.departmentName ?? "—"} />
         <Row label="Manager" value={user?.managerName ?? "—"} last />
       </Section>
+
+      {isManagerOrAdmin ? (
+        <Section title="Manager">
+          <Pressable
+            style={styles.linkRow}
+            onPress={() => router.push("/manager/delegations" as never)}
+          >
+            <Feather name="user-check" size={18} color={HT.navy} />
+            <Text style={styles.linkText}>Approval delegation</Text>
+            <Feather name="chevron-right" size={18} color={HT.ink4} />
+          </Pressable>
+        </Section>
+      ) : null}
 
       <Section title="Help">
         <Pressable style={styles.linkRow} onPress={() => {}}>

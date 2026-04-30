@@ -57,6 +57,7 @@
   },
   "dependencies": {
     "expo-camera": "^17.0.10",
+    "expo-document-picker": "^55.0.13",
     "expo-secure-store": "^15.0.8"
   }
 }

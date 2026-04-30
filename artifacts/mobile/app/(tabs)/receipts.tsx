@@ -1,15 +1,18 @@
 import { Feather } from "@expo/vector-icons";
 import {
   type ExpenseReportSummary,
+  type Receipt,
+  useListReceipts,
   useListReports,
 } from "@workspace/api-client-react";
 import { useRouter } from "expo-router";
-import React, { useCallback, useMemo } from "react";
+import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
   Pressable,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -18,24 +21,28 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BrandLockup } from "@/components/ui/BrandHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { PrimaryButton } from "@/components/ui/PrimaryButton";
 import { Money } from "@/components/ui/Money";
+import { PrimaryButton } from "@/components/ui/PrimaryButton";
+import { ReceiptThumb } from "@/components/ui/ReceiptThumb";
+import { ReceiptViewer } from "@/components/ui/ReceiptViewer";
+import { StatusPill } from "@/components/ui/StatusPill";
 import { HT } from "@/constants/colors";
+import { isEditable } from "@/constants/status";
 
 export default function ReceiptsTab() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const query = useListReports({ scope: "mine" }, { query: { staleTime: 10_000 } });
-
-  const editableReports = useMemo(() => {
-    return (query.data ?? []).filter(
-      (r) => r.status === "Draft" || r.status === "Changes Requested",
-    );
-  }, [query.data]);
+  const [viewer, setViewer] = useState<Receipt | null>(null);
 
   const onRefresh = useCallback(() => {
     query.refetch();
   }, [query]);
+
+  // Show reports that have at least one receipt OR are editable (so user can attach)
+  const reportsWithReceipts = (query.data ?? []).filter(
+    (r) => r.receiptCount > 0 || isEditable(r.status),
+  );
 
   return (
     <View style={styles.root}>
@@ -43,9 +50,9 @@ export default function ReceiptsTab() {
         <View style={styles.headerRow}>
           <BrandLockup size={32} />
         </View>
-        <Text style={styles.h1}>Capture a receipt</Text>
+        <Text style={styles.h1}>Receipts</Text>
         <Text style={styles.h1Sub}>
-          Pick the report you want to attach to. You can also add a receipt from inside any line item.
+          Tap any thumbnail to view it. Use Capture to add new receipts to a Draft or Changes Requested report.
         </Text>
       </View>
 
@@ -70,7 +77,7 @@ export default function ReceiptsTab() {
         </View>
       ) : (
         <FlatList
-          data={editableReports}
+          data={reportsWithReceipts}
           keyExtractor={(r) => r.id}
           contentContainerStyle={{
             paddingHorizontal: 12,
@@ -78,18 +85,19 @@ export default function ReceiptsTab() {
             paddingTop: 8,
           }}
           renderItem={({ item }) => (
-            <ReportCaptureRow
+            <ReportReceiptsCard
               item={item}
               onCapture={() => router.push(`/report/${item.id}/capture`)}
               onOpen={() => router.push(`/report/${item.id}`)}
+              onPickReceipt={setViewer}
             />
           )}
-          ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
+          ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
           ListEmptyComponent={
             <EmptyState
               icon="image"
-              title="No editable reports"
-              body="Receipts can only be attached to Draft or Changes Requested reports. Start a new report to capture a receipt."
+              title="No receipts yet"
+              body="Receipts you capture or upload will show here, grouped by report."
             />
           }
           refreshControl={
@@ -101,39 +109,89 @@ export default function ReceiptsTab() {
           }
         />
       )}
+
+      <ReceiptViewer
+        receipt={viewer}
+        visible={viewer !== null}
+        onClose={() => setViewer(null)}
+      />
     </View>
   );
 }
 
-function ReportCaptureRow({
+function ReportReceiptsCard({
   item,
   onCapture,
   onOpen,
+  onPickReceipt,
 }: {
   item: ExpenseReportSummary;
   onCapture: () => void;
   onOpen: () => void;
+  onPickReceipt: (r: Receipt) => void;
 }) {
+  const editable = isEditable(item.status);
+  const receiptsQ = useListReceipts(item.id, {
+    query: {
+      enabled: item.receiptCount > 0,
+      staleTime: 30_000,
+    },
+  });
+
   return (
     <View style={styles.card}>
       <Pressable
         onPress={onOpen}
-        style={({ pressed }) => [{ flex: 1 }, pressed && { opacity: 0.7 }]}
+        style={({ pressed }) => [styles.cardHead, pressed && { opacity: 0.7 }]}
       >
-        <Text style={styles.code}>{item.displayCode}</Text>
-        <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
-        <Text style={styles.meta}>
-          {item.receiptCount} receipt{item.receiptCount === 1 ? "" : "s"} ·{" "}
-          <Money value={item.total} size={12} weight="500" style={{ color: HT.ink3 }} />
-        </Text>
+        <View style={{ flex: 1 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <Text style={styles.code}>{item.displayCode}</Text>
+            <StatusPill status={item.status} size="sm" />
+          </View>
+          <Text style={styles.title} numberOfLines={1}>
+            {item.title}
+          </Text>
+          <Text style={styles.meta}>
+            {item.receiptCount} receipt{item.receiptCount === 1 ? "" : "s"} ·{" "}
+            <Money value={item.total} size={12} weight="500" style={{ color: HT.ink3 }} />
+          </Text>
+        </View>
+        <Feather name="chevron-right" size={18} color={HT.ink4} />
       </Pressable>
-      <Pressable
-        onPress={onCapture}
-        style={({ pressed }) => [styles.captureBtn, pressed && { opacity: 0.85 }]}
-      >
-        <Feather name="camera" size={18} color="#FFFFFF" />
-        <Text style={styles.captureBtnText}>Capture</Text>
-      </Pressable>
+
+      {item.receiptCount > 0 ? (
+        receiptsQ.isLoading ? (
+          <View style={styles.thumbLoading}>
+            <ActivityIndicator color={HT.navy} size="small" />
+          </View>
+        ) : (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.thumbStrip}
+          >
+            {(receiptsQ.data ?? []).map((r) => (
+              <ReceiptThumb
+                key={r.id}
+                receipt={r}
+                size={72}
+                onPress={() => onPickReceipt(r)}
+              />
+            ))}
+          </ScrollView>
+        )
+      ) : null}
+
+      {editable ? (
+        <Pressable
+          onPress={onCapture}
+          style={({ pressed }) => [styles.captureBtn, pressed && { opacity: 0.85 }]}
+        >
+          <Feather name="camera" size={16} color="#FFFFFF" />
+          <Text style={styles.captureBtnText}>Capture receipt</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -152,14 +210,17 @@ const styles = StyleSheet.create({
   },
   loading: { flex: 1, alignItems: "center", justifyContent: "center" },
   card: {
-    flexDirection: "row",
-    alignItems: "center",
     backgroundColor: HT.surface,
     borderRadius: 14,
-    padding: 14,
-    gap: 12,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: HT.border,
+    overflow: "hidden",
+  },
+  cardHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 14,
+    gap: 8,
   },
   code: {
     fontFamily: "Inter_700Bold",
@@ -167,16 +228,26 @@ const styles = StyleSheet.create({
     color: HT.teal,
     letterSpacing: 0.4,
   },
-  title: { fontFamily: "Inter_600SemiBold", fontSize: 16, color: HT.ink, marginTop: 2 },
+  title: { fontFamily: "Inter_600SemiBold", fontSize: 15, color: HT.ink, marginTop: 4 },
   meta: { fontFamily: "Inter_500Medium", fontSize: 12, color: HT.ink3, marginTop: 4 },
+  thumbStrip: {
+    paddingHorizontal: 14,
+    paddingBottom: 12,
+    gap: 8,
+  },
+  thumbLoading: {
+    paddingVertical: 18,
+    alignItems: "center",
+  },
   captureBtn: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
     gap: 6,
-    paddingHorizontal: 14,
+    margin: 12,
     paddingVertical: 10,
-    borderRadius: 12,
+    borderRadius: 10,
     backgroundColor: HT.navy,
   },
-  captureBtnText: { color: "#FFFFFF", fontFamily: "Inter_600SemiBold", fontSize: 14 },
+  captureBtnText: { color: "#FFFFFF", fontFamily: "Inter_600SemiBold", fontSize: 13 },
 });
