@@ -265,12 +265,15 @@ export function UsersPage() {
             </div>
             <div className="space-y-2">
               <Label>Manager (Optional)</Label>
-              <Select value={managerId} onValueChange={setManagerId}>
+              <Select
+                value={managerId || "none"}
+                onValueChange={(v) => setManagerId(v === "none" ? "" : v)}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select Manager" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">None</SelectItem>
+                  <SelectItem value="none">None</SelectItem>
                   {managers.map(m => (
                     <SelectItem key={m.id} value={m.id}>{m.fullName}</SelectItem>
                   ))}
@@ -324,12 +327,15 @@ export function UsersPage() {
             </div>
             <div className="space-y-2">
               <Label>Manager (Optional)</Label>
-              <Select value={managerId} onValueChange={setManagerId}>
+              <Select
+                value={managerId || "none"}
+                onValueChange={(v) => setManagerId(v === "none" ? "" : v)}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select Manager" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">None</SelectItem>
+                  <SelectItem value="none">None</SelectItem>
                   {managers.map(m => (
                     <SelectItem key={m.id} value={m.id}>{m.fullName}</SelectItem>
                   ))}
