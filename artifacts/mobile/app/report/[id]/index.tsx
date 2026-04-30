@@ -17,6 +17,7 @@ import {
   useSubmitReport,
   useVoidReport,
 } from "@workspace/api-client-react";
+import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
@@ -149,11 +150,19 @@ export default function ReportDetailScreen() {
         }
         await reqChanges.mutateAsync({ id, data });
       }
+      Haptics.notificationAsync(
+        kind === "reject"
+          ? Haptics.NotificationFeedbackType.Warning
+          : Haptics.NotificationFeedbackType.Success,
+      ).catch(() => {});
       setActionModal(null);
       setActionComment("");
       reportQ.refetch();
       timelineQ.refetch();
     } catch (err) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(
+        () => {},
+      );
       setActionError(
         err instanceof ApiError
           ? err.message
@@ -167,9 +176,15 @@ export default function ReportDetailScreen() {
   const onSubmit = async () => {
     try {
       await submit.mutateAsync({ id });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+        () => {},
+      );
       reportQ.refetch();
       timelineQ.refetch();
     } catch (err) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(
+        () => {},
+      );
       showError("Couldn't submit", err instanceof Error ? err.message : "Submission failed.");
     }
   };
