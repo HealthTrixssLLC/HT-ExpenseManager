@@ -1,6 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import {
   type ExpenseReportSummary,
+  getManagerQueueQueryKey,
   useManagerQueue,
 } from "@workspace/api-client-react";
 import { useRouter } from "expo-router";
@@ -26,7 +27,9 @@ import { HT } from "@/constants/colors";
 export default function InboxTab() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const query = useManagerQueue({ query: { staleTime: 10_000 } });
+  const query = useManagerQueue({
+    query: { staleTime: 10_000, queryKey: getManagerQueueQueryKey() },
+  });
 
   const onRefresh = useCallback(() => {
     query.refetch();

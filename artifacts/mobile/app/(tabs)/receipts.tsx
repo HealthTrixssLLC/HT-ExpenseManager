@@ -2,6 +2,8 @@ import { Feather } from "@expo/vector-icons";
 import {
   type ExpenseReportSummary,
   type Receipt,
+  getListReceiptsQueryKey,
+  getListReportsQueryKey,
   useListReceipts,
   useListReports,
 } from "@workspace/api-client-react";
@@ -32,7 +34,15 @@ import { isEditable } from "@/constants/status";
 export default function ReceiptsTab() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const query = useListReports({ scope: "mine" }, { query: { staleTime: 10_000 } });
+  const query = useListReports(
+    { scope: "mine" },
+    {
+      query: {
+        staleTime: 10_000,
+        queryKey: getListReportsQueryKey({ scope: "mine" }),
+      },
+    },
+  );
   const [viewer, setViewer] = useState<Receipt | null>(null);
 
   const onRefresh = useCallback(() => {
@@ -135,6 +145,7 @@ function ReportReceiptsCard({
     query: {
       enabled: item.receiptCount > 0,
       staleTime: 30_000,
+      queryKey: getListReceiptsQueryKey(item.id),
     },
   });
 

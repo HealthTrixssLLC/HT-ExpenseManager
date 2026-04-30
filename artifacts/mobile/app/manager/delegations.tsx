@@ -72,28 +72,31 @@ export default function ManagerDelegationsScreen() {
   const revokeMut = useAdminRevokeDelegation();
 
   const [showAdd, setShowAdd] = useState(false);
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState<null | "from" | "to">(null);
+  const [fromManagerId, setFromManagerId] = useState<string | null>(null);
   const [toManagerId, setToManagerId] = useState<string | null>(null);
   const [startsAt, setStartsAt] = useState<string>(todayIso());
   const [endsAt, setEndsAt] = useState<string>("");
   const [formError, setFormError] = useState<string | null>(null);
 
-  const isAdmin = me?.role?.includes("Admin") ?? false;
+  const isAdmin = me?.role === "System Admin";
 
-  const myDelegations = useMemo(() => {
-    const all = delegationsQ.data ?? [];
-    if (isAdmin) return all;
-    if (!me) return [];
-    return all.filter((d) => d.fromManagerId === me.id);
-  }, [delegationsQ.data, isAdmin, me]);
+  const allDelegations = useMemo(() => delegationsQ.data ?? [], [delegationsQ.data]);
 
-  const managers = useMemo(() => {
-    return (managersQ.data ?? []).filter((m) => m.id !== me?.id);
-  }, [managersQ.data, me]);
+  const allManagers = useMemo(() => managersQ.data ?? [], [managersQ.data]);
+  const toCandidates = useMemo(
+    () => allManagers.filter((m) => m.id !== fromManagerId),
+    [allManagers, fromManagerId],
+  );
 
-  const selectedManager = managers.find((m) => m.id === toManagerId) ?? null;
+  const selectedFrom = allManagers.find((m) => m.id === fromManagerId) ?? null;
+  const selectedTo = allManagers.find((m) => m.id === toManagerId) ?? null;
 
   const submit = () => {
+    if (!fromManagerId) {
+      setFormError("Pick the manager whose queue is being delegated.");
+      return;
+    }
     if (!toManagerId) {
       setFormError("Pick a manager to delegate to.");
       return;
@@ -110,7 +113,7 @@ export default function ManagerDelegationsScreen() {
     createMut.mutate(
       {
         data: {
-          fromManagerId: me!.id,
+          fromManagerId,
           toManagerId,
           startsAt: new Date(startsAt + "T00:00:00").toISOString(),
           endsAt: new Date(endsAt + "T23:59:59").toISOString(),
@@ -120,6 +123,7 @@ export default function ManagerDelegationsScreen() {
         onSuccess: () => {
           qc.invalidateQueries({ queryKey: getAdminListDelegationsQueryKey() });
           setShowAdd(false);
+          setFromManagerId(null);
           setToManagerId(null);
           setStartsAt(todayIso());
           setEndsAt("");
@@ -173,22 +177,30 @@ export default function ManagerDelegationsScreen() {
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 32 }}>
         <Text style={styles.subtitle}>
-          Temporarily route your approval queue to another manager while you're away.
+          Route a manager's approval queue to another manager while they're away.
         </Text>
 
-        <Section title={isAdmin ? "All delegations" : "Your delegations"}>
+        {!isAdmin ? (
+          <EmptyState
+            icon="lock"
+            title="Admin only"
+            body="Only System Admins can manage approval delegations."
+          />
+        ) : null}
+
+        <Section title="All delegations">
           {delegationsQ.isLoading ? (
             <View style={{ padding: 20, alignItems: "center" }}>
               <ActivityIndicator color={HT.navy} />
             </View>
-          ) : myDelegations.length === 0 ? (
+          ) : allDelegations.length === 0 ? (
             <EmptyState
               icon="user-check"
               title="No delegations"
-              body="Tap + above to delegate your approval queue."
+              body="Tap + above to delegate a manager's approval queue."
             />
           ) : (
-            myDelegations.map((d, idx) => {
+            allDelegations.map((d, idx) => {
               const active = isActive(d);
               return (
                 <View
@@ -226,11 +238,9 @@ export default function ManagerDelegationsScreen() {
                         </Text>
                       </View>
                     </View>
-                    {isAdmin ? (
-                      <Text style={styles.delegationFrom}>
-                        from {d.fromManagerName}
-                      </Text>
-                    ) : null}
+                    <Text style={styles.delegationFrom}>
+                      from {d.fromManagerName}
+                    </Text>
                     <Text style={styles.delegationDates}>
                       {formatDate(d.startsAt)} → {formatDate(d.endsAt)}
                     </Text>
@@ -269,15 +279,28 @@ export default function ManagerDelegationsScreen() {
             <View style={styles.modalHandle} />
             <Text style={styles.modalTitle}>New delegation</Text>
 
-            <Text style={styles.fieldLabel}>Delegate to</Text>
-            <Pressable onPress={() => setPickerOpen(true)} style={styles.pickerBtn}>
+            <Text style={styles.fieldLabel}>Delegate from</Text>
+            <Pressable onPress={() => setPickerOpen("from")} style={styles.pickerBtn}>
               <Text
                 style={[
                   styles.pickerBtnText,
-                  !selectedManager && { color: HT.ink4 },
+                  !selectedFrom && { color: HT.ink4 },
                 ]}
               >
-                {selectedManager?.fullName ?? "Select manager"}
+                {selectedFrom?.fullName ?? "Select manager"}
+              </Text>
+              <Feather name="chevron-down" size={18} color={HT.ink3} />
+            </Pressable>
+
+            <Text style={styles.fieldLabel}>Delegate to</Text>
+            <Pressable onPress={() => setPickerOpen("to")} style={styles.pickerBtn}>
+              <Text
+                style={[
+                  styles.pickerBtnText,
+                  !selectedTo && { color: HT.ink4 },
+                ]}
+              >
+                {selectedTo?.fullName ?? "Select manager"}
               </Text>
               <Feather name="chevron-down" size={18} color={HT.ink3} />
             </Pressable>
@@ -329,32 +352,47 @@ export default function ManagerDelegationsScreen() {
 
       {/* Manager picker */}
       <Modal
-        visible={pickerOpen}
+        visible={pickerOpen !== null}
         transparent
         animationType="fade"
-        onRequestClose={() => setPickerOpen(false)}
+        onRequestClose={() => setPickerOpen(null)}
       >
-        <Pressable style={styles.modalBackdrop} onPress={() => setPickerOpen(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setPickerOpen(null)}>
           <Pressable
             style={[styles.pickerSheet, { paddingBottom: insets.bottom + 12 }]}
             onPress={(e) => e.stopPropagation()}
           >
             <View style={styles.modalHandle} />
-            <Text style={styles.modalTitle}>Select manager</Text>
+            <Text style={styles.modalTitle}>
+              {pickerOpen === "from" ? "Delegate from" : "Delegate to"}
+            </Text>
             <ScrollView style={{ maxHeight: 320 }}>
-              {managers.length === 0 ? (
-                <Text style={styles.emptyText}>No other managers in your org.</Text>
-              ) : (
-                managers.map((m) => (
+              {(() => {
+                const list = pickerOpen === "from" ? allManagers : toCandidates;
+                const selectedId =
+                  pickerOpen === "from" ? fromManagerId : toManagerId;
+                if (list.length === 0) {
+                  return (
+                    <Text style={styles.emptyText}>
+                      No managers available.
+                    </Text>
+                  );
+                }
+                return list.map((m) => (
                   <Pressable
                     key={m.id}
                     onPress={() => {
-                      setToManagerId(m.id);
-                      setPickerOpen(false);
+                      if (pickerOpen === "from") {
+                        setFromManagerId(m.id);
+                        if (toManagerId === m.id) setToManagerId(null);
+                      } else {
+                        setToManagerId(m.id);
+                      }
+                      setPickerOpen(null);
                     }}
                     style={({ pressed }) => [
                       styles.pickerRow,
-                      toManagerId === m.id && { backgroundColor: HT.tintNavy },
+                      selectedId === m.id && { backgroundColor: HT.tintNavy },
                       pressed && { opacity: 0.7 },
                     ]}
                   >
@@ -362,12 +400,12 @@ export default function ManagerDelegationsScreen() {
                       <Text style={styles.pickerRowName}>{m.fullName}</Text>
                       <Text style={styles.pickerRowSub}>{m.email}</Text>
                     </View>
-                    {toManagerId === m.id ? (
+                    {selectedId === m.id ? (
                       <Feather name="check" size={18} color={HT.navy} />
                     ) : null}
                   </Pressable>
-                ))
-              )}
+                ));
+              })()}
             </ScrollView>
           </Pressable>
         </Pressable>

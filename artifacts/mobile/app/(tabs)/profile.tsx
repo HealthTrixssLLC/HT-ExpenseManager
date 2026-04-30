@@ -22,8 +22,7 @@ export default function ProfileTab() {
   const router = useRouter();
   const { user, signOut } = useAuth();
   const [signingOut, setSigningOut] = useState(false);
-  const isManagerOrAdmin =
-    !!user?.role && (user.role.includes("Manager") || user.role.includes("Admin"));
+  const isSysAdmin = user?.role === "System Admin";
 
   const initials = (user?.fullName ?? "U")
     .split(" ")
@@ -77,8 +76,8 @@ export default function ProfileTab() {
         <Row label="Manager" value={user?.managerName ?? "—"} last />
       </Section>
 
-      {isManagerOrAdmin ? (
-        <Section title="Manager">
+      {isSysAdmin ? (
+        <Section title="Admin">
           <Pressable
             style={styles.linkRow}
             onPress={() => router.push("/manager/delegations" as never)}

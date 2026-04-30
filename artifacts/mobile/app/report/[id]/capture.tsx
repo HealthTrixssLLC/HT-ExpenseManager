@@ -2,6 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import {
   ApiError,
   type LineItem,
+  getGetReportQueryKey,
   useGetReport,
   useRegisterReceipt,
   useRequestUploadUrl,
@@ -80,7 +81,9 @@ export default function CaptureScreen() {
   const router = useRouter();
   const cameraRef = useRef<CameraView | null>(null);
 
-  const reportQ = useGetReport(id, { query: { enabled: !!id } });
+  const reportQ = useGetReport(id, {
+    query: { enabled: !!id, queryKey: getGetReportQueryKey(id) },
+  });
   const uploadUrlMutation = useRequestUploadUrl();
   const registerMutation = useRegisterReceipt();
 

@@ -1,5 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import {
+  getGetReceiptDownloadUrlQueryKey,
   type Receipt,
   useGetReceiptDownloadUrl,
 } from "@workspace/api-client-react";
@@ -21,7 +22,11 @@ export function ReceiptThumb({
   const isImage = receipt.mimeType.startsWith("image/");
   const isPdf = receipt.mimeType === "application/pdf";
   const { data, isLoading, isError } = useGetReceiptDownloadUrl(receipt.id, {
-    query: { enabled: isImage, staleTime: 60_000 },
+    query: {
+      enabled: isImage,
+      staleTime: 60_000,
+      queryKey: getGetReceiptDownloadUrlQueryKey(receipt.id),
+    },
   });
 
   const Wrapper: React.ComponentType<{ children: React.ReactNode }> = onPress

@@ -1,6 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import {
   type ExpenseReportSummary,
+  getListReportsQueryKey,
   useListReports,
 } from "@workspace/api-client-react";
 import { useRouter } from "expo-router";
@@ -34,7 +35,12 @@ export default function ReportsTab() {
 
   const query = useListReports(
     { scope: "mine" },
-    { query: { staleTime: 10_000 } },
+    {
+      query: {
+        staleTime: 10_000,
+        queryKey: getListReportsQueryKey({ scope: "mine" }),
+      },
+    },
   );
 
   const filtered = useMemo(() => {

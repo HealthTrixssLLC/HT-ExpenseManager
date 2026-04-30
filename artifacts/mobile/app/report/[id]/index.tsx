@@ -3,6 +3,8 @@ import {
   ApiError,
   type ExpenseReport,
   type LineItem,
+  getGetReportQueryKey,
+  getGetReportTimelineQueryKey,
   useDeleteLineItem,
   useDeleteReport,
   useGetReport,
@@ -59,8 +61,16 @@ export default function ReportDetailScreen() {
   const router = useRouter();
   const { user } = useAuth();
 
-  const reportQ = useGetReport(id, { query: { enabled: !!id, staleTime: 5_000 } });
-  const timelineQ = useGetReportTimeline(id, { query: { enabled: !!id } });
+  const reportQ = useGetReport(id, {
+    query: {
+      enabled: !!id,
+      staleTime: 5_000,
+      queryKey: getGetReportQueryKey(id),
+    },
+  });
+  const timelineQ = useGetReportTimeline(id, {
+    query: { enabled: !!id, queryKey: getGetReportTimelineQueryKey(id) },
+  });
 
   const submit = useSubmitReport();
   const recall = useRecallReport();
