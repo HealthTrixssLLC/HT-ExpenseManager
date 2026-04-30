@@ -1,4 +1,6 @@
-// Zod schemas (validators). These are the runtime exports the server uses.
+export * from "./generated/api";
+export * from "./generated/types";
+r uses.
 // The names also act as TS types when used with `z.infer<typeof X>` or directly
 // (zod schemas have an inferred output type).
 export * from "./generated/api";
