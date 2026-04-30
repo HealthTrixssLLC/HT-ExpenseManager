@@ -45,6 +45,7 @@ export default function AddLineScreen() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(
     PaymentMethod.Personal_Card,
   );
+  const [attachReceipt, setAttachReceipt] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const categoriesQ = useListCategories();
@@ -64,7 +65,7 @@ export default function AddLineScreen() {
       return setError("Date must be YYYY-MM-DD.");
 
     try {
-      await create.mutateAsync({
+      const created = await create.mutateAsync({
         id,
         data: {
           merchant: merchant.trim(),
@@ -75,7 +76,14 @@ export default function AddLineScreen() {
           paymentMethod,
         },
       });
-      router.back();
+      if (attachReceipt && created?.id) {
+        router.replace({
+          pathname: "/report/[id]/capture",
+          params: { id, lineId: created.id },
+        });
+      } else {
+        router.back();
+      }
     } catch (err) {
       setError(
         err instanceof ApiError
@@ -180,6 +188,34 @@ export default function AddLineScreen() {
           })}
         </View>
 
+        <Pressable
+          onPress={() => setAttachReceipt((v) => !v)}
+          style={({ pressed }) => [
+            styles.toggleRow,
+            pressed && { backgroundColor: HT.surfaceAlt },
+          ]}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={styles.toggleTitle}>Attach a receipt next</Text>
+            <Text style={styles.toggleSub}>
+              Open the camera after saving so you can capture or pick a receipt for this line.
+            </Text>
+          </View>
+          <View
+            style={[
+              styles.toggleBox,
+              attachReceipt && {
+                backgroundColor: HT.navy,
+                borderColor: HT.navy,
+              },
+            ]}
+          >
+            {attachReceipt ? (
+              <Feather name="check" size={14} color="#FFFFFF" />
+            ) : null}
+          </View>
+        </Pressable>
+
         <Text style={[styles.label, { marginTop: 18 }]}>Notes (optional)</Text>
         <TextInput
           value={description}
@@ -195,8 +231,8 @@ export default function AddLineScreen() {
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}>
         <PrimaryButton
-          title="Add line item"
-          icon="plus"
+          title={attachReceipt ? "Save & add receipt" : "Add line item"}
+          icon={attachReceipt ? "camera" : "plus"}
           fullWidth
           size="lg"
           loading={create.isPending}
@@ -247,6 +283,39 @@ const styles = StyleSheet.create({
     backgroundColor: HT.surface,
   },
   chipText: { fontFamily: "Inter_600SemiBold", fontSize: 13, color: HT.ink2 },
+  toggleRow: {
+    marginTop: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: HT.surface,
+    borderWidth: 1,
+    borderColor: HT.border,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  toggleTitle: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 15,
+    color: HT.ink,
+  },
+  toggleSub: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 12,
+    color: HT.ink3,
+    marginTop: 2,
+  },
+  toggleBox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: HT.borderStrong,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: HT.surface,
+  },
   error: { color: HT.danger, fontFamily: "Inter_500Medium", marginTop: 16 },
   footer: {
     paddingHorizontal: 16,

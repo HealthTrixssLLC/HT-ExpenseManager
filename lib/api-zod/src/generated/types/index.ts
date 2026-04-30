@@ -59,6 +59,7 @@ export * from "./updateGlMappingBody";
 export * from "./updateLineItemBody";
 export * from "./updateQboConnectionBody";
 export * from "./updateQboConnectionBodyAction";
+export * from "./updateReceiptBody";
 export * from "./updateReportBody";
 export * from "./updateUserBody";
 export * from "./user";

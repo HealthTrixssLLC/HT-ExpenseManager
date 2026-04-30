@@ -76,7 +76,10 @@ function pickAlert(title: string, body: string) {
 }
 
 export default function CaptureScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, lineId: preselectLineId } = useLocalSearchParams<{
+    id: string;
+    lineId?: string;
+  }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const cameraRef = useRef<CameraView | null>(null);
@@ -205,7 +208,7 @@ export default function CaptureScreen() {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         status: "queued",
         progress: 0,
-        lineItemId: null,
+        lineItemId: preselectLineId ?? null,
         attempts: 0,
       },
     ]);

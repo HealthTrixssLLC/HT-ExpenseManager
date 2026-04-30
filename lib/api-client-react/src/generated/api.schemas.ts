@@ -413,6 +413,15 @@ export interface RegisterReceiptBody {
   lineItemId?: string | null;
 }
 
+/**
+ * Update mutable receipt metadata. Only `lineItemId` is currently supported — pass a line ID on the same report to attach, or `null` to detach. Receipts can only be updated while the parent report is editable (Draft or Changes Requested).
+
+ */
+export interface UpdateReceiptBody {
+  /** @nullable */
+  lineItemId: string | null;
+}
+
 export interface RequestUploadUrlBody {
   /** Owning report */
   reportId: string;

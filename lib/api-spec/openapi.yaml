@@ -744,6 +744,36 @@ paths:
         name: id
         required: true
         schema: { type: string, format: uuid }
+    patch:
+      operationId: updateReceipt
+      tags: [receipts]
+      summary: Update receipt metadata (currently only line item attachment)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateReceiptBody" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Receipt" }
+        "400":
+          description: Invalid update (line not on this report, etc.)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "403":
+          description: Caller cannot edit this receipt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "404":
+          description: Receipt not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
     delete:
       operationId: deleteReceipt
       tags: [receipts]
@@ -1529,6 +1559,17 @@ components:
         sizeBytes: { type: integer }
         lineItemId: { type: ["string", "null"], format: uuid }
       required: [objectPath, filename, mimeType, sizeBytes]
+
+    UpdateReceiptBody:
+      type: object
+      description: >
+        Update mutable receipt metadata. Only `lineItemId` is currently
+        supported — pass a line ID on the same report to attach, or `null`
+        to detach. Receipts can only be updated while the parent report is
+        editable (Draft or Changes Requested).
+      properties:
+        lineItemId: { type: ["string", "null"], format: uuid }
+      required: [lineItemId]
 
     RequestUploadUrlBody:
       type: object

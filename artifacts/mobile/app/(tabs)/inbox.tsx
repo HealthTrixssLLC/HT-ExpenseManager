@@ -5,7 +5,7 @@ import {
   useManagerQueue,
 } from "@workspace/api-client-react";
 import { useRouter } from "expo-router";
-import React, { useCallback } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -24,9 +24,18 @@ import { PrimaryButton } from "@/components/ui/PrimaryButton";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { HT } from "@/constants/colors";
 
+type SortMode = "aging" | "newest" | "amount";
+
+const SORTS: { id: SortMode; label: string; icon: keyof typeof Feather.glyphMap }[] = [
+  { id: "aging", label: "Oldest", icon: "clock" },
+  { id: "newest", label: "Newest", icon: "calendar" },
+  { id: "amount", label: "Amount", icon: "dollar-sign" },
+];
+
 export default function InboxTab() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const [sortMode, setSortMode] = useState<SortMode>("aging");
   const query = useManagerQueue({
     query: { staleTime: 10_000, queryKey: getManagerQueueQueryKey() },
   });
@@ -34,6 +43,22 @@ export default function InboxTab() {
   const onRefresh = useCallback(() => {
     query.refetch();
   }, [query]);
+
+  const sortedData = useMemo(() => {
+    const arr = [...(query.data ?? [])];
+    if (sortMode === "aging") {
+      arr.sort((a, b) => b.ageDays - a.ageDays);
+    } else if (sortMode === "newest") {
+      arr.sort(
+        (a, b) =>
+          new Date(b.submittedAt ?? b.updatedAt).getTime() -
+          new Date(a.submittedAt ?? a.updatedAt).getTime(),
+      );
+    } else {
+      arr.sort((a, b) => Number(b.total) - Number(a.total));
+    }
+    return arr;
+  }, [query.data, sortMode]);
 
   return (
     <View style={styles.root}>
@@ -50,6 +75,43 @@ export default function InboxTab() {
         <Text style={styles.h1Sub}>
           Reports waiting on your approval. Tap a report to review line items, receipts, and approve.
         </Text>
+
+        <View style={styles.sortRow}>
+          <Text style={styles.sortLabel}>Sort by</Text>
+          <View style={styles.sortChips}>
+            {SORTS.map((s) => {
+              const sel = sortMode === s.id;
+              return (
+                <Pressable
+                  key={s.id}
+                  onPress={() => setSortMode(s.id)}
+                  style={({ pressed }) => [
+                    styles.sortChip,
+                    sel && {
+                      backgroundColor: HT.tintNavy,
+                      borderColor: HT.navy,
+                    },
+                    pressed && !sel && { backgroundColor: HT.surfaceAlt },
+                  ]}
+                >
+                  <Feather
+                    name={s.icon}
+                    size={12}
+                    color={sel ? HT.navy : HT.ink3}
+                  />
+                  <Text
+                    style={[
+                      styles.sortChipText,
+                      sel && { color: HT.navy },
+                    ]}
+                  >
+                    {s.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
       </View>
 
       {query.isLoading ? (
@@ -73,7 +135,7 @@ export default function InboxTab() {
         </View>
       ) : (
         <FlatList
-          data={query.data ?? []}
+          data={sortedData}
           keyExtractor={(r) => r.id}
           contentContainerStyle={{
             paddingHorizontal: 12,
@@ -172,6 +234,27 @@ const styles = StyleSheet.create({
     marginTop: 4,
     lineHeight: 20,
   },
+  sortRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 12 },
+  sortLabel: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 11,
+    color: HT.ink3,
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+  },
+  sortChips: { flexDirection: "row", gap: 6, flex: 1, flexWrap: "wrap" },
+  sortChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: HT.borderStrong,
+    backgroundColor: HT.surface,
+  },
+  sortChipText: { fontFamily: "Inter_600SemiBold", fontSize: 12, color: HT.ink2 },
   loading: { flex: 1, alignItems: "center", justifyContent: "center" },
   card: {
     flexDirection: "row",

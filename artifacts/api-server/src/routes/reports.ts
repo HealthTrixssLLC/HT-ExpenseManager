@@ -16,6 +16,7 @@ import {
   ListReportsResponse,
   RegisterReceiptBody,
   UpdateLineItemBody,
+  UpdateReceiptBody,
   UpdateReportBody,
 } from "@workspace/api-zod";
 import { db, expenseReportsTable, lineItemsTable, receiptsTable, usersTable, approvalActionsTable } from "../lib/db";
@@ -686,6 +687,86 @@ router.post("/reports/:id/receipts", async (req, res): Promise<void> => {
       })
       .returning();
     res.status(201).json(toReceiptDto(receipt));
+  } catch (err) {
+    handle(res, err);
+  }
+});
+
+// PATCH /receipts/:id — update mutable receipt metadata. Today only the
+// `lineItemId` is mutable: pass a line ID on the same report to attach an
+// existing receipt to a specific line, or `null` to detach. Limited to the
+// report's employee while the parent report is editable (Draft / Changes
+// Requested) so it can't be used to mutate state mid-approval.
+router.patch("/receipts/:id", async (req, res): Promise<void> => {
+  try {
+    const id = pathId(req, "id");
+    const parsed = UpdateReceiptBody.safeParse(req.body);
+    if (!parsed.success) {
+      sendProblem(res, 400, "Invalid Body", parsed.error.message);
+      return;
+    }
+    const [receipt] = await db
+      .select()
+      .from(receiptsTable)
+      .where(
+        and(
+          eq(receiptsTable.id, id),
+          eq(receiptsTable.orgId, req.auth!.user.orgId),
+        ),
+      )
+      .limit(1);
+    if (!receipt) {
+      sendProblem(res, 404, "Not Found");
+      return;
+    }
+    if (!receipt.reportId) {
+      sendProblem(
+        res,
+        400,
+        "Invalid Receipt",
+        "Receipt is not associated with a report.",
+      );
+      return;
+    }
+    const report = await fetchReportOrThrow(
+      receipt.reportId,
+      req.auth!.user.orgId,
+    );
+    if (req.auth!.user.id !== report.employeeId) {
+      sendProblem(res, 403, "Forbidden");
+      return;
+    }
+    if (!EDITABLE_STATUSES.includes(report.status)) {
+      sendProblem(
+        res,
+        409,
+        "Not Editable",
+        "Receipt can only be re-attached while the report is editable.",
+      );
+      return;
+    }
+    if (parsed.data.lineItemId) {
+      const [line] = await db
+        .select()
+        .from(lineItemsTable)
+        .where(eq(lineItemsTable.id, parsed.data.lineItemId))
+        .limit(1);
+      if (!line || line.reportId !== report.id) {
+        sendProblem(
+          res,
+          400,
+          "Invalid Line Item",
+          "lineItemId does not belong to this report.",
+        );
+        return;
+      }
+    }
+    const [updated] = await db
+      .update(receiptsTable)
+      .set({ lineItemId: parsed.data.lineItemId ?? null })
+      .where(eq(receiptsTable.id, id))
+      .returning();
+    res.status(200).json(toReceiptDto(updated));
   } catch (err) {
     handle(res, err);
   }

@@ -1,16 +1,21 @@
 import { Feather } from "@expo/vector-icons";
 import {
+  type ExpenseReport,
   type ExpenseReportSummary,
   type Receipt,
+  getGetReportQueryKey,
   getListReceiptsQueryKey,
   getListReportsQueryKey,
+  useGetReport,
   useListReceipts,
   useListReports,
+  useUpdateReceipt,
 } from "@workspace/api-client-react";
 import { useRouter } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Pressable,
   RefreshControl,
@@ -43,11 +48,26 @@ export default function ReceiptsTab() {
       },
     },
   );
-  const [viewer, setViewer] = useState<Receipt | null>(null);
+  const [viewer, setViewer] = useState<{
+    receipt: Receipt;
+    reportId: string;
+    editable: boolean;
+  } | null>(null);
 
   const onRefresh = useCallback(() => {
     query.refetch();
   }, [query]);
+
+  // Lazily load lines for the active report so the viewer can offer attach/detach.
+  const activeReportQ = useGetReport(viewer?.reportId ?? "", {
+    query: {
+      enabled: !!viewer && viewer.editable,
+      staleTime: 30_000,
+      queryKey: getGetReportQueryKey(viewer?.reportId ?? ""),
+    },
+  });
+  const activeReport = activeReportQ.data as ExpenseReport | undefined;
+  const updateReceipt = useUpdateReceipt();
 
   // Show reports that have at least one receipt OR are editable (so user can attach)
   const reportsWithReceipts = (query.data ?? []).filter(
@@ -99,7 +119,13 @@ export default function ReceiptsTab() {
               item={item}
               onCapture={() => router.push(`/report/${item.id}/capture`)}
               onOpen={() => router.push(`/report/${item.id}`)}
-              onPickReceipt={setViewer}
+              onPickReceipt={(r) =>
+                setViewer({
+                  receipt: r,
+                  reportId: item.id,
+                  editable: isEditable(item.status),
+                })
+              }
             />
           )}
           ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
@@ -121,9 +147,42 @@ export default function ReceiptsTab() {
       )}
 
       <ReceiptViewer
-        receipt={viewer}
+        receipt={viewer?.receipt ?? null}
         visible={viewer !== null}
         onClose={() => setViewer(null)}
+        lines={viewer?.editable ? activeReport?.lineItems : undefined}
+        canEdit={!!viewer?.editable}
+        isMutating={updateReceipt.isPending}
+        onAttach={async (rcpt, lineId) => {
+          try {
+            const updated = await updateReceipt.mutateAsync({
+              id: rcpt.id,
+              data: { lineItemId: lineId },
+            });
+            setViewer((v) => (v ? { ...v, receipt: updated } : v));
+            if (viewer) activeReportQ.refetch();
+          } catch (err) {
+            Alert.alert(
+              "Couldn't attach receipt",
+              err instanceof Error ? err.message : "Please try again.",
+            );
+          }
+        }}
+        onDetach={async (rcpt) => {
+          try {
+            const updated = await updateReceipt.mutateAsync({
+              id: rcpt.id,
+              data: { lineItemId: null },
+            });
+            setViewer((v) => (v ? { ...v, receipt: updated } : v));
+            if (viewer) activeReportQ.refetch();
+          } catch (err) {
+            Alert.alert(
+              "Couldn't detach receipt",
+              err instanceof Error ? err.message : "Please try again.",
+            );
+          }
+        }}
       />
     </View>
   );

@@ -56,6 +56,7 @@ import type {
   RequestUploadUrlResponse,
   UpdateGlMappingBody,
   UpdateLineItemBody,
+  UpdateReceiptBody,
   UpdateReportBody,
   UpdateUserBody,
   User,
@@ -3615,6 +3616,93 @@ export const useRegisterReceipt = <
   TContext
 > => {
   return useMutation(getRegisterReceiptMutationOptions(options));
+};
+
+/**
+ * @summary Update receipt metadata (currently only line item attachment)
+ */
+export const getUpdateReceiptUrl = (id: string) => {
+  return `/api/receipts/${id}`;
+};
+
+export const updateReceipt = async (
+  id: string,
+  updateReceiptBody: UpdateReceiptBody,
+  options?: RequestInit,
+): Promise<Receipt> => {
+  return customFetch<Receipt>(getUpdateReceiptUrl(id), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateReceiptBody),
+  });
+};
+
+export const getUpdateReceiptMutationOptions = <
+  TError = ErrorType<Problem>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateReceipt>>,
+    TError,
+    { id: string; data: BodyType<UpdateReceiptBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateReceipt>>,
+  TError,
+  { id: string; data: BodyType<UpdateReceiptBody> },
+  TContext
+> => {
+  const mutationKey = ["updateReceipt"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateReceipt>>,
+    { id: string; data: BodyType<UpdateReceiptBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updateReceipt(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateReceiptMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateReceipt>>
+>;
+export type UpdateReceiptMutationBody = BodyType<UpdateReceiptBody>;
+export type UpdateReceiptMutationError = ErrorType<Problem>;
+
+/**
+ * @summary Update receipt metadata (currently only line item attachment)
+ */
+export const useUpdateReceipt = <
+  TError = ErrorType<Problem>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateReceipt>>,
+    TError,
+    { id: string; data: BodyType<UpdateReceiptBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateReceipt>>,
+  TError,
+  { id: string; data: BodyType<UpdateReceiptBody> },
+  TContext
+> => {
+  return useMutation(getUpdateReceiptMutationOptions(options));
 };
 
 export const getDeleteReceiptUrl = (id: string) => {

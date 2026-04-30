@@ -9,6 +9,7 @@ import {
   useDeleteReport,
   useGetReport,
   useGetReportTimeline,
+  useUpdateReceipt,
   useManagerApprove,
   useManagerReject,
   useManagerRequestChanges,
@@ -80,6 +81,7 @@ export default function ReportDetailScreen() {
   const reject = useManagerReject();
   const reqChanges = useManagerRequestChanges();
   const deleteLine = useDeleteLineItem();
+  const updateReceipt = useUpdateReceipt();
 
   const [actionModal, setActionModal] = useState<
     null | "approve" | "reject" | "changes"
@@ -612,6 +614,39 @@ export default function ReportDetailScreen() {
         receipt={viewerReceipt}
         visible={viewerReceipt !== null}
         onClose={() => setViewerReceipt(null)}
+        lines={editable ? report.lineItems : undefined}
+        canEdit={editable}
+        isMutating={updateReceipt.isPending}
+        onAttach={async (rcpt, lineId) => {
+          try {
+            const updated = await updateReceipt.mutateAsync({
+              id: rcpt.id,
+              data: { lineItemId: lineId },
+            });
+            setViewerReceipt(updated);
+            reportQ.refetch();
+          } catch (err) {
+            Alert.alert(
+              "Couldn't attach receipt",
+              err instanceof Error ? err.message : "Please try again.",
+            );
+          }
+        }}
+        onDetach={async (rcpt) => {
+          try {
+            const updated = await updateReceipt.mutateAsync({
+              id: rcpt.id,
+              data: { lineItemId: null },
+            });
+            setViewerReceipt(updated);
+            reportQ.refetch();
+          } catch (err) {
+            Alert.alert(
+              "Couldn't detach receipt",
+              err instanceof Error ? err.message : "Please try again.",
+            );
+          }
+        }}
       />
     </View>
   );

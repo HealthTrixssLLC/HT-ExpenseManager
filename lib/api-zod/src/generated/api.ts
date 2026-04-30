@@ -1181,6 +1181,33 @@ export const RegisterReceiptBody = zod.object({
   lineItemId: zod.string().uuid().nullish(),
 });
 
+/**
+ * @summary Update receipt metadata (currently only line item attachment)
+ */
+export const UpdateReceiptParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+export const UpdateReceiptBody = zod
+  .object({
+    lineItemId: zod.string().uuid().nullable(),
+  })
+  .describe(
+    "Update mutable receipt metadata. Only `lineItemId` is currently supported — pass a line ID on the same report to attach, or `null` to detach. Receipts can only be updated while the parent report is editable (Draft or Changes Requested).\n",
+  );
+
+export const UpdateReceiptResponse = zod.object({
+  id: zod.string().uuid(),
+  reportId: zod.string().uuid().nullish(),
+  lineItemId: zod.string().uuid().nullish(),
+  objectPath: zod.string(),
+  filename: zod.string(),
+  mimeType: zod.string(),
+  sizeBytes: zod.number(),
+  uploadedById: zod.string().uuid(),
+  createdAt: zod.coerce.date(),
+});
+
 export const DeleteReceiptParams = zod.object({
   id: zod.coerce.string().uuid(),
 });
