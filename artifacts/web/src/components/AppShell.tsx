@@ -12,6 +12,7 @@ import {
   Building2,
   ShieldCheck,
   ScrollIcon,
+  UserCircle,
 } from "lucide-react";
 import { DesktopTopbar } from "@/components/brand/BrandHeader";
 import { SidebarNav, type NavSection } from "@/components/brand/SidebarNav";
@@ -75,6 +76,13 @@ function buildSections(role: Role): NavSection[] {
     title: "Insights",
     items: [
       { label: "Reports & analytics", icon: <BarChart3 size={16} />, href: "/reports" },
+    ],
+  });
+
+  sections.push({
+    title: "Account",
+    items: [
+      { label: "My profile", icon: <UserCircle size={16} />, href: "/profile" },
     ],
   });
 

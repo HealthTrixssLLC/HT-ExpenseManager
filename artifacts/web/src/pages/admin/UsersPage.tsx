@@ -9,7 +9,9 @@ import {
   useListDepartments,
   getListDepartmentsQueryKey,
   useListManagers,
-  getListManagersQueryKey
+  getListManagersQueryKey,
+  Role,
+  type User,
 } from "@workspace/api-client-react";
 import { HtCard, HtCardHeader } from "@/components/brand/Card";
 import { Button } from "@/components/ui/button";
@@ -44,13 +46,13 @@ export function UsersPage() {
   const qc = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const [selectedUser, setSelectedUser] = useState<any>(null);
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
   // Form states
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState("Employee");
+  const [role, setRole] = useState<Role>(Role.Employee);
   const [departmentId, setDepartmentId] = useState("");
   const [managerId, setManagerId] = useState("");
   const [isActive, setIsActive] = useState(true);
@@ -77,7 +79,7 @@ export function UsersPage() {
         fullName,
         email,
         password,
-        role: role as any,
+        role,
         departmentId,
         managerId: managerId || undefined
       }
@@ -95,7 +97,7 @@ export function UsersPage() {
     updateUser.mutate({
       id: selectedUser.id,
       data: {
-        role: role as any,
+        role,
         departmentId,
         managerId: managerId || undefined,
         isActive
@@ -122,13 +124,13 @@ export function UsersPage() {
     setFullName("");
     setEmail("");
     setPassword("");
-    setRole("Employee");
+    setRole(Role.Employee);
     setDepartmentId("");
     setManagerId("");
     setIsActive(true);
   };
 
-  const openEdit = (user: any) => {
+  const openEdit = (user: User) => {
     setSelectedUser(user);
     setRole(user.role);
     setDepartmentId(user.departmentId || "");
@@ -235,7 +237,7 @@ export function UsersPage() {
             </div>
             <div className="space-y-2">
               <Label>Role</Label>
-              <Select value={role} onValueChange={setRole}>
+              <Select value={role} onValueChange={(v) => setRole(v as Role)}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -294,7 +296,7 @@ export function UsersPage() {
           <div className="grid gap-4 py-4">
             <div className="space-y-2">
               <Label>Role</Label>
-              <Select value={role} onValueChange={setRole}>
+              <Select value={role} onValueChange={(v) => setRole(v as Role)}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>

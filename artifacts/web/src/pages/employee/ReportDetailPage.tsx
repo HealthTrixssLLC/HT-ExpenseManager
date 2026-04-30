@@ -15,6 +15,7 @@ import {
   getGetReportTimelineQueryKey
 } from "@workspace/api-client-react";
 import { formatMoney, formatDate, formatDateTime } from "@/lib/format";
+import { notifySuccess } from "@/lib/notify";
 import { StatusPill } from "@/components/brand/StatusPill";
 import { StatusTracker } from "@/components/brand/StatusTracker";
 import { HtCard, HtCardHeader } from "@/components/brand/Card";
@@ -56,26 +57,30 @@ export function ReportDetailPage({ id }: { id: string }) {
 
   const handleSubmit = () => {
     submitReport.mutate({ id }, {
-      onSuccess: () => {
+      onSuccess: (updated) => {
         qc.invalidateQueries({ queryKey: getGetReportQueryKey(id) });
         qc.invalidateQueries({ queryKey: getGetReportTimelineQueryKey(id) });
+        notifySuccess("Report submitted for approval", updated?.displayCode);
       }
     });
   };
 
   const handleRecall = () => {
     recallReport.mutate({ id }, {
-      onSuccess: () => {
+      onSuccess: (updated) => {
         qc.invalidateQueries({ queryKey: getGetReportQueryKey(id) });
         qc.invalidateQueries({ queryKey: getGetReportTimelineQueryKey(id) });
+        notifySuccess("Report recalled to draft", updated?.displayCode);
       }
     });
   };
 
   const handleDelete = () => {
     if (confirm("Are you sure you want to delete this report? This cannot be undone.")) {
+      const code = report?.displayCode;
       deleteReport.mutate({ id }, {
         onSuccess: () => {
+          notifySuccess("Report deleted", code);
           setLocation("/my-reports");
         }
       });
@@ -199,23 +204,30 @@ export function ReportDetailPage({ id }: { id: string }) {
           </HtCard>
 
           <HtCard>
-            <HtCardHeader title="Timeline" />
-            <div className="p-4 space-y-4">
+            <HtCardHeader title="Audit Log" subtitle={`${timeline.length} action${timeline.length === 1 ? "" : "s"} on this report`} />
+            <div className="p-4 space-y-4" data-testid="report-audit-log">
               {timeline.length === 0 ? (
                 <div className="text-sm text-[var(--ht-ink-3)]">No activity yet.</div>
               ) : (
                 timeline.map((event, i) => (
-                  <div key={i} className="flex gap-3 text-sm">
+                  <div key={event.id ?? i} className="flex gap-3 text-sm">
                     <div className="flex flex-col items-center">
                       <div className="w-2 h-2 rounded-full bg-[var(--ht-navy)] mt-1.5" />
                       {i < timeline.length - 1 && <div className="w-px h-full bg-[var(--ht-border)] mt-1 mb-1" />}
                     </div>
-                    <div className="pb-4">
+                    <div className="pb-4 flex-1">
                       <div className="font-medium text-[var(--ht-ink)]">
                         {event.fromStatus} → {event.toStatus}
                       </div>
                       <div className="text-xs text-[var(--ht-ink-3)] mt-0.5">
-                        {event.actor?.fullName} • {formatDateTime(event.createdAt)}
+                        {event.actor?.fullName}
+                        {event.actorRole && (
+                          <span className="ml-1 inline-block px-1.5 py-px rounded bg-gray-100 text-[var(--ht-ink-2)] uppercase tracking-wide text-[10px]">
+                            {event.actorRole}
+                          </span>
+                        )}
+                        <span className="mx-1">•</span>
+                        {formatDateTime(event.createdAt)}
                       </div>
                       {event.comment && (
                         <div className="mt-1 text-[var(--ht-ink-2)] bg-gray-50 p-2 rounded border border-[var(--ht-border)]">

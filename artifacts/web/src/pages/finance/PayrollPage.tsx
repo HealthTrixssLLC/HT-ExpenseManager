@@ -10,6 +10,7 @@ import {
   useMarkPayrollBatchPaid
 } from "@workspace/api-client-react";
 import { formatMoney, formatDate, formatDateTime } from "@/lib/format";
+import { notifySuccess } from "@/lib/notify";
 import { StatusPill } from "@/components/brand/StatusPill";
 import { HtCard, HtCardHeader } from "@/components/brand/Card";
 import { Button } from "@/components/ui/button";
@@ -44,11 +45,12 @@ export function PayrollPage() {
   const handleCreateBatch = () => {
     if (queue.length === 0) return;
     createBatch.mutate({ data: { label: `Batch ${new Date().toISOString().split('T')[0]}` } }, {
-      onSuccess: () => {
+      onSuccess: (batch) => {
         setSelectedReports([]);
         qc.invalidateQueries({ queryKey: getPayrollQueueQueryKey() });
         qc.invalidateQueries({ queryKey: getListPayrollBatchesQueryKey() });
         setActiveTab("batches");
+        notifySuccess("Batch created", `${batch.label} • ${formatMoney(Number(batch.total))}`);
       }
     });
   };
@@ -57,6 +59,7 @@ export function PayrollPage() {
     markPaid.mutate({ id: batchId }, {
       onSuccess: () => {
         qc.invalidateQueries({ queryKey: getListPayrollBatchesQueryKey() });
+        notifySuccess("Marked paid", "Batch is ready to reconcile.");
       }
     });
   };

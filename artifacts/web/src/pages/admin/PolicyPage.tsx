@@ -3,7 +3,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   useAdminListPolicyRules,
   getAdminListPolicyRulesQueryKey,
-  useAdminPatchPolicyRule
+  useAdminPatchPolicyRule,
+  type PolicyRule,
 } from "@workspace/api-client-react";
 import { HtCard } from "@/components/brand/Card";
 import { Button } from "@/components/ui/button";
@@ -35,10 +36,10 @@ export function PolicyPage() {
 
   const patchRule = useAdminPatchPolicyRule();
 
-  const handleEdit = (rule: any) => {
+  const handleEdit = (rule: PolicyRule) => {
     setEditingName(rule.name);
-    setValueStr(JSON.stringify(rule.value, null, 2) || "");
-    setDescription(rule.description || "");
+    setValueStr(JSON.stringify(rule.value, null, 2));
+    setDescription(rule.description ?? "");
   };
 
   const handleCancel = () => {

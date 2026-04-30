@@ -14,8 +14,10 @@ import {
   usePostToQuickbooks,
   useRetryQuickbooksPost,
   useGetGlPreview,
-  getGetGlPreviewQueryKey
+  getGetGlPreviewQueryKey,
+  type PostToQuickbooksResponse,
 } from "@workspace/api-client-react";
+import { notifySuccess } from "@/lib/notify";
 import { formatMoney, formatDate } from "@/lib/format";
 import { StatusPill } from "@/components/brand/StatusPill";
 import { StatusTracker } from "@/components/brand/StatusTracker";
@@ -58,11 +60,15 @@ export function FinanceReviewPage({ id }: { id: string }) {
 
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectNotes, setRejectNotes] = useState("");
+  const [postConfirmOpen, setPostConfirmOpen] = useState(false);
+  const [postResult, setPostResult] = useState<PostToQuickbooksResponse | null>(null);
 
   const handleApprove = () => {
     approve.mutate({ id, data: { comment: "" } }, {
       onSuccess: () => {
-        qc.invalidateQueries({ queryKey: getGetReportQueryKey(id) }); qc.invalidateQueries({ queryKey: getFinanceQueueQueryKey() });
+        qc.invalidateQueries({ queryKey: getGetReportQueryKey(id) });
+        qc.invalidateQueries({ queryKey: getFinanceQueueQueryKey() });
+        notifySuccess("Finance approved", `${report?.displayCode ?? "Report"} is ready to post.`);
       }
     });
   };
@@ -72,15 +78,22 @@ export function FinanceReviewPage({ id }: { id: string }) {
       onSuccess: () => {
         setRejectOpen(false);
         setRejectNotes("");
-        qc.invalidateQueries({ queryKey: getGetReportQueryKey(id) }); qc.invalidateQueries({ queryKey: getFinanceQueueQueryKey() });
+        qc.invalidateQueries({ queryKey: getGetReportQueryKey(id) });
+        qc.invalidateQueries({ queryKey: getFinanceQueueQueryKey() });
+        notifySuccess("Report rejected", "The employee will be notified.");
       }
     });
   };
 
   const handlePost = () => {
     postQbo.mutate({ id, data: { comment: "" } }, {
-      onSuccess: () => {
-        qc.invalidateQueries({ queryKey: getGetReportQueryKey(id) }); qc.invalidateQueries({ queryKey: getFinanceQueueQueryKey() });
+      onSuccess: (resp) => {
+        setPostResult(resp);
+        qc.invalidateQueries({ queryKey: getGetReportQueryKey(id) });
+        qc.invalidateQueries({ queryKey: getFinanceQueueQueryKey() });
+        if (resp.status === "posted") {
+          notifySuccess("Posted to QuickBooks", resp.journalId ? `Journal ${resp.journalId}` : undefined);
+        }
       }
     });
   };
@@ -88,7 +101,9 @@ export function FinanceReviewPage({ id }: { id: string }) {
   const handleRetry = () => {
     retryQbo.mutate({ id }, {
       onSuccess: () => {
-        qc.invalidateQueries({ queryKey: getGetReportQueryKey(id) }); qc.invalidateQueries({ queryKey: getFinanceQueueQueryKey() });
+        qc.invalidateQueries({ queryKey: getGetReportQueryKey(id) });
+        qc.invalidateQueries({ queryKey: getFinanceQueueQueryKey() });
+        notifySuccess("Retry sent");
       }
     });
   };
@@ -242,7 +257,12 @@ export function FinanceReviewPage({ id }: { id: string }) {
               </>
             )}
             {canPost && (
-              <Button data-testid="button-post-quickbooks" onClick={handlePost} disabled={postQbo.isPending} className="bg-[var(--ht-orange)] hover:bg-[var(--ht-orange-1)]">
+              <Button
+                data-testid="button-post-quickbooks"
+                onClick={() => setPostConfirmOpen(true)}
+                disabled={postQbo.isPending}
+                className="bg-[var(--ht-orange)] hover:bg-[var(--ht-orange-1)]"
+              >
                 <UploadCloud className="w-4 h-4 mr-2" />
                 {postQbo.isPending ? "Posting..." : "Post to QuickBooks"}
               </Button>
@@ -256,6 +276,79 @@ export function FinanceReviewPage({ id }: { id: string }) {
           </div>
         </div>
       )}
+
+      {/* Post to QuickBooks Confirmation Dialog */}
+      <Dialog open={postConfirmOpen} onOpenChange={setPostConfirmOpen}>
+        <DialogContent data-testid="dialog-post-confirm">
+          <DialogHeader>
+            <DialogTitle>Post to QuickBooks?</DialogTitle>
+          </DialogHeader>
+          <div className="py-4 space-y-3 text-sm text-[var(--ht-ink-2)]">
+            <p>
+              You're about to post <span className="font-medium text-[var(--ht-ink)]">{report.displayCode}</span> ({formatMoney(Number(report.total))}) to QuickBooks Online. This creates a journal entry that cannot be reversed from this screen.
+            </p>
+            {glPreview && (
+              <div className="bg-gray-50 border border-[var(--ht-border)] rounded-md p-3">
+                <div className="text-xs text-[var(--ht-ink-3)] mb-1">Posting summary</div>
+                <div className="flex justify-between text-xs"><span>Debits</span><span className="font-medium">{formatMoney(Number(glPreview.totalDebits))}</span></div>
+                <div className="flex justify-between text-xs"><span>Credits</span><span className="font-medium">{formatMoney(Number(glPreview.totalCredits))}</span></div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPostConfirmOpen(false)}>Cancel</Button>
+            <Button
+              data-testid="button-post-confirm"
+              onClick={() => { setPostConfirmOpen(false); handlePost(); }}
+              disabled={postQbo.isPending}
+              className="bg-[var(--ht-orange)] hover:bg-[var(--ht-orange-1)]"
+            >
+              {postQbo.isPending ? "Posting..." : "Confirm & Post"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Post Result Dialog */}
+      <Dialog open={!!postResult} onOpenChange={(o) => { if (!o) setPostResult(null); }}>
+        <DialogContent data-testid="dialog-post-result">
+          <DialogHeader>
+            <DialogTitle>
+              {postResult?.status === "posted" ? "Posted to QuickBooks" : "Sync Error"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-4 space-y-3 text-sm">
+            {postResult?.status === "posted" ? (
+              <>
+                <div className="flex items-center gap-2 text-emerald-700">
+                  <CheckCircle className="w-5 h-5" />
+                  <span>Journal entry created successfully.</span>
+                </div>
+                {postResult.journalId && (
+                  <div className="bg-gray-50 border border-[var(--ht-border)] rounded-md p-3 font-mono text-xs">
+                    Journal ID: {postResult.journalId}
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-2 text-red-700">
+                  <XCircle className="w-5 h-5" />
+                  <span>QuickBooks rejected this posting.</span>
+                </div>
+                {postResult?.errorMessage && (
+                  <div className="bg-red-50 border border-red-100 rounded-md p-3 text-red-800 text-xs">
+                    {postResult.errorMessage}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setPostResult(null)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Reject Dialog */}
       <Dialog open={rejectOpen} onOpenChange={setRejectOpen}>

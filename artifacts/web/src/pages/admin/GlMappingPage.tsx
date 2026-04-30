@@ -5,7 +5,8 @@ import {
   getAdminListGlMappingsQueryKey,
   useAdminUpdateGlMapping,
   useListDepartments,
-  getListDepartmentsQueryKey
+  getListDepartmentsQueryKey,
+  type GlMapping,
 } from "@workspace/api-client-react";
 import { HtCard } from "@/components/brand/Card";
 import { Button } from "@/components/ui/button";
@@ -35,9 +36,9 @@ export function GlMappingPage() {
 
   const updateMapping = useAdminUpdateGlMapping();
 
-  const handleEdit = (mapping: any) => {
+  const handleEdit = (mapping: GlMapping) => {
     setEditingId(mapping.id);
-    setQboAccount(mapping.qboAccount || "");
+    setQboAccount(mapping.qboAccount ?? "");
   };
 
   const handleCancel = () => {

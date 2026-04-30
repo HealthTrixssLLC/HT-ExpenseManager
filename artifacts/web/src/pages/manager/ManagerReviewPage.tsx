@@ -14,6 +14,7 @@ import {
   useManagerRequestChanges,
 } from "@workspace/api-client-react";
 import { formatMoney, formatDate } from "@/lib/format";
+import { notifySuccess } from "@/lib/notify";
 import { StatusPill } from "@/components/brand/StatusPill";
 import { StatusTracker } from "@/components/brand/StatusTracker";
 import { HtCard, HtCardHeader } from "@/components/brand/Card";
@@ -57,6 +58,7 @@ export function ManagerReviewPage({ id }: { id: string }) {
     approve.mutate({ id, data: { comment: "" } }, {
       onSuccess: () => {
         qc.invalidateQueries({ queryKey: getGetReportQueryKey(id) }); qc.invalidateQueries({ queryKey: getManagerQueueQueryKey() });
+        notifySuccess("Approved", `${report?.displayCode ?? "Report"} sent to Finance.`);
         setLocation("/manager/queue");
       }
     });
@@ -68,6 +70,7 @@ export function ManagerReviewPage({ id }: { id: string }) {
         setRejectOpen(false);
         setComments("");
         qc.invalidateQueries({ queryKey: getGetReportQueryKey(id) }); qc.invalidateQueries({ queryKey: getManagerQueueQueryKey() });
+        notifySuccess("Rejected", "The employee will be notified.");
         setLocation("/manager/queue");
       }
     });
@@ -79,6 +82,7 @@ export function ManagerReviewPage({ id }: { id: string }) {
         setChangesOpen(false);
         setComments("");
         qc.invalidateQueries({ queryKey: getGetReportQueryKey(id) }); qc.invalidateQueries({ queryKey: getManagerQueueQueryKey() });
+        notifySuccess("Changes requested", "Sent back to the employee.");
         setLocation("/manager/queue");
       }
     });

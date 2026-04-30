@@ -9,6 +9,7 @@ import {
   useReconcilePayrollBatch
 } from "@workspace/api-client-react";
 import { formatMoney, formatDate, formatDateTime } from "@/lib/format";
+import { notifySuccess } from "@/lib/notify";
 import { HtCard, HtCardHeader } from "@/components/brand/Card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -92,6 +93,7 @@ export function ReconciliationPage() {
       onSuccess: () => {
         qc.invalidateQueries({ queryKey: getGetPayrollBatchQueryKey(selectedBatchId) });
         qc.invalidateQueries({ queryKey: getListPayrollBatchesQueryKey() });
+        notifySuccess("Reconciled", `${entries.length} entr${entries.length === 1 ? "y" : "ies"} recorded.`);
       }
     });
   };

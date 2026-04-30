@@ -23,6 +23,7 @@ import { CreateReportPage } from "@/pages/employee/CreateReportPage";
 import { ReportDetailPage } from "@/pages/employee/ReportDetailPage";
 import { AddLineItemPage } from "@/pages/employee/AddLineItemPage";
 import { ReceiptsPage } from "@/pages/employee/ReceiptsPage";
+import { ProfilePage } from "@/pages/employee/ProfilePage";
 // Manager
 import { ManagerQueuePage } from "@/pages/manager/ManagerQueuePage";
 import { ManagerReviewPage } from "@/pages/manager/ManagerReviewPage";
@@ -86,6 +87,7 @@ function AuthedRoutes() {
         <Route path="/reports/:id/receipts">
           {(params) => <ReceiptsPage id={params.id!} />}
         </Route>
+        <Route path="/profile" component={ProfilePage} />
 
         {/* Manager */}
         <Route path="/manager/queue">
