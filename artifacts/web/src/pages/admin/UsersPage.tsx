@@ -99,7 +99,7 @@ export function UsersPage() {
       data: {
         role,
         departmentId,
-        managerId: managerId || undefined,
+        managerId: managerId || null,
         isActive
       }
     }, {
