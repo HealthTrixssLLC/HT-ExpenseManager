@@ -1,0 +1,8 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "Y4Tsip6JBOVCWqcCO0Ijl"
+uri = "file://artifacts/web/src/assets/ht_mark_dark.png"
+type = "image"
+title = "ht mark dark navy"

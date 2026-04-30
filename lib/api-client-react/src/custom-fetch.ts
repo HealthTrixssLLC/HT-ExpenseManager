@@ -8,6 +8,13 @@ export type BodyType<T> = T;
 
 export type AuthTokenGetter = () => Promise<string | null> | string | null;
 
+export type RequestInterceptor = (context: {
+  input: RequestInfo | URL;
+  method: string;
+  headers: Headers;
+  init: RequestInit;
+}) => void | Promise<void>;
+
 const NO_BODY_STATUS = new Set([204, 205, 304]);
 const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
 
@@ -17,6 +24,8 @@ const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
 
 let _baseUrl: string | null = null;
 let _authTokenGetter: AuthTokenGetter | null = null;
+let _requestInterceptor: RequestInterceptor | null = null;
+let _defaultCredentials: RequestCredentials | null = null;
 
 /**
  * Set a base URL that is prepended to every relative request URL
@@ -42,6 +51,28 @@ export function setBaseUrl(url: string | null): void {
  */
 export function setAuthTokenGetter(getter: AuthTokenGetter | null): void {
   _authTokenGetter = getter;
+}
+
+/**
+ * Register an interceptor that runs after the request method/headers are
+ * resolved and before the underlying `fetch` is invoked. Useful for
+ * attaching CSRF tokens or trace headers to mutating requests.
+ *
+ * Pass `null` to clear the interceptor.
+ */
+export function setRequestInterceptor(interceptor: RequestInterceptor | null): void {
+  _requestInterceptor = interceptor;
+}
+
+/**
+ * Set a default `credentials` mode applied to every request when the caller
+ * does not specify one. Useful for web clients that always need to ship
+ * cookies (`"include"`) regardless of the same-origin default.
+ *
+ * Pass `null` to fall back to the runtime default.
+ */
+export function setDefaultCredentials(mode: RequestCredentials | null): void {
+  _defaultCredentials = mode;
 }
 
 function isRequest(input: RequestInfo | URL): input is Request {
@@ -360,7 +391,16 @@ export async function customFetch<T = unknown>(
 
   const requestInfo = { method, url: resolveUrl(input) };
 
-  const response = await fetch(input, { ...init, method, headers });
+  const finalInit: RequestInit = { ...init, method, headers };
+  if (_defaultCredentials && finalInit.credentials == null) {
+    finalInit.credentials = _defaultCredentials;
+  }
+
+  if (_requestInterceptor) {
+    await _requestInterceptor({ input, method, headers, init: finalInit });
+  }
+
+  const response = await fetch(input, finalInit);
 
   if (!response.ok) {
     const errorData = await parseErrorBody(response, method);
