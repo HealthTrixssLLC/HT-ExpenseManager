@@ -1,3 +1,18 @@
+/**
+ * Expense-report domain tables.
+ *
+ * - `expense_reports` is the header (title, period, currency, totals,
+ *   workflow status). The status column drives the state machine in
+ *   `services/workflow.ts`.
+ * - `expense_lines` are itemised charges; `lineSplits` distributes a single
+ *   line across departments / GL accounts.
+ * - `receipts` stores object-storage references to uploaded files.
+ * - `approval_actions` is the immutable audit log of every status change
+ *   (sequence-numbered per report).
+ *
+ * Money is stored as `numeric(14,2)` in the report's currency. All amounts
+ * round-trip through `string` in TypeScript to avoid float precision drift.
+ */
 import {
   bigint,
   boolean,

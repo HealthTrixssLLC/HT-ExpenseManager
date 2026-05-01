@@ -1,3 +1,13 @@
+/**
+ * `users` — workforce identity scoped to an org.
+ *
+ * Notes
+ * - `email` is unique per org (case-insensitive via the lower(email)
+ *   expression index).
+ * - `roles` is a non-empty array of `roleEnum` values; an approver may also
+ *   set `isAlsoEmployee` so they can submit reports against themselves.
+ * - `passwordHash` is a bcrypt hash. See `lib/auth.ts` in the api-server.
+ */
 import {
   AnyPgColumn,
   boolean,

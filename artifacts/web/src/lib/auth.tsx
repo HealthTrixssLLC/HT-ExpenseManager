@@ -1,3 +1,15 @@
+/**
+ * AuthProvider — owns the React Query state for the current session and
+ * exposes login/logout/bootstrap actions through `AuthContext`.
+ *
+ * Why is the context split across two files?
+ *   `auth-context.ts` exports only the `AuthContext` value + the
+ *   `useAuth` / `useAuthedUser` hooks. This file (`auth.tsx`) exports only
+ *   the provider component. Vite's React Fast Refresh requires a module to
+ *   export *only* components (or only hooks/values) to safely hot-reload —
+ *   mixing them caused full-page reloads on edit and a runtime
+ *   "useAuth must be used within AuthProvider" warning during refresh.
+ */
 import {
   useCallback,
   useEffect,

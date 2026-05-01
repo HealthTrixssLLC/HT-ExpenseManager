@@ -1,3 +1,21 @@
+/**
+ * `customFetch` — the single fetch helper used by every Orval-generated
+ * client method (`@workspace/api-client-react`).
+ *
+ * Responsibilities:
+ * - Resolve URLs against an optional `setBaseUrl(...)` (used by Expo to
+ *   point at a remote API host; web leaves it `null` for same-origin).
+ * - Apply default credentials, attach a bearer token from
+ *   `setAuthTokenGetter(...)` (mobile), and run the
+ *   request/response interceptors used to add CSRF headers and capture
+ *   rotated session secrets.
+ * - Parse responses according to their content type, coercing JSON, text,
+ *   and blob bodies; raises `ApiError` (with the parsed problem+json body)
+ *   for non-2xx responses and `ResponseParseError` for malformed JSON.
+ *
+ * All public configuration is module-level so it can be set once at app
+ * boot — see `artifacts/web/src/lib/api.ts` and the Expo bootstrap.
+ */
 export type CustomFetchOptions = RequestInit & {
   responseType?: "json" | "text" | "blob" | "auto";
 };

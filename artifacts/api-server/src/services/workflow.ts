@@ -1,3 +1,17 @@
+/**
+ * Expense-report workflow state machine.
+ *
+ * `TRANSITIONS` is the canonical map from a transition name (`submit`,
+ * `managerApprove`, `postQbo`, …) to the legal `(from, to, actors)` triples.
+ * Routes call `applyTransition({ report, actor, transition, ... })`, which:
+ *   1. Picks the first triple whose `from` matches the report's status and
+ *      whose `actors` include the actor's role (or `"self"` for the owner).
+ *   2. Updates `expense_reports.status` (and `submittedAt` on first submit).
+ *   3. Inserts an `approval_actions` audit row with the next sequence number.
+ *
+ * Pass `tx` to participate in an outer transaction (used by payroll batch
+ * operations that mark many reports paid atomically).
+ */
 import { eq, max } from "drizzle-orm";
 import {
   approvalActionsTable,

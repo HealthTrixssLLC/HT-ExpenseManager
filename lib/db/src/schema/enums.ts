@@ -1,3 +1,12 @@
+/**
+ * Postgres enum definitions and matching TypeScript union types.
+ *
+ * The `*_VALUES` const tuples are the single source of truth — both the
+ * `pgEnum(...)` and the exported `Role` / `WorkflowStatus` / etc. unions are
+ * derived from them. Add a new value to the tuple, generate a Drizzle
+ * migration, and the rest of the stack (zod schemas, generated client) picks
+ * it up automatically.
+ */
 import { pgEnum } from "drizzle-orm/pg-core";
 
 export const ROLE_VALUES = [

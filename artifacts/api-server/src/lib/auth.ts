@@ -1,3 +1,21 @@
+/**
+ * Authentication primitives.
+ *
+ * Centralises the password hashing, session-token generation, and session
+ * lifecycle helpers used by the auth routes (`routes/auth.ts`) and the
+ * `attachSession` middleware (`middlewares/session.ts`).
+ *
+ * Design notes
+ * - Session tokens are opaque base64url secrets; only their SHA-256 hash is
+ *   persisted (`sessions.tokenHash`). A leaked database row therefore cannot
+ *   be replayed.
+ * - Browser clients receive the token via an HttpOnly cookie plus a paired
+ *   non-HttpOnly CSRF cookie (double-submit). Mobile clients send the token
+ *   in `Authorization: Bearer …` and identify themselves via the
+ *   `X-Healthtrix-Client` header so CSRF checks are skipped.
+ * - The token rotates at most once per hour (see `ROTATION_THRESHOLD_MS`) but
+ *   the session row, owner, and absolute expiry stay the same.
+ */
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { and, eq, gt } from "drizzle-orm";

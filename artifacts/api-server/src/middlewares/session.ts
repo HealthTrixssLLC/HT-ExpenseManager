@@ -1,3 +1,15 @@
+/**
+ * Session middleware: identification, authorisation, and CSRF.
+ *
+ * - `attachSession` resolves the bearer token / session cookie, attaches
+ *   `req.auth`, and propagates a rotated session secret back to the client
+ *   (Set-Cookie for browsers, `X-New-Session-Token` header for iOS).
+ * - `requireAuth` / `requireRole(...roles)` are route guards used by the
+ *   protected route modules.
+ * - `csrfGuard` enforces the double-submit CSRF check on mutating cookie
+ *   sessions. Bearer (mobile) requests bypass it because they are not
+ *   subject to ambient-credential CSRF attacks.
+ */
 import type { NextFunction, Request, Response } from "express";
 import {
   BEARER_PREFIX,

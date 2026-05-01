@@ -1,3 +1,16 @@
+/**
+ * `AuthContext` value + consumer hooks.
+ *
+ * Kept separate from `auth.tsx` so this module exports only React values
+ * (no components), which lets Vite Fast Refresh hot-update the provider
+ * cleanly.
+ *
+ * Hooks
+ * - `useAuth()` — full context, including loading/anonymous/authenticated
+ *   status. Use anywhere under `<AuthProvider>`.
+ * - `useAuthedUser()` — strict variant for screens already gated by an
+ *   `AppShell` route guard; throws if called when anonymous.
+ */
 import { createContext, useContext } from "react";
 import type {
   AuthSession,
