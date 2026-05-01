@@ -17,6 +17,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { HelpHeaderButton } from "@/components/help/HelpLink";
 import { BrandLockup } from "@/components/ui/BrandHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Money } from "@/components/ui/Money";
@@ -65,10 +66,13 @@ export default function InboxTab() {
       <View style={[styles.headerWrap, { paddingTop: insets.top + 8 }]}>
         <View style={styles.headerRow}>
           <BrandLockup size={32} />
-          <View style={styles.countBadge}>
-            <Text style={styles.countBadgeText}>
-              {query.data?.length ?? 0} pending
-            </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <View style={styles.countBadge}>
+              <Text style={styles.countBadgeText}>
+                {query.data?.length ?? 0} pending
+              </Text>
+            </View>
+            <HelpHeaderButton topicId="manager-queue" />
           </View>
         </View>
         <Text style={styles.h1}>Manager review</Text>

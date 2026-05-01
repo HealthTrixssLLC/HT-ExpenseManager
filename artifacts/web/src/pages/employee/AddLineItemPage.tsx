@@ -8,6 +8,7 @@ import {
   PaymentMethod,
 } from "@workspace/api-client-react";
 import { HtCard } from "@/components/brand/Card";
+import { HelpLink } from "@/components/help/HelpLink";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -111,13 +112,16 @@ export function AddLineItemPage({ id }: { id: string }) {
 
   return (
     <div className="space-y-6 max-w-2xl" data-testid="page-addlineitem">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-[var(--ht-ink)]">
-          Add Expense
-        </h1>
-        <p className="text-sm text-[var(--ht-ink-3)]">
-          Enter details for your expense. Policy rules will be applied automatically.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-[var(--ht-ink)]">
+            Add Expense
+          </h1>
+          <p className="text-sm text-[var(--ht-ink-3)]">
+            Enter details for your expense. Policy rules will be applied automatically.
+          </p>
+        </div>
+        <HelpLink topicId="add-line-items" />
       </div>
 
       <HtCard>

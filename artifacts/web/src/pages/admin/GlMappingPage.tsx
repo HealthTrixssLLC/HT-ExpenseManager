@@ -9,6 +9,7 @@ import {
   type GlMapping,
 } from "@workspace/api-client-react";
 import { HtCard } from "@/components/brand/Card";
+import { HelpLink } from "@/components/help/HelpLink";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -60,7 +61,7 @@ export function GlMappingPage() {
 
   return (
     <div className="space-y-6" data-testid="page-glmapping">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-[var(--ht-ink)]">
             GL Mapping
@@ -69,6 +70,7 @@ export function GlMappingPage() {
             Map expense categories to QuickBooks Online accounts.
           </p>
         </div>
+        <HelpLink topicId="admin-gl" />
       </div>
 
       <HtCard>

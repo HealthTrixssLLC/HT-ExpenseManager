@@ -10,6 +10,7 @@ import {
 } from "@workspace/api-client-react";
 import { useAuthedUser } from "@/lib/auth-context";
 import { HtCard, HtCardHeader } from "@/components/brand/Card";
+import { HelpLink } from "@/components/help/HelpLink";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -96,13 +97,16 @@ export function DelegationPage() {
 
   return (
     <div className="space-y-6 max-w-4xl" data-testid="page-delegation">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-[var(--ht-ink)]">
-          Approval Delegation
-        </h1>
-        <p className="text-sm text-[var(--ht-ink-3)]">
-          Temporarily route your approval queue to another manager while you are away.
-        </p>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-[var(--ht-ink)]">
+            Approval Delegation
+          </h1>
+          <p className="text-sm text-[var(--ht-ink-3)]">
+            Temporarily route your approval queue to another manager while you are away.
+          </p>
+        </div>
+        <HelpLink topicId="manager-delegate" />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

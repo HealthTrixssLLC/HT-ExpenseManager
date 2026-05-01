@@ -26,6 +26,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { HelpHeaderButton } from "@/components/help/HelpLink";
 import { BrandLockup } from "@/components/ui/BrandHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Money } from "@/components/ui/Money";
@@ -77,8 +78,14 @@ export default function ReceiptsTab() {
   return (
     <View style={styles.root}>
       <View style={[styles.headerWrap, { paddingTop: insets.top + 8 }]}>
-        <View style={styles.headerRow}>
+        <View
+          style={[
+            styles.headerRow,
+            { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+          ]}
+        >
           <BrandLockup size={32} />
+          <HelpHeaderButton topicId="upload-receipts" />
         </View>
         <Text style={styles.h1}>Receipts</Text>
         <Text style={styles.h1Sub}>

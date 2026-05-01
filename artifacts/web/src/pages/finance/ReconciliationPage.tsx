@@ -11,6 +11,7 @@ import {
 import { formatMoney, formatDate, formatDateTime } from "@/lib/format";
 import { notifySuccess } from "@/lib/notify";
 import { HtCard, HtCardHeader } from "@/components/brand/Card";
+import { HelpLink } from "@/components/help/HelpLink";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -100,7 +101,7 @@ export function ReconciliationPage() {
 
   return (
     <div className="space-y-6" data-testid="page-reconciliation">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-[var(--ht-ink)]">
             Payroll Reconciliation
@@ -109,6 +110,7 @@ export function ReconciliationPage() {
             Confirm actual paid amounts and dates from the payroll provider.
           </p>
         </div>
+        <HelpLink topicId="reconcile" />
       </div>
 
       <div className="flex items-center gap-4 max-w-md">

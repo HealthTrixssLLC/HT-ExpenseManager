@@ -95,15 +95,33 @@ export default function ProfileTab() {
       ) : null}
 
       <Section title="Help">
-        <Pressable style={styles.linkRow} onPress={() => {}}>
+        <Pressable
+          testID="profile-help-center"
+          style={styles.linkRow}
+          onPress={() => router.push("/help" as never)}
+        >
           <Feather name="book-open" size={18} color={HT.navy} />
+          <Text style={styles.linkText}>Help center</Text>
+          <Feather name="chevron-right" size={18} color={HT.ink4} />
+        </Pressable>
+        <View style={styles.divider} />
+        <Pressable
+          testID="profile-help-policy"
+          style={styles.linkRow}
+          onPress={() => router.push("/help/policy-reference" as never)}
+        >
+          <Feather name="shield" size={18} color={HT.navy} />
           <Text style={styles.linkText}>Submission policy</Text>
           <Feather name="chevron-right" size={18} color={HT.ink4} />
         </Pressable>
         <View style={styles.divider} />
-        <Pressable style={styles.linkRow} onPress={() => {}}>
-          <Feather name="message-circle" size={18} color={HT.navy} />
-          <Text style={styles.linkText}>Contact accounting</Text>
+        <Pressable
+          testID="profile-help-troubleshooting"
+          style={styles.linkRow}
+          onPress={() => router.push("/help/troubleshooting" as never)}
+        >
+          <Feather name="life-buoy" size={18} color={HT.navy} />
+          <Text style={styles.linkText}>Troubleshooting</Text>
           <Feather name="chevron-right" size={18} color={HT.ink4} />
         </Pressable>
       </Section>

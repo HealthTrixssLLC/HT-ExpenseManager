@@ -6,6 +6,7 @@ import {
   Wallet,
   ClipboardCheck,
   BarChart3,
+  BookOpen,
   Settings,
   Users,
   Sparkles,
@@ -83,6 +84,7 @@ function buildSections(roles: Role[]): NavSection[] {
     title: "Account",
     items: [
       { label: "My profile", icon: <UserCircle size={16} />, href: "/profile" },
+      { label: "Help center", icon: <BookOpen size={16} />, href: "/help" },
     ],
   });
 

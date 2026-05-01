@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { formatMoney, formatDate, formatRelative } from "@/lib/format";
 import { StatusPill } from "@/components/brand/StatusPill";
 import { HtCard } from "@/components/brand/Card";
+import { HelpLink } from "@/components/help/HelpLink";
 import {
   Table,
   TableBody,
@@ -71,7 +72,7 @@ export function FinanceQueuePage() {
 
   return (
     <div className="space-y-6" data-testid="page-financequeue">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-[var(--ht-ink)]">
             Finance Queue
@@ -80,6 +81,7 @@ export function FinanceQueuePage() {
             Reports awaiting finance approval and accounting sync.
           </p>
         </div>
+        <HelpLink topicId="finance-queue" />
       </div>
 
       <div className="flex flex-wrap items-center gap-3">

@@ -14,6 +14,7 @@ import {
   type User,
 } from "@workspace/api-client-react";
 import { HtCard } from "@/components/brand/Card";
+import { HelpLink } from "@/components/help/HelpLink";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -202,7 +203,7 @@ export function UsersPage() {
 
   return (
     <div className="space-y-6" data-testid="page-users">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-[var(--ht-ink)]">
             Users
@@ -211,15 +212,18 @@ export function UsersPage() {
             Manage employee access, roles, and reporting lines.
           </p>
         </div>
-        <Button
-          onClick={() => {
-            resetForm();
-            setCreateOpen(true);
-          }}
-        >
-          <UserPlus className="w-4 h-4 mr-2" />
-          Add User
-        </Button>
+        <div className="flex items-center gap-2">
+          <HelpLink topicId="admin-users" />
+          <Button
+            onClick={() => {
+              resetForm();
+              setCreateOpen(true);
+            }}
+          >
+            <UserPlus className="w-4 h-4 mr-2" />
+            Add User
+          </Button>
+        </div>
       </div>
 
       <HtCard>

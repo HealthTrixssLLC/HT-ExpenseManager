@@ -88,6 +88,8 @@ function AuthGate() {
         name="report/[id]/capture"
         options={{ presentation: "fullScreenModal" }}
       />
+      <Stack.Screen name="help/index" />
+      <Stack.Screen name="help/[id]" />
     </Stack>
   );
 }

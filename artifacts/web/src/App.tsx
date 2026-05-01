@@ -42,6 +42,9 @@ import { QboPage } from "@/pages/admin/QboPage";
 import { AuditLogPage } from "@/pages/admin/AuditLogPage";
 // Reports
 import { ReportsPage } from "@/pages/reports/ReportsPage";
+// Help
+import HelpIndexPage from "@/pages/help/HelpIndexPage";
+import HelpTopicPage from "@/pages/help/HelpTopicPage";
 
 configureApi();
 
@@ -162,6 +165,10 @@ function AuthedRoutes() {
 
         {/* Insights */}
         <Route path="/reports" component={ReportsPage} />
+
+        {/* Help */}
+        <Route path="/help" component={HelpIndexPage} />
+        <Route path="/help/:id" component={HelpTopicPage} />
 
         <Route path="/forbidden" component={ForbiddenPage} />
         <Route component={NotFound} />

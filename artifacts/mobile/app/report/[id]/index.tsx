@@ -35,6 +35,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { HelpLink } from "@/components/help/HelpLink";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Money, formatUsd } from "@/components/ui/Money";
 import { PrimaryButton } from "@/components/ui/PrimaryButton";
@@ -268,7 +269,7 @@ export default function ReportDetailScreen() {
           <Feather name="chevron-left" size={26} color={HT.ink} />
         </Pressable>
         <Text style={styles.headerTitle} numberOfLines={1}>{report.displayCode}</Text>
-        <View style={{ width: 26 }} />
+        <HelpLink topicId="lifecycle" />
       </View>
 
       <ScrollView

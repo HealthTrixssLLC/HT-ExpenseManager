@@ -18,6 +18,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { HelpLink } from "@/components/help/HelpLink";
 import { PrimaryButton } from "@/components/ui/PrimaryButton";
 import { HT } from "@/constants/colors";
 
@@ -104,7 +105,7 @@ export default function AddLineScreen() {
           <Feather name="x" size={22} color={HT.ink2} />
         </Pressable>
         <Text style={styles.headerTitle}>Add line item</Text>
-        <View style={{ width: 22 }} />
+        <HelpLink topicId="add-line-items" />
       </View>
 
       <ScrollView

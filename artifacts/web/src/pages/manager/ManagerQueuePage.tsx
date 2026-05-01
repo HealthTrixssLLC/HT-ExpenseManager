@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { formatMoney, formatRelative } from "@/lib/format";
 import { StatusPill } from "@/components/brand/StatusPill";
 import { HtCard } from "@/components/brand/Card";
+import { HelpLink } from "@/components/help/HelpLink";
 import {
   Table,
   TableBody,
@@ -122,7 +123,7 @@ export function ManagerQueuePage() {
 
   return (
     <div className="space-y-6" data-testid="page-managerqueue">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-[var(--ht-ink)]">
             Manager Queue
@@ -131,6 +132,7 @@ export function ManagerQueuePage() {
             Reports from your team awaiting your review.
           </p>
         </div>
+        <HelpLink topicId="manager-queue" />
       </div>
 
       <div className="flex flex-wrap items-center gap-3">

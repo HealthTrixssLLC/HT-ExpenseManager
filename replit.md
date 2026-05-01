@@ -50,3 +50,26 @@ canonical backend for the Healthtrix Expense product (mockups under
   email domains, since the seed contract may evolve.
 - **Smoke**: `pnpm --filter @workspace/api-server run smoke` runs all
   24 end-to-end checks against a live server.
+
+## Healthtrix Expense Help Center
+
+A data-driven, in-app Help Center is available on both the web and mobile apps.
+Content is duplicated (not shared via package, to avoid metro bundler complexity)
+between:
+- `artifacts/web/src/lib/help/{types.ts,content.ts}`
+- `artifacts/mobile/lib/help/{types.ts,content.ts}`
+
+Categories cover Getting started, Employees, Managers, Finance, Admin, Reports,
+Reference (status/role glossaries, workflow diagram, policy), Troubleshooting,
+and FAQ. Each topic is a typed `HelpTopic` rendered through `HelpBlocks`
+(paragraphs, lists, steps, callouts, tables, ascii diagrams).
+
+- Web routes: `/help`, `/help/:id` (wouter), sidebar entry "Help center" in
+  `AppShell.tsx` Account section, contextual `<HelpLink topicId="..."/>`
+  components on key pages (employee/manager/finance/admin).
+- Mobile screens: `app/help/index.tsx` (browse + search) and
+  `app/help/[id].tsx` (topic). Profile tab links to Help center / policy /
+  troubleshooting; tab headers show a `HelpHeaderButton`; the Add line item
+  modal and report detail expose contextual `HelpLink`s.
+- Search uses an in-memory `searchTopics(query)` that scores against title /
+  summary / keywords / role tags. No backend, no CMS, English only.

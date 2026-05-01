@@ -6,6 +6,7 @@ import {
   useAdminDisconnectQbo
 } from "@workspace/api-client-react";
 import { HtCard, HtCardHeader } from "@/components/brand/Card";
+import { HelpLink } from "@/components/help/HelpLink";
 import { Button } from "@/components/ui/button";
 import { Link2, Unlink } from "lucide-react";
 import { formatDateTime } from "@/lib/format";
@@ -33,13 +34,16 @@ export function QboPage() {
 
   return (
     <div className="space-y-6" data-testid="page-qbo">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-[var(--ht-ink)]">
-          QuickBooks Online Integration
-        </h1>
-        <p className="text-sm text-[var(--ht-ink-3)]">
-          Connect Healthtrix Expense to QuickBooks to automatically post approved expense reports as journal entries.
-        </p>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-[var(--ht-ink)]">
+            QuickBooks Online Integration
+          </h1>
+          <p className="text-sm text-[var(--ht-ink-3)]">
+            Connect Healthtrix Expense to QuickBooks to automatically post approved expense reports as journal entries.
+          </p>
+        </div>
+        <HelpLink topicId="admin-qbo" />
       </div>
 
       <div style={{ maxWidth: "42rem" }}>

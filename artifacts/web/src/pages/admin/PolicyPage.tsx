@@ -7,6 +7,7 @@ import {
   type PolicyRule,
 } from "@workspace/api-client-react";
 import { HtCard } from "@/components/brand/Card";
+import { HelpLink } from "@/components/help/HelpLink";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -69,7 +70,7 @@ export function PolicyPage() {
 
   return (
     <div className="space-y-6" data-testid="page-policy">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-[var(--ht-ink)]">
             Expense Policy
@@ -78,6 +79,7 @@ export function PolicyPage() {
             Configure auto-flagging rules, receipt requirements, and amount limits by category.
           </p>
         </div>
+        <HelpLink topicId="admin-policy" />
       </div>
 
       <HtCard>
