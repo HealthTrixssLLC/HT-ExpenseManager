@@ -20,7 +20,9 @@ import {
   date,
   index,
   integer,
+  jsonb,
   numeric,
+  pgEnum,
   pgTable,
   text,
   timestamp,
@@ -168,6 +170,61 @@ export const approvalActionsTable = pgTable(
   }),
 );
 
+// Field-level audit trail for content edits to a report and its children.
+// `approval_actions` continues to capture workflow status transitions; this
+// table captures who-changed-what at the column level on the report itself,
+// its line items, and its receipts. Stored alongside (not merged into)
+// approval_actions so each table keeps a single, focused shape.
+export const auditEntityTypeEnum = pgEnum("audit_entity_type", [
+  "report",
+  "line_item",
+  "receipt",
+]);
+
+export const auditActionEnum = pgEnum("audit_action", [
+  "created",
+  "updated",
+  "deleted",
+]);
+
+export const auditEntriesTable = pgTable(
+  "audit_entries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => orgsTable.id, { onDelete: "cascade" }),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => expenseReportsTable.id, { onDelete: "cascade" }),
+    actorId: uuid("actor_id")
+      .notNull()
+      .references(() => usersTable.id, { onDelete: "restrict" }),
+    actorRoles: roleEnum("actor_roles").array().notNull(),
+    entityType: auditEntityTypeEnum("entity_type").notNull(),
+    // entity_id is the id of the report, line item, or receipt the change
+    // was applied to. For "report" rows this equals reportId; we still store
+    // it explicitly so consumers can group/sort uniformly.
+    entityId: uuid("entity_id").notNull(),
+    action: auditActionEnum("action").notNull(),
+    // Array of {field, before, after}. For "created" we capture the inserted
+    // shape with before=null. For "deleted" we capture the prior shape with
+    // after=null so the row stays meaningful after the entity is gone.
+    fieldDiffs: jsonb("field_diffs").notNull().default(sql`'[]'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    reportIdx: index("audit_entries_report_idx").on(t.reportId, t.createdAt),
+    orgIdx: index("audit_entries_org_idx").on(t.orgId, t.createdAt),
+    actorRolesNonEmpty: check(
+      "audit_entries_actor_roles_non_empty",
+      sql`cardinality(${t.actorRoles}) > 0`,
+    ),
+  }),
+);
+
 export type ExpenseReport = typeof expenseReportsTable.$inferSelect;
 export type InsertExpenseReport = typeof expenseReportsTable.$inferInsert;
 export type LineItem = typeof lineItemsTable.$inferSelect;
@@ -176,3 +233,13 @@ export type Receipt = typeof receiptsTable.$inferSelect;
 export type InsertReceipt = typeof receiptsTable.$inferInsert;
 export type ApprovalAction = typeof approvalActionsTable.$inferSelect;
 export type InsertApprovalAction = typeof approvalActionsTable.$inferInsert;
+export type AuditEntry = typeof auditEntriesTable.$inferSelect;
+export type InsertAuditEntry = typeof auditEntriesTable.$inferInsert;
+export type AuditEntityType = (typeof auditEntityTypeEnum.enumValues)[number];
+export type AuditAction = (typeof auditActionEnum.enumValues)[number];
+
+export type AuditFieldDiff = {
+  field: string;
+  before: unknown;
+  after: unknown;
+};

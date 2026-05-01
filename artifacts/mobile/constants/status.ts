@@ -44,6 +44,20 @@ export function isTerminal(status: WorkflowStatus): boolean {
   return status === "Reconciled" || OFF_RAMPS.includes(status);
 }
 
+// Statuses where the API allows field-level edits. Mirrors the broader
+// owner+manager+delegate edit gate enforced by the api-server. The mobile
+// surface is owner-only (no manager-edit on mobile per the task contract),
+// but we still need to recognize the same status set so the owner can
+// continue editing their own report after submission.
+const MOBILE_EDITABLE_STATUSES: WorkflowStatus[] = [
+  "Draft",
+  "Submitted",
+  "Manager Review",
+  "Changes Requested",
+  "Manager Approved",
+  "Finance Review",
+];
+
 export function isEditable(status: WorkflowStatus): boolean {
-  return status === "Draft" || status === "Changes Requested";
+  return MOBILE_EDITABLE_STATUSES.includes(status);
 }

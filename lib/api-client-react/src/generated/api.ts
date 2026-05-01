@@ -19,12 +19,12 @@ import type {
 import type {
   AdminAuditLogParams,
   AdminListDelegationsParams,
-  ApprovalAction,
   ApprovalActionBody,
   AuthSession,
   BootstrapBody,
   BootstrapStatus,
   CategoryOption,
+  ChangeFeedItem,
   CreateDelegationBody,
   CreateLineItemBody,
   CreatePayrollBatchBody,
@@ -2172,7 +2172,8 @@ export const useAdminRevokeDelegation = <
 };
 
 /**
- * @summary Approval-action audit trail (org-wide or per-report)
+ * Returns workflow status transitions (`approval_actions`) and field-level content edits (`audit_entries`) interleaved by `createdAt` descending. Filter by `reportId` to scope to one report.
+ * @summary Merged audit trail (workflow actions + content edits)
  */
 export const getAdminAuditLogUrl = (params?: AdminAuditLogParams) => {
   const normalizedParams = new URLSearchParams();
@@ -2193,8 +2194,8 @@ export const getAdminAuditLogUrl = (params?: AdminAuditLogParams) => {
 export const adminAuditLog = async (
   params?: AdminAuditLogParams,
   options?: RequestInit,
-): Promise<ApprovalAction[]> => {
-  return customFetch<ApprovalAction[]>(getAdminAuditLogUrl(params), {
+): Promise<ChangeFeedItem[]> => {
+  return customFetch<ChangeFeedItem[]>(getAdminAuditLogUrl(params), {
     ...options,
     method: "GET",
   });
@@ -2239,7 +2240,7 @@ export type AdminAuditLogQueryResult = NonNullable<
 export type AdminAuditLogQueryError = ErrorType<unknown>;
 
 /**
- * @summary Approval-action audit trail (org-wide or per-report)
+ * @summary Merged audit trail (workflow actions + content edits)
  */
 
 export function useAdminAuditLog<
@@ -2531,7 +2532,7 @@ export function useGetReport<
 }
 
 /**
- * @summary Edit report metadata while in Draft or Changes Requested
+ * @summary Edit report header fields. Allowed for the report owner, the owner's direct manager, and active manager delegates while the report is in any pre-Finance-Approved status (Draft, Submitted, Manager Review, Changes Requested, Manager Approved, Finance Review). Locked at Finance Approved and beyond.
  */
 export const getUpdateReportUrl = (id: string) => {
   return `/api/reports/${id}`;
@@ -2595,7 +2596,7 @@ export type UpdateReportMutationBody = BodyType<UpdateReportBody>;
 export type UpdateReportMutationError = ErrorType<unknown>;
 
 /**
- * @summary Edit report metadata while in Draft or Changes Requested
+ * @summary Edit report header fields. Allowed for the report owner, the owner's direct manager, and active manager delegates while the report is in any pre-Finance-Approved status (Draft, Submitted, Manager Review, Changes Requested, Manager Approved, Finance Review). Locked at Finance Approved and beyond.
  */
 export const useUpdateReport = <
   TError = ErrorType<unknown>,
@@ -2958,7 +2959,8 @@ export const useVoidReport = <
 };
 
 /**
- * @summary Approval action audit log for a report
+ * Returns workflow status transitions and field-level content edits for the report, interleaved by `createdAt` ascending so the UI can render a single chronological feed.
+ * @summary Merged change history for a report
  */
 export const getGetReportTimelineUrl = (id: string) => {
   return `/api/reports/${id}/timeline`;
@@ -2967,8 +2969,8 @@ export const getGetReportTimelineUrl = (id: string) => {
 export const getReportTimeline = async (
   id: string,
   options?: RequestInit,
-): Promise<ApprovalAction[]> => {
-  return customFetch<ApprovalAction[]>(getGetReportTimelineUrl(id), {
+): Promise<ChangeFeedItem[]> => {
+  return customFetch<ChangeFeedItem[]>(getGetReportTimelineUrl(id), {
     ...options,
     method: "GET",
   });
@@ -3018,7 +3020,7 @@ export type GetReportTimelineQueryResult = NonNullable<
 export type GetReportTimelineQueryError = ErrorType<unknown>;
 
 /**
- * @summary Approval action audit log for a report
+ * @summary Merged change history for a report
  */
 
 export function useGetReportTimeline<

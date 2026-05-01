@@ -1,5 +1,9 @@
 import type {
   ApprovalAction,
+  AuditAction,
+  AuditEntityType,
+  AuditEntry,
+  AuditFieldDiff,
   Department,
   ExpenseReport,
   GlMapping,
@@ -101,7 +105,34 @@ export type ExpenseReportDto = ExpenseReportSummaryDto & {
   periodEnd: string | null;
   lineItems: LineItemDto[];
   receipts: ReceiptDto[];
+  editedSinceLastApproval: boolean;
 };
+
+export type AuditEntryDto = {
+  id: string;
+  reportId: string;
+  actor: UserRefDto;
+  actorRoles: Role[];
+  entityType: AuditEntityType;
+  entityId: string;
+  action: AuditAction;
+  fieldDiffs: AuditFieldDiff[];
+  createdAt: string;
+};
+
+export type ChangeFeedItemDto =
+  | {
+      kind: "approval";
+      createdAt: string;
+      approval: ApprovalActionDto;
+      content: null;
+    }
+  | {
+      kind: "content";
+      createdAt: string;
+      approval: null;
+      content: AuditEntryDto;
+    };
 
 export function toUserRef(user: Pick<User, "id" | "fullName" | "roles">): UserRefDto {
   return { id: user.id, fullName: user.fullName, roles: user.roles };
@@ -158,6 +189,22 @@ export function toReceiptDto(receipt: Receipt): ReceiptDto {
     sizeBytes: receipt.sizeBytes,
     uploadedById: receipt.uploadedById,
     createdAt: receipt.createdAt.toISOString(),
+  };
+}
+
+export function toAuditEntryDto(entry: AuditEntry, actor: UserRefDto): AuditEntryDto {
+  return {
+    id: entry.id,
+    reportId: entry.reportId,
+    actor,
+    actorRoles: entry.actorRoles,
+    entityType: entry.entityType,
+    entityId: entry.entityId,
+    action: entry.action,
+    // jsonb is stored as `unknown`; the schema and recordAudit guarantee
+    // it's an array of {field,before,after}.
+    fieldDiffs: (entry.fieldDiffs as AuditFieldDiff[] | null) ?? [],
+    createdAt: entry.createdAt.toISOString(),
   };
 }
 

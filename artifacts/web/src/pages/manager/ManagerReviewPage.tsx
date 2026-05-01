@@ -9,6 +9,8 @@ import {
   getListLineItemsQueryKey,
   useListReceipts,
   getListReceiptsQueryKey,
+  useGetReportTimeline,
+  getGetReportTimelineQueryKey,
   useManagerApprove,
   useManagerReject,
   useManagerRequestChanges,
@@ -19,6 +21,7 @@ import { StatusPill } from "@/components/brand/StatusPill";
 import { StatusTracker } from "@/components/brand/StatusTracker";
 import { HtCard, HtCardHeader } from "@/components/brand/Card";
 import { ReceiptThumb } from "@/components/brand/ReceiptThumb";
+import { ChangeFeed } from "@/components/ChangeFeed";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -30,7 +33,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { AlertCircle, CheckCircle, MessageSquare, XCircle } from "lucide-react";
+import { AlertTriangle, ExternalLink } from "lucide-react";
 
 export function ManagerReviewPage({ id }: { id: string }) {
   const qc = useQueryClient();
@@ -44,6 +47,9 @@ export function ManagerReviewPage({ id }: { id: string }) {
   });
   const { data: receipts = [] } = useListReceipts(id, {
     query: { queryKey: getListReceiptsQueryKey(id), enabled: !!id }
+  });
+  const { data: timeline = [] } = useGetReportTimeline(id, {
+    query: { queryKey: getGetReportTimelineQueryKey(id), enabled: !!id }
   });
 
   const approve = useManagerApprove();
@@ -109,6 +115,12 @@ export function ManagerReviewPage({ id }: { id: string }) {
           <p className="mt-1 text-[var(--ht-ink-2)]">
             {report.employee?.fullName} • {report.periodStart ? formatDate(report.periodStart) : "-"} - {report.periodEnd ? formatDate(report.periodEnd) : "-"}
           </p>
+          <Link href={`/reports/${report.id}`}>
+            <Button variant="ghost" size="sm" className="mt-2 -ml-3">
+              <ExternalLink className="w-4 h-4 mr-1" />
+              Open full report (edit)
+            </Button>
+          </Link>
         </div>
         <div className="text-right">
           <div className="text-3xl font-semibold tracking-tight text-[var(--ht-ink)]">
@@ -117,6 +129,21 @@ export function ManagerReviewPage({ id }: { id: string }) {
           <div className="text-sm text-[var(--ht-ink-3)] mt-1">Total Amount</div>
         </div>
       </div>
+
+      {report.editedSinceLastApproval && (
+        <div
+          className="flex items-start gap-3 p-3 rounded-md border border-amber-300 bg-amber-50 text-sm text-amber-900"
+          data-testid="banner-edited-since-approval"
+        >
+          <AlertTriangle className="w-5 h-5 shrink-0 mt-px text-amber-600" />
+          <div>
+            <p className="font-medium">Edited since last approval</p>
+            <p className="text-amber-800">
+              The owner or another approver edited this report after the last workflow action. Confirm the change history before approving.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
@@ -171,6 +198,16 @@ export function ManagerReviewPage({ id }: { id: string }) {
             <HtCardHeader title="Workflow Status" />
             <div className="p-4">
               <StatusTracker current={report.status} />
+            </div>
+          </HtCard>
+
+          <HtCard>
+            <HtCardHeader
+              title="Audit Log"
+              subtitle={`${timeline.length} event${timeline.length === 1 ? "" : "s"} on this report`}
+            />
+            <div className="p-4" data-testid="report-audit-log">
+              <ChangeFeed items={timeline} />
             </div>
           </HtCard>
         </div>

@@ -11,8 +11,10 @@ import { db, receiptsTable } from "../lib/db";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import { HttpError, sendProblem } from "../lib/problem";
 import { requireAuth } from "../middlewares/session";
-import { canView, fetchReportOrThrow } from "../lib/reports";
+import { canEditReport, canView, fetchReportOrThrow } from "../lib/reports";
 import { validateReceiptUpload } from "../lib/receipts";
+import { recordAudit, snapshotForDelete } from "../services/audit";
+import { RECEIPT_AUDIT_FIELDS } from "./reports";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
@@ -127,8 +129,12 @@ router.get(
   },
 );
 
-// Delete a receipt by id. Only the uploader, the report's employee, or an
-// org-wide admin/finance role can delete.
+// Delete a receipt by id. Per Task #25 the receipt's parent report governs
+// the edit gate AND the hard lock at Finance Approved+: only the report
+// owner, their direct manager, or an active delegate may delete, and only
+// while the report is in a content-editable status. Orphan receipts (no
+// reportId) fall back to the uploader-only rule. Every successful delete
+// writes an audit entry with a full pre-delete snapshot of the receipt.
 router.delete(
   "/receipts/:id",
   requireAuth,
@@ -149,27 +155,43 @@ router.delete(
       sendProblem(res, 404, "Not Found");
       return;
     }
-    let allowed = receipt.uploadedById === req.auth!.user.id;
-    if (!allowed && receipt.reportId) {
-      const report = await fetchReportOrThrow(
-        receipt.reportId,
-        req.auth!.user.orgId,
-      );
-      if (req.auth!.user.id === report.employeeId) {
-        allowed = true;
-      } else if (
-        req.auth!.user.roles.some((r) =>
-          ["System Admin", "Accounting Admin", "Finance Approver"].includes(r),
-        )
-      ) {
-        allowed = true;
+    if (!receipt.reportId) {
+      // Orphan upload (e.g. user picked a file but never attached it).
+      // Fall back to the uploader-only rule and skip audit because there
+      // is no parent report to scope the entry under.
+      if (receipt.uploadedById !== req.auth!.user.id) {
+        sendProblem(res, 403, "Forbidden");
+        return;
       }
-    }
-    if (!allowed) {
-      sendProblem(res, 403, "Forbidden");
+      await db.delete(receiptsTable).where(eq(receiptsTable.id, id));
+      res.status(204).end();
       return;
     }
-    await db.delete(receiptsTable).where(eq(receiptsTable.id, id));
+    const report = await fetchReportOrThrow(
+      receipt.reportId,
+      req.auth!.user.orgId,
+    );
+    const auth = await canEditReport(report, req.auth!.user);
+    if (!auth.ok) {
+      sendProblem(res, auth.status, auth.title, auth.detail);
+      return;
+    }
+    await db.transaction(async (tx) => {
+      await tx.delete(receiptsTable).where(eq(receiptsTable.id, id));
+      await recordAudit({
+        orgId: report.orgId,
+        reportId: report.id,
+        actor: { id: req.auth!.user.id, roles: req.auth!.user.roles },
+        entityType: "receipt",
+        entityId: receipt.id,
+        action: "deleted",
+        fieldDiffs: snapshotForDelete(
+          receipt as unknown as Record<string, unknown>,
+          RECEIPT_AUDIT_FIELDS,
+        ),
+        tx,
+      });
+    });
     res.status(204).end();
   },
 );

@@ -412,6 +412,366 @@ async function main(): Promise<void> {
   );
   console.log(`✓ /receipts/upload-url denied without auth (401)`);
 
+  // ─────────────────────────────────────────────────────────────────────
+  // Task #25 — broadened edit gate + content audit log + merged feed.
+  //
+  // Goal: editing a report's header in a post-Submit status (e.g. Manager
+  // Review) by the OWNER must succeed and produce a `content` audit entry
+  // visible on both the per-report timeline and the org-wide audit log.
+  // We also assert the response carries `editedSinceLastApproval=true` so
+  // the reviewer banner kicks in.
+  // ─────────────────────────────────────────────────────────────────────
+  const empToken = sessions["priya@healthtrix.test"].token;
+  const empId = sessions["priya@healthtrix.test"].userId;
+  const adminToken = sessions["admin@healthtrix.test"].token;
+
+  // Find a report owned by Priya in a non-terminal, post-Draft status
+  // (so we exercise the "broader than Draft/Changes Requested" gate).
+  const priyaReports = (await getJson(
+    "/reports?scope=mine",
+    empToken,
+  )) as Array<{ id: string; status: string; title: string; displayCode: string }>;
+  const editableNonDraft = priyaReports.find((r) =>
+    [
+      "Submitted",
+      "Manager Review",
+      "Manager Approved",
+      "Finance Review",
+      "Changes Requested",
+    ].includes(r.status),
+  );
+  if (!editableNonDraft) {
+    console.log("⚠ no post-Draft editable report owned by priya — skipping audit smoke");
+  } else {
+    const newTitle = `${editableNonDraft.title} [edited ${Date.now()}]`;
+    const editRes = await fetch(`${BASE}/reports/${editableNonDraft.id}`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${empToken}`,
+        "x-healthtrix-client": "ios",
+      },
+      body: JSON.stringify({ title: newTitle }),
+    });
+    assert(
+      editRes.status === 200,
+      `owner edit on ${editableNonDraft.status} report should succeed (got ${editRes.status})`,
+    );
+    const updated = (await editRes.json()) as {
+      title: string;
+      editedSinceLastApproval: boolean;
+    };
+    assert(updated.title === newTitle, "PATCH returned the updated title");
+    assert(
+      updated.editedSinceLastApproval === true,
+      "edit must flip editedSinceLastApproval=true on a post-Draft report",
+    );
+    console.log(
+      `✓ owner edited ${editableNonDraft.displayCode} (${editableNonDraft.status}); editedSinceLastApproval=true`,
+    );
+
+    // Per-report timeline must contain the new content edit.
+    const tl = (await getJson(
+      `/reports/${editableNonDraft.id}/timeline`,
+      empToken,
+    )) as Array<{
+      kind: string;
+      content?: {
+        action: string;
+        entityType: string;
+        fieldDiffs: Array<{ field: string; before: unknown; after: unknown }>;
+      } | null;
+    }>;
+    const titleEdit = tl.find(
+      (e) =>
+        e.kind === "content" &&
+        e.content?.entityType === "report" &&
+        e.content?.action === "updated" &&
+        e.content.fieldDiffs.some((d) => d.field === "title"),
+    );
+    assert(titleEdit, "per-report timeline must contain the title edit");
+    console.log(
+      `✓ per-report timeline contains the title content-edit entry`,
+    );
+
+    // Org-wide admin audit log must surface the same edit (kind=content).
+    const adminLog = (await getJson(
+      "/admin/audit-log",
+      adminToken,
+    )) as Array<{
+      kind: string;
+      content?: { reportId: string; action: string } | null;
+    }>;
+    const inAdmin = adminLog.find(
+      (e) =>
+        e.kind === "content" &&
+        e.content?.reportId === editableNonDraft.id &&
+        e.content?.action === "updated",
+    );
+    assert(inAdmin, "admin /audit-log must surface the content edit");
+    console.log(
+      `✓ admin /audit-log contains the new content edit (merged feed)`,
+    );
+
+    // Hard-lock: editing a Finance Approved (or further) report MUST 403
+    // even for the owner. Look one up via admin's all-scope.
+    const allForLock = (await getJson(
+      "/reports?scope=all",
+      adminToken,
+    )) as Array<{
+      id: string;
+      status: string;
+      employee: { id: string; fullName: string };
+    }>;
+    const locked = allForLock.find(
+      (r) =>
+        r.employee.id === empId &&
+        [
+          "Finance Approved",
+          "Posted to QuickBooks",
+          "Ready for Payroll Reimbursement",
+          "Paid Through Payroll",
+          "Reconciled",
+        ].includes(r.status),
+    );
+    if (locked) {
+      const lockedEdit = await fetch(`${BASE}/reports/${locked.id}`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${empToken}`,
+          "x-healthtrix-client": "ios",
+        },
+        body: JSON.stringify({ title: "should not work" }),
+      });
+      // Hard-lock returns 409 "Locked" (status conflict), not 403, because
+      // the actor IS authorized — it's the report's status that forbids edits.
+      assert(
+        lockedEdit.status === 409,
+        `Finance Approved+ report must be locked (got ${lockedEdit.status} on ${locked.status})`,
+      );
+      console.log(
+        `✓ owner correctly blocked from editing ${locked.status} report (409 Locked)`,
+      );
+    } else {
+      console.log(
+        `⚠ no locked-status report owned by priya — skipping hard-lock check`,
+      );
+    }
+
+    // Manager-of-owner can also edit the same report. Manager Rosa
+    // (manager@healthtrix.test) is Priya's direct manager per the seed.
+    const managerToken = sessions["manager@healthtrix.test"].token;
+    const mgrEditTitle = `${editableNonDraft.title} [mgr-edit ${Date.now()}]`;
+    const mgrEdit = await fetch(`${BASE}/reports/${editableNonDraft.id}`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${managerToken}`,
+        "x-healthtrix-client": "ios",
+      },
+      body: JSON.stringify({ title: mgrEditTitle }),
+    });
+    assert(
+      mgrEdit.status === 200,
+      `direct manager must be allowed to edit owner's report (got ${mgrEdit.status})`,
+    );
+    console.log(`✓ direct manager edited owner's report (200)`);
+
+    // Admin must NOT be allowed to edit content (per Task #25 — admins
+    // observe and audit, they do not impersonate the owner on records).
+    const adminEdit = await fetch(`${BASE}/reports/${editableNonDraft.id}`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${adminToken}`,
+        "x-healthtrix-client": "ios",
+      },
+      body: JSON.stringify({ title: "admin should not edit" }),
+    });
+    assert(
+      adminEdit.status === 403,
+      `admin must be blocked from editing report content (got ${adminEdit.status})`,
+    );
+    console.log(`✓ System Admin correctly blocked from editing content (403)`);
+
+    // Finance approver (not owner, not manager-of-owner) must also be
+    // blocked from editing — even on a report visible in the finance queue.
+    const financeToken = sessions["finance@healthtrix.test"].token;
+    const finEdit = await fetch(`${BASE}/reports/${editableNonDraft.id}`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${financeToken}`,
+        "x-healthtrix-client": "ios",
+      },
+      body: JSON.stringify({ title: "finance should not edit" }),
+    });
+    assert(
+      finEdit.status === 403,
+      `finance approver must be blocked from editing report content (got ${finEdit.status})`,
+    );
+    console.log(`✓ Finance Approver correctly blocked from editing content (403)`);
+
+    // Line-item edit must also be audited. Pull the full report to find a
+    // line and PATCH it as the owner; then verify a line_item content
+    // entry shows up in the timeline with a description diff.
+    const fullForLine = (await getJson(
+      `/reports/${editableNonDraft.id}`,
+      empToken,
+    )) as { lineItems: Array<{ id: string; description: string }> };
+    const targetLine = fullForLine.lineItems[0];
+    if (targetLine) {
+      const newDesc = `${targetLine.description} [edit ${Date.now()}]`;
+      const linePatch = await fetch(`${BASE}/lines/${targetLine.id}`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${empToken}`,
+          "x-healthtrix-client": "ios",
+        },
+        body: JSON.stringify({ description: newDesc }),
+      });
+      assert(
+        linePatch.status === 200,
+        `owner line-item edit must succeed (got ${linePatch.status})`,
+      );
+      const tl2 = (await getJson(
+        `/reports/${editableNonDraft.id}/timeline`,
+        empToken,
+      )) as Array<{
+        kind: string;
+        content?: {
+          action: string;
+          entityType: string;
+          entityId: string;
+          fieldDiffs: Array<{ field: string }>;
+        } | null;
+      }>;
+      const lineEntry = tl2.find(
+        (e) =>
+          e.kind === "content" &&
+          e.content?.entityType === "line_item" &&
+          e.content?.entityId === targetLine.id &&
+          e.content?.action === "updated" &&
+          e.content.fieldDiffs.some((d) => d.field === "description"),
+      );
+      assert(
+        lineEntry,
+        "line-item edit must produce a content audit entry on the timeline",
+      );
+      console.log(
+        `✓ line-item edit recorded as content audit entry (description diff)`,
+      );
+    }
+
+    // Receipt delete is now governed by canEditReport + records an audit
+    // entry. Verify (a) Finance Approver — not the owner/manager — is
+    // blocked from DELETE /receipts/:id, even on a report visible in
+    // their queue; and (b) the owner can delete a receipt and the delete
+    // appears in the timeline as a "receipt deleted" content entry.
+    // Walk Priya's editable reports until we find one that actually has
+    // a receipt attached.
+    let targetReceipt: { id: string; filename: string } | undefined;
+    let receiptHostReportId: string | undefined;
+    for (const r of priyaReports) {
+      if (
+        ![
+          "Submitted",
+          "Manager Review",
+          "Manager Approved",
+          "Finance Review",
+          "Changes Requested",
+          "Draft",
+        ].includes(r.status)
+      ) {
+        continue;
+      }
+      const rs = (await getJson(
+        `/reports/${r.id}/receipts`,
+        empToken,
+      )) as Array<{ id: string; filename: string }>;
+      if (rs[0]) {
+        targetReceipt = rs[0];
+        receiptHostReportId = r.id;
+        break;
+      }
+    }
+    if (targetReceipt && receiptHostReportId) {
+      // Finance approver should be blocked.
+      const finDel = await fetch(`${BASE}/receipts/${targetReceipt.id}`, {
+        method: "DELETE",
+        headers: {
+          authorization: `Bearer ${sessions["finance@healthtrix.test"].token}`,
+          "x-healthtrix-client": "ios",
+        },
+      });
+      assert(
+        finDel.status === 403,
+        `finance must be blocked from deleting receipt (got ${finDel.status})`,
+      );
+      console.log(
+        `✓ Finance Approver correctly blocked from DELETE /receipts/:id (403)`,
+      );
+      // Admin should also be blocked (no admin bypass on edit operations).
+      const admDel = await fetch(`${BASE}/receipts/${targetReceipt.id}`, {
+        method: "DELETE",
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+          "x-healthtrix-client": "ios",
+        },
+      });
+      assert(
+        admDel.status === 403,
+        `admin must be blocked from deleting receipt (got ${admDel.status})`,
+      );
+      console.log(
+        `✓ System Admin correctly blocked from DELETE /receipts/:id (403)`,
+      );
+      // Owner can delete — and an audit entry must show up.
+      const ownerDel = await fetch(`${BASE}/receipts/${targetReceipt.id}`, {
+        method: "DELETE",
+        headers: {
+          authorization: `Bearer ${empToken}`,
+          "x-healthtrix-client": "ios",
+        },
+      });
+      assert(
+        ownerDel.status === 204,
+        `owner receipt delete must succeed (got ${ownerDel.status})`,
+      );
+      const tl3 = (await getJson(
+        `/reports/${receiptHostReportId}/timeline`,
+        empToken,
+      )) as Array<{
+        kind: string;
+        content?: {
+          action: string;
+          entityType: string;
+          entityId: string;
+        } | null;
+      }>;
+      const recDel = tl3.find(
+        (e) =>
+          e.kind === "content" &&
+          e.content?.entityType === "receipt" &&
+          e.content?.entityId === targetReceipt!.id &&
+          e.content?.action === "deleted",
+      );
+      assert(
+        recDel,
+        "receipt delete must produce a content audit entry on the timeline",
+      );
+      console.log(
+        `✓ owner receipt delete recorded as content audit entry`,
+      );
+    } else {
+      console.log(
+        `⚠ no receipts on the test report — skipping receipt-delete checks`,
+      );
+    }
+  }
+
   console.log("\nAll smoke checks passed.");
 }
 

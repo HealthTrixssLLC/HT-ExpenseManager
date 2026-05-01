@@ -19,10 +19,11 @@ import {
   UpdateReceiptBody,
   UpdateReportBody,
 } from "@workspace/api-zod";
-import { db, expenseReportsTable, lineItemsTable, receiptsTable, usersTable, approvalActionsTable } from "../lib/db";
+import { db, expenseReportsTable, lineItemsTable, receiptsTable, usersTable, approvalActionsTable, auditEntriesTable } from "../lib/db";
 import { sendError, sendProblem } from "../lib/problem";
 import { requireAuth } from "../middlewares/session";
 import {
+  canEditReport,
   canView,
   FINANCE_VISIBLE_STATUSES,
   fetchReportOrThrow,
@@ -34,16 +35,49 @@ import { ObjectStorageService } from "../lib/objectStorage";
 import { verifyReceiptUpload } from "../lib/receipts";
 import {
   toApprovalActionDto,
+  toAuditEntryDto,
   toLineItemDto,
   toReceiptDto,
+  toUserRef,
+  type ChangeFeedItemDto,
 } from "../lib/serializers";
 import { applyTransition } from "../services/workflow";
+import {
+  diffFields,
+  recordAudit,
+  snapshotForCreate,
+  snapshotForDelete,
+} from "../services/audit";
 import type { WorkflowStatus } from "@workspace/db";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
 
-const EDITABLE_STATUSES: WorkflowStatus[] = ["Draft", "Changes Requested"];
+// Header fields tracked in the audit log. Excludes id, orgId, status, and
+// timestamps (status changes flow through approval_actions instead).
+const REPORT_AUDIT_FIELDS = [
+  "title",
+  "description",
+  "departmentId",
+  "policy",
+  "periodStart",
+  "periodEnd",
+] as const;
+
+const LINE_ITEM_AUDIT_FIELDS = [
+  "occurredOn",
+  "merchant",
+  "description",
+  "category",
+  "amount",
+  "paymentMethod",
+] as const;
+
+export const RECEIPT_AUDIT_FIELDS = [
+  "lineItemId",
+  "filename",
+  "objectPath",
+] as const;
 
 router.use(requireAuth);
 
@@ -212,45 +246,54 @@ router.patch("/reports/:id", async (req, res): Promise<void> => {
       return;
     }
     const report = await fetchReportOrThrow(id, req.auth!.user.orgId);
-    if (req.auth!.user.id !== report.employeeId) {
-      sendProblem(res, 403, "Forbidden");
-      return;
-    }
-    if (!EDITABLE_STATUSES.includes(report.status)) {
-      sendProblem(
-        res,
-        409,
-        "Locked",
-        `Cannot edit a report in status "${report.status}".`,
-      );
+    const auth = await canEditReport(report, req.auth!.user);
+    if (!auth.ok) {
+      sendProblem(res, auth.status, auth.title, auth.detail);
       return;
     }
     const data = parsed.data;
-    const [updated] = await db
-      .update(expenseReportsTable)
-      .set({
-        title: data.title ?? report.title,
-        description: data.description ?? report.description,
-        departmentId:
-          data.departmentId === undefined
-            ? report.departmentId
-            : data.departmentId,
-        policy: data.policy ?? report.policy,
-        periodStart:
-          data.periodStart === undefined
-            ? report.periodStart
-            : data.periodStart
-              ? toIsoDate(data.periodStart)
-              : null,
-        periodEnd:
-          data.periodEnd === undefined
-            ? report.periodEnd
-            : data.periodEnd
-              ? toIsoDate(data.periodEnd)
-              : null,
-      })
-      .where(eq(expenseReportsTable.id, report.id))
-      .returning();
+    const nextValues = {
+      title: data.title ?? report.title,
+      description: data.description ?? report.description,
+      departmentId:
+        data.departmentId === undefined ? report.departmentId : data.departmentId,
+      policy: data.policy ?? report.policy,
+      periodStart:
+        data.periodStart === undefined
+          ? report.periodStart
+          : data.periodStart
+            ? toIsoDate(data.periodStart)
+            : null,
+      periodEnd:
+        data.periodEnd === undefined
+          ? report.periodEnd
+          : data.periodEnd
+            ? toIsoDate(data.periodEnd)
+            : null,
+    };
+    const updated = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(expenseReportsTable)
+        .set(nextValues)
+        .where(eq(expenseReportsTable.id, report.id))
+        .returning();
+      const diffs = diffFields(
+        report as unknown as Record<string, unknown>,
+        row as unknown as Record<string, unknown>,
+        REPORT_AUDIT_FIELDS,
+      );
+      await recordAudit({
+        orgId: report.orgId,
+        reportId: report.id,
+        actor: { id: req.auth!.user.id, roles: req.auth!.user.roles },
+        entityType: "report",
+        entityId: report.id,
+        action: "updated",
+        fieldDiffs: diffs,
+        tx,
+      });
+      return row;
+    });
     res.json(ExpenseReportResponse.parse(await loadFullReport(updated)));
   } catch (err) {
     handle(res, err);
@@ -344,30 +387,57 @@ router.get("/reports/:id/timeline", async (req, res): Promise<void> => {
       sendProblem(res, 403, "Forbidden");
       return;
     }
-    const actions = await db
-      .select()
-      .from(approvalActionsTable)
-      .where(eq(approvalActionsTable.reportId, report.id))
-      .orderBy(asc(approvalActionsTable.sequence));
-    const actorIds = [...new Set(actions.map((a) => a.actorId))];
+    const [actions, audits] = await Promise.all([
+      db
+        .select()
+        .from(approvalActionsTable)
+        .where(eq(approvalActionsTable.reportId, report.id))
+        .orderBy(asc(approvalActionsTable.sequence)),
+      db
+        .select()
+        .from(auditEntriesTable)
+        .where(eq(auditEntriesTable.reportId, report.id))
+        .orderBy(asc(auditEntriesTable.createdAt)),
+    ]);
+    const actorIds = [
+      ...new Set([
+        ...actions.map((a) => a.actorId),
+        ...audits.map((a) => a.actorId),
+      ]),
+    ];
     const actors = actorIds.length
       ? await db.select().from(usersTable).where(inArray(usersTable.id, actorIds))
       : [];
     const actorById = new Map(actors.map((u) => [u.id, u]));
-    res.json(
-      GetReportTimelineResponse.parse(
-        actions.map((a) =>
-          toApprovalActionDto(
-            a,
-            actorById.get(a.actorId) ?? {
-              id: a.actorId,
-              fullName: "Unknown",
-              roles: a.actorRoles,
-            } as Parameters<typeof toApprovalActionDto>[1],
-          ),
+    const items: ChangeFeedItemDto[] = [
+      ...actions.map((a) => ({
+        kind: "approval" as const,
+        createdAt: a.createdAt.toISOString(),
+        approval: toApprovalActionDto(
+          a,
+          actorById.get(a.actorId) ?? {
+            id: a.actorId,
+            fullName: "Unknown",
+            roles: a.actorRoles,
+          } as Parameters<typeof toApprovalActionDto>[1],
         ),
-      ),
-    );
+        content: null,
+      })),
+      ...audits.map((entry) => {
+        const actor = actorById.get(entry.actorId);
+        const ref = actor
+          ? toUserRef(actor)
+          : { id: entry.actorId, fullName: "Unknown", roles: entry.actorRoles };
+        return {
+          kind: "content" as const,
+          createdAt: entry.createdAt.toISOString(),
+          approval: null,
+          content: toAuditEntryDto(entry, ref),
+        };
+      }),
+    ];
+    items.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    res.json(GetReportTimelineResponse.parse(items));
   } catch (err) {
     handle(res, err);
   }
@@ -414,26 +484,39 @@ router.post("/reports/:id/lines", async (req, res): Promise<void> => {
       return;
     }
     const report = await fetchReportOrThrow(id, req.auth!.user.orgId);
-    if (req.auth!.user.id !== report.employeeId) {
-      sendProblem(res, 403, "Forbidden");
+    const auth = await canEditReport(report, req.auth!.user);
+    if (!auth.ok) {
+      sendProblem(res, auth.status, auth.title, auth.detail);
       return;
     }
-    if (!EDITABLE_STATUSES.includes(report.status)) {
-      sendProblem(res, 409, "Locked", "Report is not editable.");
-      return;
-    }
-    const [line] = await db
-      .insert(lineItemsTable)
-      .values({
+    const line = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(lineItemsTable)
+        .values({
+          reportId: report.id,
+          occurredOn: toIsoDate(parsed.data.occurredOn),
+          merchant: parsed.data.merchant,
+          description: parsed.data.description ?? "",
+          category: parsed.data.category,
+          amount: normalizeAmount(parsed.data.amount),
+          paymentMethod: parsed.data.paymentMethod,
+        })
+        .returning();
+      await recordAudit({
+        orgId: report.orgId,
         reportId: report.id,
-        occurredOn: toIsoDate(parsed.data.occurredOn),
-        merchant: parsed.data.merchant,
-        description: parsed.data.description ?? "",
-        category: parsed.data.category,
-        amount: normalizeAmount(parsed.data.amount),
-        paymentMethod: parsed.data.paymentMethod,
-      })
-      .returning();
+        actor: { id: req.auth!.user.id, roles: req.auth!.user.roles },
+        entityType: "line_item",
+        entityId: row.id,
+        action: "created",
+        fieldDiffs: snapshotForCreate(
+          row as unknown as Record<string, unknown>,
+          LINE_ITEM_AUDIT_FIELDS,
+        ),
+        tx,
+      });
+      return row;
+    });
     res.status(201).json(LineItemSchema.parse(toLineItemDto(line, 0)));
   } catch (err) {
     handle(res, err);
@@ -468,12 +551,9 @@ async function updateLineItemHandler(req: Request, res: Response): Promise<void>
       return;
     }
     const report = await fetchReportOrThrow(id, req.auth!.user.orgId);
-    if (req.auth!.user.id !== report.employeeId) {
-      sendProblem(res, 403, "Forbidden");
-      return;
-    }
-    if (!EDITABLE_STATUSES.includes(report.status)) {
-      sendProblem(res, 409, "Locked", "Report is not editable.");
+    const auth = await canEditReport(report, req.auth!.user);
+    if (!auth.ok) {
+      sendProblem(res, auth.status, auth.title, auth.detail);
       return;
     }
     const existing = (
@@ -489,22 +569,39 @@ async function updateLineItemHandler(req: Request, res: Response): Promise<void>
       sendProblem(res, 404, "Not Found");
       return;
     }
-    const [updated] = await db
-      .update(lineItemsTable)
-      .set({
-        occurredOn: parsed.data.occurredOn
-          ? toIsoDate(parsed.data.occurredOn)
-          : existing.occurredOn,
-        merchant: parsed.data.merchant ?? existing.merchant,
-        description: parsed.data.description ?? existing.description,
-        category: parsed.data.category ?? existing.category,
-        amount: parsed.data.amount
-          ? normalizeAmount(parsed.data.amount)
-          : existing.amount,
-        paymentMethod: parsed.data.paymentMethod ?? existing.paymentMethod,
-      })
-      .where(eq(lineItemsTable.id, lineId))
-      .returning();
+    const updated = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(lineItemsTable)
+        .set({
+          occurredOn: parsed.data.occurredOn
+            ? toIsoDate(parsed.data.occurredOn)
+            : existing.occurredOn,
+          merchant: parsed.data.merchant ?? existing.merchant,
+          description: parsed.data.description ?? existing.description,
+          category: parsed.data.category ?? existing.category,
+          amount: parsed.data.amount
+            ? normalizeAmount(parsed.data.amount)
+            : existing.amount,
+          paymentMethod: parsed.data.paymentMethod ?? existing.paymentMethod,
+        })
+        .where(eq(lineItemsTable.id, lineId))
+        .returning();
+      await recordAudit({
+        orgId: report.orgId,
+        reportId: report.id,
+        actor: { id: req.auth!.user.id, roles: req.auth!.user.roles },
+        entityType: "line_item",
+        entityId: row.id,
+        action: "updated",
+        fieldDiffs: diffFields(
+          existing as unknown as Record<string, unknown>,
+          row as unknown as Record<string, unknown>,
+          LINE_ITEM_AUDIT_FIELDS,
+        ),
+        tx,
+      });
+      return row;
+    });
     res.json(LineItemSchema.parse(toLineItemDto(updated, 0)));
   } catch (err) {
     handle(res, err);
@@ -533,19 +630,49 @@ async function deleteLineItemHandler(req: Request, res: Response): Promise<void>
     const id = pathId(req, "id");
     const lineId = pathId(req, "lineId");
     const report = await fetchReportOrThrow(id, req.auth!.user.orgId);
-    if (req.auth!.user.id !== report.employeeId) {
-      sendProblem(res, 403, "Forbidden");
+    const auth = await canEditReport(report, req.auth!.user);
+    if (!auth.ok) {
+      sendProblem(res, auth.status, auth.title, auth.detail);
       return;
     }
-    if (!EDITABLE_STATUSES.includes(report.status)) {
-      sendProblem(res, 409, "Locked", "Report is not editable.");
+    const existing = (
+      await db
+        .select()
+        .from(lineItemsTable)
+        .where(
+          and(eq(lineItemsTable.id, lineId), eq(lineItemsTable.reportId, report.id)),
+        )
+        .limit(1)
+    )[0];
+    if (!existing) {
+      sendProblem(res, 404, "Not Found");
       return;
     }
-    await db
-      .delete(lineItemsTable)
-      .where(
-        and(eq(lineItemsTable.id, lineId), eq(lineItemsTable.reportId, report.id)),
-      );
+    await db.transaction(async (tx) => {
+      // Capture the snapshot BEFORE delete so the audit row is meaningful
+      // after the entity is gone.
+      await recordAudit({
+        orgId: report.orgId,
+        reportId: report.id,
+        actor: { id: req.auth!.user.id, roles: req.auth!.user.roles },
+        entityType: "line_item",
+        entityId: existing.id,
+        action: "deleted",
+        fieldDiffs: snapshotForDelete(
+          existing as unknown as Record<string, unknown>,
+          LINE_ITEM_AUDIT_FIELDS,
+        ),
+        tx,
+      });
+      await tx
+        .delete(lineItemsTable)
+        .where(
+          and(
+            eq(lineItemsTable.id, lineId),
+            eq(lineItemsTable.reportId, report.id),
+          ),
+        );
+    });
     res.status(204).end();
   } catch (err) {
     handle(res, err);
@@ -598,8 +725,9 @@ router.post("/lines/:lineId/receipts", async (req, res): Promise<void> => {
       lineRow.reportId,
       req.auth!.user.orgId,
     );
-    if (req.auth!.user.id !== report.employeeId) {
-      sendProblem(res, 403, "Forbidden");
+    const auth = await canEditReport(report, req.auth!.user);
+    if (!auth.ok) {
+      sendProblem(res, auth.status, auth.title, auth.detail);
       return;
     }
     // Authoritative server-side check: re-derive size + content type from the
@@ -616,19 +744,35 @@ router.post("/lines/:lineId/receipts", async (req, res): Promise<void> => {
       sendProblem(res, verified.status, verified.title, verified.detail);
       return;
     }
-    const [receipt] = await db
-      .insert(receiptsTable)
-      .values({
-        orgId: req.auth!.user.orgId,
+    const receipt = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(receiptsTable)
+        .values({
+          orgId: req.auth!.user.orgId,
+          reportId: report.id,
+          lineItemId: lineId,
+          objectPath: parsed.data.objectPath,
+          filename: parsed.data.filename,
+          mimeType: verified.contentType,
+          sizeBytes: verified.sizeBytes,
+          uploadedById: req.auth!.user.id,
+        })
+        .returning();
+      await recordAudit({
+        orgId: report.orgId,
         reportId: report.id,
-        lineItemId: lineId,
-        objectPath: parsed.data.objectPath,
-        filename: parsed.data.filename,
-        mimeType: verified.contentType,
-        sizeBytes: verified.sizeBytes,
-        uploadedById: req.auth!.user.id,
-      })
-      .returning();
+        actor: { id: req.auth!.user.id, roles: req.auth!.user.roles },
+        entityType: "receipt",
+        entityId: row.id,
+        action: "created",
+        fieldDiffs: snapshotForCreate(
+          row as unknown as Record<string, unknown>,
+          RECEIPT_AUDIT_FIELDS,
+        ),
+        tx,
+      });
+      return row;
+    });
     res.status(201).json(toReceiptDto(receipt));
   } catch (err) {
     handle(res, err);
@@ -644,8 +788,9 @@ router.post("/reports/:id/receipts", async (req, res): Promise<void> => {
       return;
     }
     const report = await fetchReportOrThrow(id, req.auth!.user.orgId);
-    if (req.auth!.user.id !== report.employeeId) {
-      sendProblem(res, 403, "Forbidden");
+    const auth = await canEditReport(report, req.auth!.user);
+    if (!auth.ok) {
+      sendProblem(res, auth.status, auth.title, auth.detail);
       return;
     }
     // If a lineItemId is supplied, the line MUST belong to this report and
@@ -677,19 +822,35 @@ router.post("/reports/:id/receipts", async (req, res): Promise<void> => {
       sendProblem(res, verified.status, verified.title, verified.detail);
       return;
     }
-    const [receipt] = await db
-      .insert(receiptsTable)
-      .values({
-        orgId: req.auth!.user.orgId,
+    const receipt = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(receiptsTable)
+        .values({
+          orgId: req.auth!.user.orgId,
+          reportId: report.id,
+          lineItemId: parsed.data.lineItemId ?? null,
+          objectPath: parsed.data.objectPath,
+          filename: parsed.data.filename,
+          mimeType: verified.contentType,
+          sizeBytes: verified.sizeBytes,
+          uploadedById: req.auth!.user.id,
+        })
+        .returning();
+      await recordAudit({
+        orgId: report.orgId,
         reportId: report.id,
-        lineItemId: parsed.data.lineItemId ?? null,
-        objectPath: parsed.data.objectPath,
-        filename: parsed.data.filename,
-        mimeType: verified.contentType,
-        sizeBytes: verified.sizeBytes,
-        uploadedById: req.auth!.user.id,
-      })
-      .returning();
+        actor: { id: req.auth!.user.id, roles: req.auth!.user.roles },
+        entityType: "receipt",
+        entityId: row.id,
+        action: "created",
+        fieldDiffs: snapshotForCreate(
+          row as unknown as Record<string, unknown>,
+          RECEIPT_AUDIT_FIELDS,
+        ),
+        tx,
+      });
+      return row;
+    });
     res.status(201).json(toReceiptDto(receipt));
   } catch (err) {
     handle(res, err);
@@ -698,9 +859,10 @@ router.post("/reports/:id/receipts", async (req, res): Promise<void> => {
 
 // PATCH /receipts/:id — update mutable receipt metadata. Today only the
 // `lineItemId` is mutable: pass a line ID on the same report to attach an
-// existing receipt to a specific line, or `null` to detach. Limited to the
-// report's employee while the parent report is editable (Draft / Changes
-// Requested) so it can't be used to mutate state mid-approval.
+// existing receipt to a specific line, or `null` to detach. Authorization
+// is delegated to the parent report's edit gate (canEditReport): owner OR
+// direct manager OR active delegate, only while the report is in a
+// content-editable status (anything before Finance Approved).
 router.patch("/receipts/:id", async (req, res): Promise<void> => {
   try {
     const id = pathId(req, "id");
@@ -736,17 +898,9 @@ router.patch("/receipts/:id", async (req, res): Promise<void> => {
       receipt.reportId,
       req.auth!.user.orgId,
     );
-    if (req.auth!.user.id !== report.employeeId) {
-      sendProblem(res, 403, "Forbidden");
-      return;
-    }
-    if (!EDITABLE_STATUSES.includes(report.status)) {
-      sendProblem(
-        res,
-        409,
-        "Not Editable",
-        "Receipt can only be re-attached while the report is editable.",
-      );
+    const authResult = await canEditReport(report, req.auth!.user);
+    if (!authResult.ok) {
+      sendProblem(res, authResult.status, authResult.title, authResult.detail);
       return;
     }
     if (parsed.data.lineItemId) {
@@ -765,11 +919,28 @@ router.patch("/receipts/:id", async (req, res): Promise<void> => {
         return;
       }
     }
-    const [updated] = await db
-      .update(receiptsTable)
-      .set({ lineItemId: parsed.data.lineItemId ?? null })
-      .where(eq(receiptsTable.id, id))
-      .returning();
+    const updated = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(receiptsTable)
+        .set({ lineItemId: parsed.data.lineItemId ?? null })
+        .where(eq(receiptsTable.id, id))
+        .returning();
+      await recordAudit({
+        orgId: report.orgId,
+        reportId: report.id,
+        actor: { id: req.auth!.user.id, roles: req.auth!.user.roles },
+        entityType: "receipt",
+        entityId: row.id,
+        action: "updated",
+        fieldDiffs: diffFields(
+          receipt as unknown as Record<string, unknown>,
+          row as unknown as Record<string, unknown>,
+          RECEIPT_AUDIT_FIELDS,
+        ),
+        tx,
+      });
+      return row;
+    });
     res.status(200).json(toReceiptDto(updated));
   } catch (err) {
     handle(res, err);

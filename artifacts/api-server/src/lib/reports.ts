@@ -1,9 +1,12 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import {
+  approvalActionsTable,
+  auditEntriesTable,
   db,
   departmentsTable,
   expenseReportsTable,
   lineItemsTable,
+  managerDelegationsTable,
   receiptsTable,
   usersTable,
   type ExpenseReport,
@@ -45,6 +48,28 @@ export const FINANCE_VISIBLE_STATUSES: ReadonlyArray<WorkflowStatus> = [
 ];
 
 const FINANCE_VISIBLE_SET = new Set<WorkflowStatus>(FINANCE_VISIBLE_STATUSES);
+
+// Statuses in which a report's content (header, line items, receipts) is
+// editable. The lock at "Finance Approved" is firm: once the report has
+// been finance approved, every later status (Posted to QuickBooks, Ready
+// for Payroll Reimbursement, Paid Through Payroll, Reconciled, Sync
+// Error, Voided) is read-only. Rejected is similarly terminal — the
+// reviewer's call has been made and content can't be retroactively
+// rewritten.
+export const EDITABLE_STATUSES: ReadonlyArray<WorkflowStatus> = [
+  "Draft",
+  "Submitted",
+  "Manager Review",
+  "Changes Requested",
+  "Manager Approved",
+  "Finance Review",
+];
+
+const EDITABLE_STATUSES_SET = new Set<WorkflowStatus>(EDITABLE_STATUSES);
+
+export function isReportContentEditable(status: WorkflowStatus): boolean {
+  return EDITABLE_STATUSES_SET.has(status);
+}
 
 export async function loadReportSummaries(
   reports: ExpenseReport[],
@@ -150,6 +175,7 @@ export async function loadFullReport(
       (receiptCountsByLine.get(r.lineItemId) ?? 0) + 1,
     );
   }
+  const editedSinceLastApproval = await wasEditedSinceLastApproval(report.id);
   return {
     ...summary,
     description: report.description,
@@ -161,7 +187,36 @@ export async function loadFullReport(
       toLineItemDto(l, receiptCountsByLine.get(l.id) ?? 0),
     ),
     receipts: receipts.map(toReceiptDto),
+    editedSinceLastApproval,
   };
+}
+
+// Returns true when the report has at least one content edit recorded
+// after its most recent approval action. When no approvals have happened
+// yet there is nothing to "post-date" so we report false (the banner
+// only matters once a reviewer has acted).
+export async function wasEditedSinceLastApproval(
+  reportId: string,
+): Promise<boolean> {
+  const lastApproval = (
+    await db
+      .select({ createdAt: approvalActionsTable.createdAt })
+      .from(approvalActionsTable)
+      .where(eq(approvalActionsTable.reportId, reportId))
+      .orderBy(desc(approvalActionsTable.createdAt))
+      .limit(1)
+  )[0];
+  if (!lastApproval) return false;
+  const lastEdit = (
+    await db
+      .select({ createdAt: auditEntriesTable.createdAt })
+      .from(auditEntriesTable)
+      .where(eq(auditEntriesTable.reportId, reportId))
+      .orderBy(desc(auditEntriesTable.createdAt))
+      .limit(1)
+  )[0];
+  if (!lastEdit) return false;
+  return lastEdit.createdAt.getTime() > lastApproval.createdAt.getTime();
 }
 
 export async function fetchReportOrThrow(
@@ -205,14 +260,104 @@ export async function canView(
     if (FINANCE_VISIBLE_SET.has(report.status)) return true;
   }
   if (user.roles.includes("Manager Approver")) {
-    const employee = await db
-      .select({ managerId: usersTable.managerId })
-      .from(usersTable)
-      .where(eq(usersTable.id, report.employeeId))
-      .limit(1);
-    if (employee[0]?.managerId === user.id) return true;
+    if (await isManagerOrDelegateOf(report.employeeId, user)) return true;
   }
   return false;
+}
+
+// Edit-authorization for content mutations on a report. Returns
+// `{ ok: true }` when the caller may edit, `{ ok: false, status, detail }`
+// otherwise so the caller can propagate the right HTTP response without
+// guessing.
+//
+// The owner can always edit their own report. Their direct manager can
+// edit it too — and if a manager is currently delegating their queue to
+// another manager, that delegate inherits the same edit rights for the
+// duration of the delegation. Admins (System / Accounting) act org-wide.
+//
+// Edit access is *separately* gated by the report's status: even an
+// authorized caller is denied when the report is past Finance Approved.
+// We perform the role check first so we don't leak status information to
+// unauthorized callers.
+export type EditAuthResult =
+  | { ok: true }
+  | { ok: false; status: number; title: string; detail: string };
+
+export async function canEditReport(
+  report: ExpenseReport,
+  user: User,
+): Promise<EditAuthResult> {
+  const orgMatches = report.orgId === user.orgId;
+  if (!orgMatches) {
+    return { ok: false, status: 403, title: "Forbidden", detail: "Report not in your organization." };
+  }
+  // Per Task #25: ONLY the report owner, their direct manager, or an
+  // active delegate of that manager may edit a report's content. Admin
+  // roles (System Admin / Accounting Admin) intentionally do NOT have
+  // edit rights here — administrative changes go through dedicated
+  // admin tooling, not by impersonating the owner on financial records.
+  const isOwner = user.id === report.employeeId;
+  let isManagerOrDelegate = false;
+  if (!isOwner) {
+    isManagerOrDelegate = await isManagerOrDelegateOf(report.employeeId, user);
+  }
+  if (!isOwner && !isManagerOrDelegate) {
+    return {
+      ok: false,
+      status: 403,
+      title: "Forbidden",
+      detail: "Only the report owner or their manager can edit this report.",
+    };
+  }
+  if (!isReportContentEditable(report.status)) {
+    return {
+      ok: false,
+      status: 409,
+      title: "Locked",
+      detail: `Cannot edit a report in status "${report.status}".`,
+    };
+  }
+  return { ok: true };
+}
+
+// True if `user` is the direct manager of the employee with id
+// `employeeId`, OR holds an active manager_delegations row from that
+// employee's direct manager. Used by the edit-authorization gate so
+// delegates inherit edit rights for the duration of the delegation.
+export async function isManagerOrDelegateOf(
+  employeeId: string,
+  user: User,
+): Promise<boolean> {
+  if (!user.roles.includes("Manager Approver")) return false;
+  const employee = (
+    await db
+      .select({ managerId: usersTable.managerId, orgId: usersTable.orgId })
+      .from(usersTable)
+      .where(eq(usersTable.id, employeeId))
+      .limit(1)
+  )[0];
+  if (!employee || employee.orgId !== user.orgId) return false;
+  if (!employee.managerId) return false;
+  if (employee.managerId === user.id) return true;
+  // Delegated authority: an active row from the employee's manager TO this
+  // user authorizes the same edit rights as the manager themselves.
+  const now = new Date();
+  const rows = await db
+    .select()
+    .from(managerDelegationsTable)
+    .where(
+      and(
+        eq(managerDelegationsTable.orgId, user.orgId),
+        eq(managerDelegationsTable.fromManagerId, employee.managerId),
+        eq(managerDelegationsTable.toManagerId, user.id),
+      ),
+    );
+  return rows.some(
+    (r) =>
+      r.revokedAt === null &&
+      r.startsAt <= now &&
+      (r.endsAt === null || r.endsAt > now),
+  );
 }
 
 // Async variant for action endpoints that ensures the caller has manager

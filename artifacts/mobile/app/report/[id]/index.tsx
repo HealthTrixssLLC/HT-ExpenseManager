@@ -437,32 +437,61 @@ export default function ReportDetailScreen() {
               <Text style={styles.emptyText}>No activity yet</Text>
             </View>
           ) : (
-            (timelineQ.data ?? []).map((a, i, arr) => (
-              <View
-                key={a.id}
-                style={[
-                  styles.activityRow,
-                  i < arr.length - 1 && {
-                    borderBottomWidth: StyleSheet.hairlineWidth,
-                    borderBottomColor: HT.border,
-                  },
-                ]}
-              >
-                <View style={styles.activityDot} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.activityWho}>{a.actor.fullName}</Text>
-                  <Text style={styles.activityWhat}>
-                    {a.fromStatus} → <Text style={{ color: HT.ink }}>{a.toStatus}</Text>
-                  </Text>
-                  {a.comment ? (
-                    <Text style={styles.activityComment}>"{a.comment}"</Text>
-                  ) : null}
-                  <Text style={styles.activityWhen}>
-                    {new Date(a.createdAt).toLocaleString()}
-                  </Text>
+            (timelineQ.data ?? []).map((item, i, arr) => {
+              // Merged change feed: each entry is either an approval action
+              // or a content edit. Mobile keeps a compact single-line summary
+              // for content edits; the web app shows the full diff.
+              const isApproval = item.kind === "approval";
+              const a = item.approval;
+              const c = item.content;
+              const actorName = isApproval
+                ? a?.actor.fullName
+                : c?.actor.fullName;
+              const key = (isApproval ? a?.id : c?.id) ?? `idx-${i}`;
+              const what = isApproval ? (
+                <Text style={styles.activityWhat}>
+                  {a?.fromStatus} →{" "}
+                  <Text style={{ color: HT.ink }}>{a?.toStatus}</Text>
+                </Text>
+              ) : (
+                <Text style={styles.activityWhat}>
+                  {c?.entityType === "report"
+                    ? "Report"
+                    : c?.entityType === "line_item"
+                      ? "Line item"
+                      : "Receipt"}{" "}
+                  <Text style={{ color: HT.ink }}>{c?.action}</Text>
+                  {c && c.fieldDiffs.length > 0
+                    ? ` (${c.fieldDiffs.length} field${c.fieldDiffs.length === 1 ? "" : "s"})`
+                    : ""}
+                </Text>
+              );
+              const comment = isApproval ? a?.comment : null;
+              return (
+                <View
+                  key={key}
+                  style={[
+                    styles.activityRow,
+                    i < arr.length - 1 && {
+                      borderBottomWidth: StyleSheet.hairlineWidth,
+                      borderBottomColor: HT.border,
+                    },
+                  ]}
+                >
+                  <View style={styles.activityDot} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.activityWho}>{actorName}</Text>
+                    {what}
+                    {comment ? (
+                      <Text style={styles.activityComment}>"{comment}"</Text>
+                    ) : null}
+                    <Text style={styles.activityWhen}>
+                      {new Date(item.createdAt).toLocaleString()}
+                    </Text>
+                  </View>
                 </View>
-              </View>
-            ))
+              );
+            })
           )}
         </Section>
       </ScrollView>

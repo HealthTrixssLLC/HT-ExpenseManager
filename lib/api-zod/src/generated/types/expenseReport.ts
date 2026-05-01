@@ -33,4 +33,6 @@ export interface ExpenseReport {
   updatedAt: Date;
   lineItems: LineItem[];
   receipts: Receipt[];
+  /** True when at least one field-level content edit has been recorded *after* the most recent approval action on this report (or after creation when no approvals exist yet, except for the initial draft state). Surfaces an "Edited since last approval" banner on the manager / finance review pages so reviewers can see a re-edit happened without forcing a status auto-reset. */
+  editedSinceLastApproval: boolean;
 }

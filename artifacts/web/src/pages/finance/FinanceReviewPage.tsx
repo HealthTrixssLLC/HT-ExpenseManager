@@ -9,6 +9,8 @@ import {
   getListLineItemsQueryKey,
   useListReceipts,
   getListReceiptsQueryKey,
+  useGetReportTimeline,
+  getGetReportTimelineQueryKey,
   useFinanceApprove,
   useFinanceReject,
   usePostToQuickbooks,
@@ -21,8 +23,9 @@ import { notifySuccess } from "@/lib/notify";
 import { formatMoney, formatDate } from "@/lib/format";
 import { StatusPill } from "@/components/brand/StatusPill";
 import { StatusTracker } from "@/components/brand/StatusTracker";
-import { HtCard, HtCardHeader, HtSection } from "@/components/brand/Card";
+import { HtCard, HtCardHeader } from "@/components/brand/Card";
 import { ReceiptThumb } from "@/components/brand/ReceiptThumb";
+import { ChangeFeed } from "@/components/ChangeFeed";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -34,7 +37,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { AlertCircle, CheckCircle, UploadCloud, XCircle } from "lucide-react";
+import { AlertCircle, AlertTriangle, CheckCircle, ExternalLink, UploadCloud, XCircle } from "lucide-react";
 
 export function FinanceReviewPage({ id }: { id: string }) {
   const qc = useQueryClient();
@@ -48,6 +51,9 @@ export function FinanceReviewPage({ id }: { id: string }) {
   });
   const { data: receipts = [] } = useListReceipts(id, {
     query: { queryKey: getListReceiptsQueryKey(id), enabled: !!id }
+  });
+  const { data: timeline = [] } = useGetReportTimeline(id, {
+    query: { queryKey: getGetReportTimelineQueryKey(id), enabled: !!id }
   });
   const { data: glPreview, isLoading: glLoading } = useGetGlPreview(id, {
     query: { queryKey: getGetGlPreviewQueryKey(id), enabled: !!id && (report?.status === "Finance Review" || report?.status === "Finance Approved" || report?.status === "Posted to QuickBooks" || report?.status === "Ready for Payroll Reimbursement" || report?.status === "Sync Error") }
@@ -133,6 +139,12 @@ export function FinanceReviewPage({ id }: { id: string }) {
               ? `${formatDate(report.periodStart)} – ${formatDate(report.periodEnd)}`
               : "-"}
           </p>
+          <Link href={`/reports/${report.id}`}>
+            <Button variant="ghost" size="sm" className="mt-2 -ml-3">
+              <ExternalLink className="w-4 h-4 mr-1" />
+              Open full report
+            </Button>
+          </Link>
         </div>
         <div className="text-right">
           <div className="text-3xl font-semibold tracking-tight text-[var(--ht-ink)]">
@@ -141,6 +153,21 @@ export function FinanceReviewPage({ id }: { id: string }) {
           <div className="text-sm text-[var(--ht-ink-3)] mt-1">Total Amount</div>
         </div>
       </div>
+
+      {report.editedSinceLastApproval && (
+        <div
+          className="flex items-start gap-3 p-3 rounded-md border border-amber-300 bg-amber-50 text-sm text-amber-900"
+          data-testid="banner-edited-since-approval"
+        >
+          <AlertTriangle className="w-5 h-5 shrink-0 mt-px text-amber-600" />
+          <div>
+            <p className="font-medium">Edited since last approval</p>
+            <p className="text-amber-800">
+              This report was edited after the most recent workflow action. Confirm the change history below before approving or posting.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
@@ -195,6 +222,16 @@ export function FinanceReviewPage({ id }: { id: string }) {
             <HtCardHeader title="Workflow Status" />
             <div className="p-4">
               <StatusTracker current={report.status} />
+            </div>
+          </HtCard>
+
+          <HtCard>
+            <HtCardHeader
+              title="Audit Log"
+              subtitle={`${timeline.length} event${timeline.length === 1 ? "" : "s"} on this report`}
+            />
+            <div className="p-4" data-testid="report-audit-log">
+              <ChangeFeed items={timeline} />
             </div>
           </HtCard>
 

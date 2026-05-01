@@ -485,7 +485,8 @@ export const AdminRevokeDelegationParams = zod.object({
 });
 
 /**
- * @summary Approval-action audit trail (org-wide or per-report)
+ * Returns workflow status transitions (`approval_actions`) and field-level content edits (`audit_entries`) interleaved by `createdAt` descending. Filter by `reportId` to scope to one report.
+ * @summary Merged audit trail (workflow actions + content edits)
  */
 export const adminAuditLogQueryLimitDefault = 100;
 export const adminAuditLogQueryLimitMax = 500;
@@ -499,72 +500,139 @@ export const AdminAuditLogQueryParams = zod.object({
     .default(adminAuditLogQueryLimitDefault),
 });
 
-export const AdminAuditLogResponseItem = zod.object({
-  id: zod.string().uuid(),
-  reportId: zod.string().uuid(),
-  actor: zod.object({
-    id: zod.string().uuid(),
-    fullName: zod.string(),
-    roles: zod
-      .array(
-        zod.enum([
-          "Employee",
-          "Manager Approver",
-          "Finance Approver",
-          "Accounting Admin",
-          "System Admin",
-        ]),
-      )
-      .min(1),
-  }),
-  actorRoles: zod
-    .array(
-      zod.enum([
-        "Employee",
-        "Manager Approver",
-        "Finance Approver",
-        "Accounting Admin",
-        "System Admin",
-      ]),
-    )
-    .min(1),
-  fromStatus: zod.enum([
-    "Draft",
-    "Submitted",
-    "Manager Review",
-    "Changes Requested",
-    "Manager Approved",
-    "Finance Review",
-    "Finance Approved",
-    "Posted to QuickBooks",
-    "Ready for Payroll Reimbursement",
-    "Paid Through Payroll",
-    "Reconciled",
-    "Rejected",
-    "Voided",
-    "Sync Error",
-  ]),
-  toStatus: zod.enum([
-    "Draft",
-    "Submitted",
-    "Manager Review",
-    "Changes Requested",
-    "Manager Approved",
-    "Finance Review",
-    "Finance Approved",
-    "Posted to QuickBooks",
-    "Ready for Payroll Reimbursement",
-    "Paid Through Payroll",
-    "Reconciled",
-    "Rejected",
-    "Voided",
-    "Sync Error",
-  ]),
-  comment: zod.string().nullish(),
-  metadata: zod.string().nullish(),
-  sequence: zod.number(),
-  createdAt: zod.coerce.date(),
-});
+export const AdminAuditLogResponseItem = zod
+  .object({
+    kind: zod.enum(["approval", "content"]),
+    createdAt: zod.coerce.date(),
+    approval: zod
+      .union([
+        zod.object({
+          id: zod.string().uuid(),
+          reportId: zod.string().uuid(),
+          actor: zod.object({
+            id: zod.string().uuid(),
+            fullName: zod.string(),
+            roles: zod
+              .array(
+                zod.enum([
+                  "Employee",
+                  "Manager Approver",
+                  "Finance Approver",
+                  "Accounting Admin",
+                  "System Admin",
+                ]),
+              )
+              .min(1),
+          }),
+          actorRoles: zod
+            .array(
+              zod.enum([
+                "Employee",
+                "Manager Approver",
+                "Finance Approver",
+                "Accounting Admin",
+                "System Admin",
+              ]),
+            )
+            .min(1),
+          fromStatus: zod.enum([
+            "Draft",
+            "Submitted",
+            "Manager Review",
+            "Changes Requested",
+            "Manager Approved",
+            "Finance Review",
+            "Finance Approved",
+            "Posted to QuickBooks",
+            "Ready for Payroll Reimbursement",
+            "Paid Through Payroll",
+            "Reconciled",
+            "Rejected",
+            "Voided",
+            "Sync Error",
+          ]),
+          toStatus: zod.enum([
+            "Draft",
+            "Submitted",
+            "Manager Review",
+            "Changes Requested",
+            "Manager Approved",
+            "Finance Review",
+            "Finance Approved",
+            "Posted to QuickBooks",
+            "Ready for Payroll Reimbursement",
+            "Paid Through Payroll",
+            "Reconciled",
+            "Rejected",
+            "Voided",
+            "Sync Error",
+          ]),
+          comment: zod.string().nullish(),
+          metadata: zod.string().nullish(),
+          sequence: zod.number(),
+          createdAt: zod.coerce.date(),
+        }),
+        zod.null(),
+      ])
+      .optional(),
+    content: zod
+      .union([
+        zod
+          .object({
+            id: zod.string().uuid(),
+            reportId: zod.string().uuid(),
+            actor: zod.object({
+              id: zod.string().uuid(),
+              fullName: zod.string(),
+              roles: zod
+                .array(
+                  zod.enum([
+                    "Employee",
+                    "Manager Approver",
+                    "Finance Approver",
+                    "Accounting Admin",
+                    "System Admin",
+                  ]),
+                )
+                .min(1),
+            }),
+            actorRoles: zod
+              .array(
+                zod.enum([
+                  "Employee",
+                  "Manager Approver",
+                  "Finance Approver",
+                  "Accounting Admin",
+                  "System Admin",
+                ]),
+              )
+              .min(1),
+            entityType: zod.enum(["report", "line_item", "receipt"]),
+            entityId: zod.string().uuid(),
+            action: zod.enum(["created", "updated", "deleted"]),
+            fieldDiffs: zod.array(
+              zod
+                .object({
+                  field: zod.string(),
+                  before: zod.unknown(),
+                  after: zod.unknown(),
+                })
+                .describe(
+                  'One field-level change. `before` and `after` are the column\'s prior and new values, JSON-serialized. For \"created\" entries `before` is null; for \"deleted\" entries `after` is null.',
+                ),
+            ),
+            createdAt: zod.coerce.date(),
+          })
+          .describe(
+            "A field-level content edit on a report or one of its children (line item, receipt). Approval\/status transitions live in `ApprovalAction`; merge them via `ChangeFeedItem`.",
+          ),
+        zod.null(),
+      ])
+      .optional(),
+  })
+  .describe(
+    "Discriminated wrapper for the merged change-history feed used by `getReportTimeline` and `adminAuditLog`. `kind=approval` carries an `ApprovalAction`; `kind=content` carries an `AuditEntry`.",
+  );
 export const AdminAuditLogResponse = zod.array(AdminAuditLogResponseItem);
 
 /**
@@ -717,10 +785,15 @@ export const GetReportResponse = zod.object({
       createdAt: zod.coerce.date(),
     }),
   ),
+  editedSinceLastApproval: zod
+    .boolean()
+    .describe(
+      'True when at least one field-level content edit has been recorded \*after\* the most recent approval action on this report (or after creation when no approvals exist yet, except for the initial draft state). Surfaces an \"Edited since last approval\" banner on the manager \/ finance review pages so reviewers can see a re-edit happened without forcing a status auto-reset.',
+    ),
 });
 
 /**
- * @summary Edit report metadata while in Draft or Changes Requested
+ * @summary Edit report header fields. Allowed for the report owner, the owner's direct manager, and active manager delegates while the report is in any pre-Finance-Approved status (Draft, Submitted, Manager Review, Changes Requested, Manager Approved, Finance Review). Locked at Finance Approved and beyond.
  */
 export const UpdateReportParams = zod.object({
   id: zod.coerce.string().uuid(),
@@ -808,6 +881,11 @@ export const UpdateReportResponse = zod.object({
       createdAt: zod.coerce.date(),
     }),
   ),
+  editedSinceLastApproval: zod
+    .boolean()
+    .describe(
+      'True when at least one field-level content edit has been recorded \*after\* the most recent approval action on this report (or after creation when no approvals exist yet, except for the initial draft state). Surfaces an \"Edited since last approval\" banner on the manager \/ finance review pages so reviewers can see a re-edit happened without forcing a status auto-reset.',
+    ),
 });
 
 /**
@@ -897,6 +975,11 @@ export const SubmitReportResponse = zod.object({
       createdAt: zod.coerce.date(),
     }),
   ),
+  editedSinceLastApproval: zod
+    .boolean()
+    .describe(
+      'True when at least one field-level content edit has been recorded \*after\* the most recent approval action on this report (or after creation when no approvals exist yet, except for the initial draft state). Surfaces an \"Edited since last approval\" banner on the manager \/ finance review pages so reviewers can see a re-edit happened without forcing a status auto-reset.',
+    ),
 });
 
 /**
@@ -979,6 +1062,11 @@ export const RecallReportResponse = zod.object({
       createdAt: zod.coerce.date(),
     }),
   ),
+  editedSinceLastApproval: zod
+    .boolean()
+    .describe(
+      'True when at least one field-level content edit has been recorded \*after\* the most recent approval action on this report (or after creation when no approvals exist yet, except for the initial draft state). Surfaces an \"Edited since last approval\" banner on the manager \/ finance review pages so reviewers can see a re-edit happened without forcing a status auto-reset.',
+    ),
 });
 
 /**
@@ -1066,81 +1154,154 @@ export const VoidReportResponse = zod.object({
       createdAt: zod.coerce.date(),
     }),
   ),
+  editedSinceLastApproval: zod
+    .boolean()
+    .describe(
+      'True when at least one field-level content edit has been recorded \*after\* the most recent approval action on this report (or after creation when no approvals exist yet, except for the initial draft state). Surfaces an \"Edited since last approval\" banner on the manager \/ finance review pages so reviewers can see a re-edit happened without forcing a status auto-reset.',
+    ),
 });
 
 /**
- * @summary Approval action audit log for a report
+ * Returns workflow status transitions and field-level content edits for the report, interleaved by `createdAt` ascending so the UI can render a single chronological feed.
+ * @summary Merged change history for a report
  */
 export const GetReportTimelineParams = zod.object({
   id: zod.coerce.string().uuid(),
 });
 
-export const GetReportTimelineResponseItem = zod.object({
-  id: zod.string().uuid(),
-  reportId: zod.string().uuid(),
-  actor: zod.object({
-    id: zod.string().uuid(),
-    fullName: zod.string(),
-    roles: zod
-      .array(
-        zod.enum([
-          "Employee",
-          "Manager Approver",
-          "Finance Approver",
-          "Accounting Admin",
-          "System Admin",
-        ]),
-      )
-      .min(1),
-  }),
-  actorRoles: zod
-    .array(
-      zod.enum([
-        "Employee",
-        "Manager Approver",
-        "Finance Approver",
-        "Accounting Admin",
-        "System Admin",
-      ]),
-    )
-    .min(1),
-  fromStatus: zod.enum([
-    "Draft",
-    "Submitted",
-    "Manager Review",
-    "Changes Requested",
-    "Manager Approved",
-    "Finance Review",
-    "Finance Approved",
-    "Posted to QuickBooks",
-    "Ready for Payroll Reimbursement",
-    "Paid Through Payroll",
-    "Reconciled",
-    "Rejected",
-    "Voided",
-    "Sync Error",
-  ]),
-  toStatus: zod.enum([
-    "Draft",
-    "Submitted",
-    "Manager Review",
-    "Changes Requested",
-    "Manager Approved",
-    "Finance Review",
-    "Finance Approved",
-    "Posted to QuickBooks",
-    "Ready for Payroll Reimbursement",
-    "Paid Through Payroll",
-    "Reconciled",
-    "Rejected",
-    "Voided",
-    "Sync Error",
-  ]),
-  comment: zod.string().nullish(),
-  metadata: zod.string().nullish(),
-  sequence: zod.number(),
-  createdAt: zod.coerce.date(),
-});
+export const GetReportTimelineResponseItem = zod
+  .object({
+    kind: zod.enum(["approval", "content"]),
+    createdAt: zod.coerce.date(),
+    approval: zod
+      .union([
+        zod.object({
+          id: zod.string().uuid(),
+          reportId: zod.string().uuid(),
+          actor: zod.object({
+            id: zod.string().uuid(),
+            fullName: zod.string(),
+            roles: zod
+              .array(
+                zod.enum([
+                  "Employee",
+                  "Manager Approver",
+                  "Finance Approver",
+                  "Accounting Admin",
+                  "System Admin",
+                ]),
+              )
+              .min(1),
+          }),
+          actorRoles: zod
+            .array(
+              zod.enum([
+                "Employee",
+                "Manager Approver",
+                "Finance Approver",
+                "Accounting Admin",
+                "System Admin",
+              ]),
+            )
+            .min(1),
+          fromStatus: zod.enum([
+            "Draft",
+            "Submitted",
+            "Manager Review",
+            "Changes Requested",
+            "Manager Approved",
+            "Finance Review",
+            "Finance Approved",
+            "Posted to QuickBooks",
+            "Ready for Payroll Reimbursement",
+            "Paid Through Payroll",
+            "Reconciled",
+            "Rejected",
+            "Voided",
+            "Sync Error",
+          ]),
+          toStatus: zod.enum([
+            "Draft",
+            "Submitted",
+            "Manager Review",
+            "Changes Requested",
+            "Manager Approved",
+            "Finance Review",
+            "Finance Approved",
+            "Posted to QuickBooks",
+            "Ready for Payroll Reimbursement",
+            "Paid Through Payroll",
+            "Reconciled",
+            "Rejected",
+            "Voided",
+            "Sync Error",
+          ]),
+          comment: zod.string().nullish(),
+          metadata: zod.string().nullish(),
+          sequence: zod.number(),
+          createdAt: zod.coerce.date(),
+        }),
+        zod.null(),
+      ])
+      .optional(),
+    content: zod
+      .union([
+        zod
+          .object({
+            id: zod.string().uuid(),
+            reportId: zod.string().uuid(),
+            actor: zod.object({
+              id: zod.string().uuid(),
+              fullName: zod.string(),
+              roles: zod
+                .array(
+                  zod.enum([
+                    "Employee",
+                    "Manager Approver",
+                    "Finance Approver",
+                    "Accounting Admin",
+                    "System Admin",
+                  ]),
+                )
+                .min(1),
+            }),
+            actorRoles: zod
+              .array(
+                zod.enum([
+                  "Employee",
+                  "Manager Approver",
+                  "Finance Approver",
+                  "Accounting Admin",
+                  "System Admin",
+                ]),
+              )
+              .min(1),
+            entityType: zod.enum(["report", "line_item", "receipt"]),
+            entityId: zod.string().uuid(),
+            action: zod.enum(["created", "updated", "deleted"]),
+            fieldDiffs: zod.array(
+              zod
+                .object({
+                  field: zod.string(),
+                  before: zod.unknown(),
+                  after: zod.unknown(),
+                })
+                .describe(
+                  'One field-level change. `before` and `after` are the column\'s prior and new values, JSON-serialized. For \"created\" entries `before` is null; for \"deleted\" entries `after` is null.',
+                ),
+            ),
+            createdAt: zod.coerce.date(),
+          })
+          .describe(
+            "A field-level content edit on a report or one of its children (line item, receipt). Approval\/status transitions live in `ApprovalAction`; merge them via `ChangeFeedItem`.",
+          ),
+        zod.null(),
+      ])
+      .optional(),
+  })
+  .describe(
+    "Discriminated wrapper for the merged change-history feed used by `getReportTimeline` and `adminAuditLog`. `kind=approval` carries an `ApprovalAction`; `kind=content` carries an `AuditEntry`.",
+  );
 export const GetReportTimelineResponse = zod.array(
   GetReportTimelineResponseItem,
 );
@@ -1456,6 +1617,11 @@ export const ManagerApproveResponse = zod.object({
       createdAt: zod.coerce.date(),
     }),
   ),
+  editedSinceLastApproval: zod
+    .boolean()
+    .describe(
+      'True when at least one field-level content edit has been recorded \*after\* the most recent approval action on this report (or after creation when no approvals exist yet, except for the initial draft state). Surfaces an \"Edited since last approval\" banner on the manager \/ finance review pages so reviewers can see a re-edit happened without forcing a status auto-reset.',
+    ),
 });
 
 export const ManagerRequestChangesParams = zod.object({
@@ -1539,6 +1705,11 @@ export const ManagerRequestChangesResponse = zod.object({
       createdAt: zod.coerce.date(),
     }),
   ),
+  editedSinceLastApproval: zod
+    .boolean()
+    .describe(
+      'True when at least one field-level content edit has been recorded \*after\* the most recent approval action on this report (or after creation when no approvals exist yet, except for the initial draft state). Surfaces an \"Edited since last approval\" banner on the manager \/ finance review pages so reviewers can see a re-edit happened without forcing a status auto-reset.',
+    ),
 });
 
 export const ManagerRejectParams = zod.object({
@@ -1622,6 +1793,11 @@ export const ManagerRejectResponse = zod.object({
       createdAt: zod.coerce.date(),
     }),
   ),
+  editedSinceLastApproval: zod
+    .boolean()
+    .describe(
+      'True when at least one field-level content edit has been recorded \*after\* the most recent approval action on this report (or after creation when no approvals exist yet, except for the initial draft state). Surfaces an \"Edited since last approval\" banner on the manager \/ finance review pages so reviewers can see a re-edit happened without forcing a status auto-reset.',
+    ),
 });
 
 /**
@@ -1757,6 +1933,11 @@ export const FinanceApproveResponse = zod.object({
       createdAt: zod.coerce.date(),
     }),
   ),
+  editedSinceLastApproval: zod
+    .boolean()
+    .describe(
+      'True when at least one field-level content edit has been recorded \*after\* the most recent approval action on this report (or after creation when no approvals exist yet, except for the initial draft state). Surfaces an \"Edited since last approval\" banner on the manager \/ finance review pages so reviewers can see a re-edit happened without forcing a status auto-reset.',
+    ),
 });
 
 export const FinanceRejectParams = zod.object({
@@ -1840,6 +2021,11 @@ export const FinanceRejectResponse = zod.object({
       createdAt: zod.coerce.date(),
     }),
   ),
+  editedSinceLastApproval: zod
+    .boolean()
+    .describe(
+      'True when at least one field-level content edit has been recorded \*after\* the most recent approval action on this report (or after creation when no approvals exist yet, except for the initial draft state). Surfaces an \"Edited since last approval\" banner on the manager \/ finance review pages so reviewers can see a re-edit happened without forcing a status auto-reset.',
+    ),
 });
 
 /**
@@ -1958,6 +2144,11 @@ export const PostToQuickbooksResponse = zod.object({
         createdAt: zod.coerce.date(),
       }),
     ),
+    editedSinceLastApproval: zod
+      .boolean()
+      .describe(
+        'True when at least one field-level content edit has been recorded \*after\* the most recent approval action on this report (or after creation when no approvals exist yet, except for the initial draft state). Surfaces an \"Edited since last approval\" banner on the manager \/ finance review pages so reviewers can see a re-edit happened without forcing a status auto-reset.',
+      ),
   }),
   journalId: zod.string().nullish(),
   status: zod.enum(["posted", "error"]),
@@ -2045,6 +2236,11 @@ export const RetryQuickbooksPostResponse = zod.object({
         createdAt: zod.coerce.date(),
       }),
     ),
+    editedSinceLastApproval: zod
+      .boolean()
+      .describe(
+        'True when at least one field-level content edit has been recorded \*after\* the most recent approval action on this report (or after creation when no approvals exist yet, except for the initial draft state). Surfaces an \"Edited since last approval\" banner on the manager \/ finance review pages so reviewers can see a re-edit happened without forcing a status auto-reset.',
+      ),
   }),
   journalId: zod.string().nullish(),
   status: zod.enum(["posted", "error"]),

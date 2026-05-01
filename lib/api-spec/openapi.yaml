@@ -442,7 +442,12 @@ paths:
     get:
       operationId: adminAuditLog
       tags: [admin]
-      summary: Approval-action audit trail (org-wide or per-report)
+      summary: Merged audit trail (workflow actions + content edits)
+      description: >-
+        Returns workflow status transitions (`approval_actions`) and
+        field-level content edits (`audit_entries`) interleaved by
+        `createdAt` descending. Filter by `reportId` to scope to one
+        report.
       parameters:
         - in: query
           name: reportId
@@ -459,7 +464,7 @@ paths:
             application/json:
               schema:
                 type: array
-                items: { $ref: "#/components/schemas/ApprovalAction" }
+                items: { $ref: "#/components/schemas/ChangeFeedItem" }
 
   /reports:
     get:
@@ -526,7 +531,12 @@ paths:
     patch:
       operationId: updateReport
       tags: [reports]
-      summary: Edit report metadata while in Draft or Changes Requested
+      summary: >-
+        Edit report header fields. Allowed for the report owner, the
+        owner's direct manager, and active manager delegates while the
+        report is in any pre-Finance-Approved status (Draft, Submitted,
+        Manager Review, Changes Requested, Manager Approved, Finance
+        Review). Locked at Finance Approved and beyond.
       requestBody:
         required: true
         content:
@@ -614,7 +624,11 @@ paths:
     get:
       operationId: getReportTimeline
       tags: [timeline]
-      summary: Approval action audit log for a report
+      summary: Merged change history for a report
+      description: >-
+        Returns workflow status transitions and field-level content edits
+        for the report, interleaved by `createdAt` ascending so the UI
+        can render a single chronological feed.
       responses:
         "200":
           description: OK
@@ -622,7 +636,7 @@ paths:
             application/json:
               schema:
                 type: array
-                items: { $ref: "#/components/schemas/ApprovalAction" }
+                items: { $ref: "#/components/schemas/ChangeFeedItem" }
 
   /reports/{id}/lines:
     parameters:
@@ -1466,6 +1480,16 @@ components:
         receipts:
           type: array
           items: { $ref: "#/components/schemas/Receipt" }
+        editedSinceLastApproval:
+          type: boolean
+          description: >-
+            True when at least one field-level content edit has been
+            recorded *after* the most recent approval action on this
+            report (or after creation when no approvals exist yet, except
+            for the initial draft state). Surfaces an "Edited since last
+            approval" banner on the manager / finance review pages so
+            reviewers can see a re-edit happened without forcing a
+            status auto-reset.
       required:
         - id
         - displayCode
@@ -1479,6 +1503,7 @@ components:
         - updatedAt
         - lineItems
         - receipts
+        - editedSinceLastApproval
 
     CreateReportBody:
       type: object
@@ -1651,6 +1676,76 @@ components:
         - toStatus
         - sequence
         - createdAt
+
+    AuditFieldDiff:
+      type: object
+      description: >-
+        One field-level change. `before` and `after` are the column's
+        prior and new values, JSON-serialized. For "created" entries
+        `before` is null; for "deleted" entries `after` is null.
+      properties:
+        field: { type: string }
+        before: {}
+        after: {}
+      required: [field, before, after]
+
+    AuditEntry:
+      type: object
+      description: >-
+        A field-level content edit on a report or one of its children
+        (line item, receipt). Approval/status transitions live in
+        `ApprovalAction`; merge them via `ChangeFeedItem`.
+      properties:
+        id: { type: string, format: uuid }
+        reportId: { type: string, format: uuid }
+        actor: { $ref: "#/components/schemas/UserRef" }
+        actorRoles:
+          type: array
+          items: { $ref: "#/components/schemas/Role" }
+          minItems: 1
+          uniqueItems: true
+        entityType:
+          type: string
+          enum: [report, line_item, receipt]
+        entityId: { type: string, format: uuid }
+        action:
+          type: string
+          enum: [created, updated, deleted]
+        fieldDiffs:
+          type: array
+          items: { $ref: "#/components/schemas/AuditFieldDiff" }
+        createdAt: { type: string, format: date-time }
+      required:
+        - id
+        - reportId
+        - actor
+        - actorRoles
+        - entityType
+        - entityId
+        - action
+        - fieldDiffs
+        - createdAt
+
+    ChangeFeedItem:
+      type: object
+      description: >-
+        Discriminated wrapper for the merged change-history feed used by
+        `getReportTimeline` and `adminAuditLog`. `kind=approval` carries
+        an `ApprovalAction`; `kind=content` carries an `AuditEntry`.
+      properties:
+        kind:
+          type: string
+          enum: [approval, content]
+        createdAt: { type: string, format: date-time }
+        approval:
+          oneOf:
+            - $ref: "#/components/schemas/ApprovalAction"
+            - { type: "null" }
+        content:
+          oneOf:
+            - $ref: "#/components/schemas/AuditEntry"
+            - { type: "null" }
+      required: [kind, createdAt]
 
     GlPreviewLine:
       type: object

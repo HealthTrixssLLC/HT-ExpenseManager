@@ -361,6 +361,8 @@ export interface ExpenseReport {
   updatedAt: string;
   lineItems: LineItem[];
   receipts: Receipt[];
+  /** True when at least one field-level content edit has been recorded *after* the most recent approval action on this report (or after creation when no approvals exist yet, except for the initial draft state). Surfaces an "Edited since last approval" banner on the manager / finance review pages so reviewers can see a re-edit happened without forcing a status auto-reset. */
+  editedSinceLastApproval: boolean;
 }
 
 export interface CreateReportBody {
@@ -471,6 +473,67 @@ export interface ApprovalAction {
   metadata?: string | null;
   sequence: number;
   createdAt: string;
+}
+
+/**
+ * One field-level change. `before` and `after` are the column's prior and new values, JSON-serialized. For "created" entries `before` is null; for "deleted" entries `after` is null.
+ */
+export interface AuditFieldDiff {
+  field: string;
+  before: unknown;
+  after: unknown;
+}
+
+export type AuditEntryEntityType =
+  (typeof AuditEntryEntityType)[keyof typeof AuditEntryEntityType];
+
+export const AuditEntryEntityType = {
+  report: "report",
+  line_item: "line_item",
+  receipt: "receipt",
+} as const;
+
+export type AuditEntryAction =
+  (typeof AuditEntryAction)[keyof typeof AuditEntryAction];
+
+export const AuditEntryAction = {
+  created: "created",
+  updated: "updated",
+  deleted: "deleted",
+} as const;
+
+/**
+ * A field-level content edit on a report or one of its children (line item, receipt). Approval/status transitions live in `ApprovalAction`; merge them via `ChangeFeedItem`.
+ */
+export interface AuditEntry {
+  id: string;
+  reportId: string;
+  actor: UserRef;
+  /** @minItems 1 */
+  actorRoles: Role[];
+  entityType: AuditEntryEntityType;
+  entityId: string;
+  action: AuditEntryAction;
+  fieldDiffs: AuditFieldDiff[];
+  createdAt: string;
+}
+
+export type ChangeFeedItemKind =
+  (typeof ChangeFeedItemKind)[keyof typeof ChangeFeedItemKind];
+
+export const ChangeFeedItemKind = {
+  approval: "approval",
+  content: "content",
+} as const;
+
+/**
+ * Discriminated wrapper for the merged change-history feed used by `getReportTimeline` and `adminAuditLog`. `kind=approval` carries an `ApprovalAction`; `kind=content` carries an `AuditEntry`.
+ */
+export interface ChangeFeedItem {
+  kind: ChangeFeedItemKind;
+  createdAt: string;
+  approval?: ApprovalAction | null;
+  content?: AuditEntry | null;
 }
 
 export interface GlPreviewLine {

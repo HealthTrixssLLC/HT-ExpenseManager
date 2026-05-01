@@ -17,6 +17,7 @@ import {
 } from "@workspace/api-zod";
 import {
   approvalActionsTable,
+  auditEntriesTable,
   db,
   departmentsTable,
   expenseReportsTable,
@@ -31,10 +32,13 @@ import { sendProblem } from "../lib/problem";
 import { requireAuth, requireRole } from "../middlewares/session";
 import {
   toApprovalActionDto,
+  toAuditEntryDto,
   toGlMappingDto,
   toPolicyRuleDto,
   toQboConnectionDto,
   toUserDto,
+  toUserRef,
+  type ChangeFeedItemDto,
 } from "../lib/serializers";
 import {
   connectQboStub,
@@ -342,9 +346,10 @@ router.post(
   },
 );
 
-// Approval-action audit trail. Defaults to org-wide; pass ?reportId=<uuid> to
-// scope to a single report (which is what the report detail page shows in the
-// timeline tab).
+// Merged audit trail: workflow status transitions (approval_actions) plus
+// field-level content edits (audit_entries), interleaved by createdAt
+// descending so the admin Audit Log page renders one chronological feed.
+// Defaults to org-wide; pass ?reportId=<uuid> to scope to a single report.
 router.get(
   "/admin/audit-log",
   requireRole(...ADMIN_ROLES),
@@ -357,30 +362,57 @@ router.get(
       : 100;
     // approval_actions has no org column directly; join through expense_reports
     // to enforce org isolation (and to support the optional reportId filter).
-    const where = reportIdParam
+    const approvalWhere = reportIdParam
       ? and(
           eq(expenseReportsTable.orgId, orgId),
           eq(approvalActionsTable.reportId, reportIdParam),
         )
       : eq(expenseReportsTable.orgId, orgId);
-    // Order by createdAt DESC (a wall-clock timestamp), not by `sequence` —
-    // sequence is per-report and is meaningless across multiple reports.
-    // Pushing ORDER BY + LIMIT into SQL avoids loading the full org history
-    // into memory just to slice it.
-    const rows = await db
-      .select()
-      .from(approvalActionsTable)
-      .innerJoin(
-        expenseReportsTable,
-        eq(approvalActionsTable.reportId, expenseReportsTable.id),
-      )
-      .innerJoin(usersTable, eq(approvalActionsTable.actorId, usersTable.id))
-      .where(where)
-      .orderBy(desc(approvalActionsTable.createdAt))
-      .limit(limit);
-    res.json(
-      rows.map((row) => toApprovalActionDto(row.approval_actions, row.users)),
-    );
+    const auditWhere = reportIdParam
+      ? and(
+          eq(auditEntriesTable.orgId, orgId),
+          eq(auditEntriesTable.reportId, reportIdParam),
+        )
+      : eq(auditEntriesTable.orgId, orgId);
+    // Pull `limit` rows from each table separately; we'll merge in JS and
+    // truncate. Asking for `limit` from each side guarantees we never miss
+    // a row that would have placed in the top `limit` of the merged feed.
+    const [approvalRows, auditRows] = await Promise.all([
+      db
+        .select()
+        .from(approvalActionsTable)
+        .innerJoin(
+          expenseReportsTable,
+          eq(approvalActionsTable.reportId, expenseReportsTable.id),
+        )
+        .innerJoin(usersTable, eq(approvalActionsTable.actorId, usersTable.id))
+        .where(approvalWhere)
+        .orderBy(desc(approvalActionsTable.createdAt))
+        .limit(limit),
+      db
+        .select()
+        .from(auditEntriesTable)
+        .innerJoin(usersTable, eq(auditEntriesTable.actorId, usersTable.id))
+        .where(auditWhere)
+        .orderBy(desc(auditEntriesTable.createdAt))
+        .limit(limit),
+    ]);
+    const items: ChangeFeedItemDto[] = [
+      ...approvalRows.map((row) => ({
+        kind: "approval" as const,
+        createdAt: row.approval_actions.createdAt.toISOString(),
+        approval: toApprovalActionDto(row.approval_actions, row.users),
+        content: null,
+      })),
+      ...auditRows.map((row) => ({
+        kind: "content" as const,
+        createdAt: row.audit_entries.createdAt.toISOString(),
+        approval: null,
+        content: toAuditEntryDto(row.audit_entries, toUserRef(row.users)),
+      })),
+    ];
+    items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    res.json(items.slice(0, limit));
   },
 );
 
