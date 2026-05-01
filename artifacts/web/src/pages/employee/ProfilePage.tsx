@@ -1,4 +1,4 @@
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/lib/auth-context";
 import { HtCard, HtCardHeader } from "@/components/brand/Card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";

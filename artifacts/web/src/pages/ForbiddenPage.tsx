@@ -1,6 +1,6 @@
 import { Link } from "wouter";
 import { ShieldAlert } from "lucide-react";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/lib/auth-context";
 
 export function ForbiddenPage() {
   const { roles } = useAuth();

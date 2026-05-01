@@ -4,7 +4,7 @@ import {
   getGetBootstrapStatusQueryKey,
 } from "@workspace/api-client-react";
 import { HealthtrixMark } from "@/components/brand/BrandHeader";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/lib/auth-context";
 import { describeApiError } from "@/lib/api";
 
 export function LoginPage() {

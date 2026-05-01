@@ -8,7 +8,7 @@ import {
   useListManagers,
   getListManagersQueryKey
 } from "@workspace/api-client-react";
-import { useAuthedUser } from "@/lib/auth";
+import { useAuthedUser } from "@/lib/auth-context";
 import { HtCard, HtCardHeader } from "@/components/brand/Card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

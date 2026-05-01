@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { DesktopTopbar } from "@/components/brand/BrandHeader";
 import { SidebarNav, type NavSection } from "@/components/brand/SidebarNav";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/lib/auth-context";
 import {
   roleCanFinanceReview,
   roleCanManagerReview,

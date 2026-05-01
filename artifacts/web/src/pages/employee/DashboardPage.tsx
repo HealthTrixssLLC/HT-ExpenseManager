@@ -5,7 +5,7 @@ import {
   useListReports,
   getListReportsQueryKey,
 } from "@workspace/api-client-react";
-import { useAuthedUser } from "@/lib/auth";
+import { useAuthedUser } from "@/lib/auth-context";
 import { formatMoney, formatDate } from "@/lib/format";
 import { StatusPill } from "@/components/brand/StatusPill";
 import { HtCard, HtCardHeader } from "@/components/brand/Card";
