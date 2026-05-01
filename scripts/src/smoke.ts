@@ -16,7 +16,7 @@ const BASE = process.env["API_BASE"] ?? "http://localhost:8080/api";
 const PASSWORD = "Healthtrix!2026";
 
 type LoginResp = {
-  user: { id: string; email: string; role: string; fullName: string };
+  user: { id: string; email: string; roles: string[]; fullName: string };
   csrfToken: string;
   sessionExpiresAt: string;
   sessionToken: string | null;
@@ -82,12 +82,15 @@ async function main(): Promise<void> {
   for (const r of roles) {
     const session = await login(r.email);
     assert(session.sessionToken, `${r.email}: token returned`);
-    assert(session.user.role === r.role, `${r.email}: role=${r.role}`);
+    assert(
+      session.user.roles.includes(r.role as never),
+      `${r.email}: roles include ${r.role}`,
+    );
     sessions[r.email] = {
       token: session.sessionToken!,
       userId: session.user.id,
     };
-    console.log(`✓ login ${r.email} → ${session.user.role}`);
+    console.log(`✓ login ${r.email} → ${session.user.roles.join(", ")}`);
   }
 
   // /auth/me echo

@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, asc, eq, or } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import {
   ListCategoriesResponse,
   ListDepartmentsResponse,
@@ -61,12 +61,8 @@ router.get("/lookups/managers", requireAuth, async (req, res): Promise<void> => 
       and(
         eq(usersTable.orgId, orgId),
         eq(usersTable.isActive, true),
-        or(
-          eq(usersTable.role, "Manager Approver"),
-          eq(usersTable.role, "Finance Approver"),
-          eq(usersTable.role, "Accounting Admin"),
-          eq(usersTable.role, "System Admin"),
-        ),
+        // Postgres array overlap: any of the user's roles is an approver role.
+        sql`${usersTable.roles} && ARRAY['Manager Approver','Finance Approver','Accounting Admin','System Admin']::role[]`,
       ),
     )
     .orderBy(asc(usersTable.fullName));
@@ -76,7 +72,7 @@ router.get("/lookups/managers", requireAuth, async (req, res): Promise<void> => 
         id: u.id,
         fullName: u.fullName,
         email: u.email,
-        role: u.role,
+        roles: u.roles,
       })),
     ),
   );

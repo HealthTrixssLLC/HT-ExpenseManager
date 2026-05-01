@@ -1218,7 +1218,11 @@ components:
         email: { type: string }
         fullName: { type: string }
         title: { type: ["string", "null"] }
-        role: { $ref: "#/components/schemas/Role" }
+        roles:
+          type: array
+          items: { $ref: "#/components/schemas/Role" }
+          minItems: 1
+          uniqueItems: true
         isAlsoEmployee: { type: boolean }
         isActive: { type: boolean }
         departmentId: { type: ["string", "null"], format: uuid }
@@ -1230,7 +1234,7 @@ components:
         - id
         - email
         - fullName
-        - role
+        - roles
         - isAlsoEmployee
         - isActive
         - createdAt
@@ -1242,18 +1246,26 @@ components:
         fullName: { type: string, minLength: 1 }
         title: { type: ["string", "null"] }
         password: { type: string, minLength: 8 }
-        role: { $ref: "#/components/schemas/Role" }
+        roles:
+          type: array
+          items: { $ref: "#/components/schemas/Role" }
+          minItems: 1
+          uniqueItems: true
         isAlsoEmployee: { type: boolean }
         departmentId: { type: ["string", "null"], format: uuid }
         managerId: { type: ["string", "null"], format: uuid }
-      required: [email, fullName, password, role]
+      required: [email, fullName, password, roles]
 
     UpdateUserBody:
       type: object
       properties:
         fullName: { type: string }
         title: { type: ["string", "null"] }
-        role: { $ref: "#/components/schemas/Role" }
+        roles:
+          type: array
+          items: { $ref: "#/components/schemas/Role" }
+          minItems: 1
+          uniqueItems: true
         isAlsoEmployee: { type: boolean }
         departmentId: { type: ["string", "null"], format: uuid }
         managerId: { type: ["string", "null"], format: uuid }
@@ -1410,8 +1422,12 @@ components:
       properties:
         id: { type: string, format: uuid }
         fullName: { type: string }
-        role: { $ref: "#/components/schemas/Role" }
-      required: [id, fullName, role]
+        roles:
+          type: array
+          items: { $ref: "#/components/schemas/Role" }
+          minItems: 1
+          uniqueItems: true
+      required: [id, fullName, roles]
 
     ManagerOption:
       type: object
@@ -1419,8 +1435,12 @@ components:
         id: { type: string, format: uuid }
         fullName: { type: string }
         email: { type: string, format: email }
-        role: { $ref: "#/components/schemas/Role" }
-      required: [id, fullName, email, role]
+        roles:
+          type: array
+          items: { $ref: "#/components/schemas/Role" }
+          minItems: 1
+          uniqueItems: true
+      required: [id, fullName, email, roles]
 
     ExpenseReport:
       type: object
@@ -1611,7 +1631,11 @@ components:
         id: { type: string, format: uuid }
         reportId: { type: string, format: uuid }
         actor: { $ref: "#/components/schemas/UserRef" }
-        actorRole: { $ref: "#/components/schemas/Role" }
+        actorRoles:
+          type: array
+          items: { $ref: "#/components/schemas/Role" }
+          minItems: 1
+          uniqueItems: true
         fromStatus: { $ref: "#/components/schemas/WorkflowStatus" }
         toStatus: { $ref: "#/components/schemas/WorkflowStatus" }
         comment: { type: ["string", "null"] }
@@ -1622,7 +1646,7 @@ components:
         - id
         - reportId
         - actor
-        - actorRole
+        - actorRoles
         - fromStatus
         - toStatus
         - sequence

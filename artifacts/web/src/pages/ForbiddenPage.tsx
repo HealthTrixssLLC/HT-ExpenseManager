@@ -3,7 +3,8 @@ import { ShieldAlert } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 
 export function ForbiddenPage() {
-  const { role } = useAuth();
+  const { roles } = useAuth();
+  const roleLabel = roles.length > 0 ? roles.join(", ") : null;
   return (
     <div
       style={{
@@ -50,9 +51,9 @@ export function ForbiddenPage() {
             lineHeight: 1.55,
           }}
         >
-          {role
-            ? `Your role (${role}) doesn't include this area. If you believe this is a mistake, ask a System Admin to update your permissions.`
-            : "Your role doesn't include this area."}
+          {roleLabel
+            ? `Your roles (${roleLabel}) don't include this area. If you believe this is a mistake, ask a System Admin to update your permissions.`
+            : "Your roles don't include this area."}
         </p>
         <Link
           href="/"

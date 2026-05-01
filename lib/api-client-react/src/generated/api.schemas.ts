@@ -69,7 +69,8 @@ export interface User {
   fullName: string;
   /** @nullable */
   title?: string | null;
-  role: Role;
+  /** @minItems 1 */
+  roles: Role[];
   isAlsoEmployee: boolean;
   isActive: boolean;
   /** @nullable */
@@ -130,7 +131,8 @@ export interface CreateUserBody {
   title?: string | null;
   /** @minLength 8 */
   password: string;
-  role: Role;
+  /** @minItems 1 */
+  roles: Role[];
   isAlsoEmployee?: boolean;
   /** @nullable */
   departmentId?: string | null;
@@ -142,7 +144,8 @@ export interface UpdateUserBody {
   fullName?: string;
   /** @nullable */
   title?: string | null;
-  role?: Role;
+  /** @minItems 1 */
+  roles?: Role[];
   isAlsoEmployee?: boolean;
   /** @nullable */
   departmentId?: string | null;
@@ -273,7 +276,8 @@ export interface UpdateQboConnectionBody {
 export interface UserRef {
   id: string;
   fullName: string;
-  role: Role;
+  /** @minItems 1 */
+  roles: Role[];
 }
 
 export interface ExpenseReportSummary {
@@ -302,7 +306,8 @@ export interface ManagerOption {
   id: string;
   fullName: string;
   email: string;
-  role: Role;
+  /** @minItems 1 */
+  roles: Role[];
 }
 
 export interface LineItem {
@@ -456,7 +461,8 @@ export interface ApprovalAction {
   id: string;
   reportId: string;
   actor: UserRef;
-  actorRole: Role;
+  /** @minItems 1 */
+  actorRoles: Role[];
   fromStatus: WorkflowStatus;
   toStatus: WorkflowStatus;
   /** @nullable */

@@ -13,7 +13,8 @@ export interface User {
   fullName: string;
   /** @nullable */
   title?: string | null;
-  role: Role;
+  /** @minItems 1 */
+  roles: Role[];
   isAlsoEmployee: boolean;
   isActive: boolean;
   /** @nullable */

@@ -11,5 +11,6 @@ export interface ManagerOption {
   id: string;
   fullName: string;
   email: string;
-  role: Role;
+  /** @minItems 1 */
+  roles: Role[];
 }

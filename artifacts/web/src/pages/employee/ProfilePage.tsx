@@ -7,7 +7,7 @@ import { useLocation } from "wouter";
 import { formatDate } from "@/lib/format";
 
 export function ProfilePage() {
-  const { user, role, session, logout } = useAuth();
+  const { user, roles, session, logout } = useAuth();
   const [, setLocation] = useLocation();
 
   if (!user) {
@@ -55,9 +55,15 @@ export function ProfilePage() {
           <div className="flex items-start gap-3">
             <Shield className="w-5 h-5 mt-0.5 text-[var(--ht-ink-3)]" />
             <div>
-              <div className="text-xs uppercase tracking-wide text-[var(--ht-ink-3)]">Role</div>
-              <div className="flex items-center gap-2">
-                <Badge variant="secondary" className="font-medium">{role ?? user.role}</Badge>
+              <div className="text-xs uppercase tracking-wide text-[var(--ht-ink-3)]">
+                {roles.length > 1 ? "Roles" : "Role"}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {roles.map((r) => (
+                  <Badge key={r} variant="secondary" className="font-medium">
+                    {r}
+                  </Badge>
+                ))}
                 {user.isAlsoEmployee && (
                   <Badge variant="outline" className="text-xs">Also employee</Badge>
                 )}

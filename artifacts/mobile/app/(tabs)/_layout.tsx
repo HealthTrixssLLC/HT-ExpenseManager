@@ -8,7 +8,7 @@ import { useAuth } from "@/contexts/AuthContext";
 
 export default function TabLayout() {
   const { user } = useAuth();
-  const isManager = user?.role === "Manager Approver";
+  const isManager = user?.roles?.includes("Manager Approver") ?? false;
   const showInbox = isManager;
   const showReports = !isManager || user?.isAlsoEmployee === true;
 

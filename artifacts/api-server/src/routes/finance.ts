@@ -72,7 +72,7 @@ async function transitionRoute(
   const report = await fetchReportOrThrow(id, req.auth!.user.orgId);
   const result = await applyTransition({
     report,
-    actor: { id: req.auth!.user.id, role: req.auth!.user.role },
+    actor: { id: req.auth!.user.id, roles: req.auth!.user.roles },
     transition,
     comment: parsed.data.comment ?? null,
   });
@@ -125,7 +125,7 @@ router.post(
     if (post.status === "posted") {
       const result = await applyTransition({
         report,
-        actor: { id: req.auth!.user.id, role: req.auth!.user.role },
+        actor: { id: req.auth!.user.id, roles: req.auth!.user.roles },
         transition: "postQbo",
         comment: typeof req.body?.comment === "string" ? req.body.comment : null,
         metadata: JSON.stringify({ journalId: post.journalId }),
@@ -133,7 +133,7 @@ router.post(
       // Auto-advance to Ready for Payroll Reimbursement so payroll queue picks it up.
       const advanced = await applyTransition({
         report: result.report,
-        actor: { id: req.auth!.user.id, role: req.auth!.user.role },
+        actor: { id: req.auth!.user.id, roles: req.auth!.user.roles },
         transition: "readyForPayroll",
         metadata: JSON.stringify({ journalId: post.journalId }),
       });
@@ -149,7 +149,7 @@ router.post(
     }
     const result = await applyTransition({
       report,
-      actor: { id: req.auth!.user.id, role: req.auth!.user.role },
+      actor: { id: req.auth!.user.id, roles: req.auth!.user.roles },
       transition: "postQboError",
       comment: post.errorMessage,
       metadata: JSON.stringify({ errorMessage: post.errorMessage }),
@@ -187,13 +187,13 @@ router.post(
     }
     const result = await applyTransition({
       report,
-      actor: { id: req.auth!.user.id, role: req.auth!.user.role },
+      actor: { id: req.auth!.user.id, roles: req.auth!.user.roles },
       transition: "retryQbo",
       metadata: JSON.stringify({ journalId: post.journalId }),
     });
     const advanced = await applyTransition({
       report: result.report,
-      actor: { id: req.auth!.user.id, role: req.auth!.user.role },
+      actor: { id: req.auth!.user.id, roles: req.auth!.user.roles },
       transition: "readyForPayroll",
     });
     res.json(

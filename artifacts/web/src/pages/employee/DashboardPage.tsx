@@ -192,8 +192,8 @@ export function DashboardPage() {
                   Create New Report
                 </Button>
               </Link>
-              {(user.role === "Manager Approver" || user.role === "Finance Approver" || user.role === "System Admin" || user.role === "Accounting Admin") && (
-                <Link href={user.role === "Finance Approver" ? "/finance/queue" : "/manager/queue"}>
+              {(user.roles.includes("Manager Approver") || user.roles.includes("Finance Approver")) && (
+                <Link href={user.roles.includes("Manager Approver") ? "/manager/queue" : "/finance/queue"}>
                   <Button variant="outline" className="w-full justify-start">
                     <Clock className="w-4 h-4 mr-2" />
                     Review Approvals Queue

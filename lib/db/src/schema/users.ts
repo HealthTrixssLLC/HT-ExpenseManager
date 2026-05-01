@@ -1,12 +1,14 @@
 import {
   AnyPgColumn,
   boolean,
+  check,
   pgTable,
   text,
   timestamp,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { orgsTable } from "./orgs";
 import { departmentsTable } from "./departments";
 import { roleEnum } from "./enums";
@@ -22,7 +24,7 @@ export const usersTable = pgTable(
     passwordHash: text("password_hash").notNull(),
     fullName: text("full_name").notNull(),
     title: text("title"),
-    role: roleEnum("role").notNull(),
+    roles: roleEnum("roles").array().notNull(),
     // Approver roles often also submit reports themselves.
     isAlsoEmployee: boolean("is_also_employee").notNull().default(false),
     departmentId: uuid("department_id").references(() => departmentsTable.id, {
@@ -42,6 +44,10 @@ export const usersTable = pgTable(
   },
   (t) => ({
     orgEmailUnique: uniqueIndex("users_org_email_unique").on(t.orgId, t.email),
+    rolesNonEmpty: check(
+      "users_roles_non_empty",
+      sql`cardinality(${t.roles}) > 0`,
+    ),
   }),
 );
 

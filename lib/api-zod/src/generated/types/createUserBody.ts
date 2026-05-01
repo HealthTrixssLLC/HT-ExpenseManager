@@ -15,7 +15,8 @@ export interface CreateUserBody {
   title?: string | null;
   /** @minLength 8 */
   password: string;
-  role: Role;
+  /** @minItems 1 */
+  roles: Role[];
   isAlsoEmployee?: boolean;
   /** @nullable */
   departmentId?: string | null;

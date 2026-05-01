@@ -1,6 +1,7 @@
 import {
   bigint,
   boolean,
+  check,
   date,
   index,
   integer,
@@ -11,6 +12,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { orgsTable } from "./orgs";
 import { usersTable } from "./users";
 import { departmentsTable } from "./departments";
@@ -128,7 +130,7 @@ export const approvalActionsTable = pgTable(
     actorId: uuid("actor_id")
       .notNull()
       .references(() => usersTable.id, { onDelete: "restrict" }),
-    actorRole: roleEnum("actor_role").notNull(),
+    actorRoles: roleEnum("actor_roles").array().notNull(),
     fromStatus: workflowStatusEnum("from_status").notNull(),
     toStatus: workflowStatusEnum("to_status").notNull(),
     comment: text("comment"),
@@ -143,6 +145,10 @@ export const approvalActionsTable = pgTable(
     reportIdx: index("approval_actions_report_idx").on(
       t.reportId,
       t.sequence,
+    ),
+    actorRolesNonEmpty: check(
+      "approval_actions_actor_roles_non_empty",
+      sql`cardinality(${t.actorRoles}) > 0`,
     ),
   }),
 );

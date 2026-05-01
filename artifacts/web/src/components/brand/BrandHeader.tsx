@@ -63,12 +63,12 @@ export function HealthtrixMark({
 
 export function DesktopTopbar({
   user,
-  role,
+  roles,
   rightSlot,
   onSignOut,
 }: {
   user: string;
-  role: string;
+  roles: readonly string[];
   rightSlot?: ReactNode;
   onSignOut?: () => void;
 }) {
@@ -99,7 +99,7 @@ export function DesktopTopbar({
         >
           <div style={{ textAlign: "right", lineHeight: 1.2 }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: "white" }}>{user}</div>
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.7)" }}>{role}</div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.7)" }}>{roles.join(" · ")}</div>
           </div>
           <div
             style={{

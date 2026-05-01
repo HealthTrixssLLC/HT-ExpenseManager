@@ -109,7 +109,7 @@ export async function loadReportSummaries(
         : {
             id: report.employeeId,
             fullName: "Unknown",
-            role: "Employee",
+            roles: ["Employee"] as const,
           },
       departmentName: report.departmentId
         ? departmentById.get(report.departmentId) ?? null
@@ -193,7 +193,7 @@ export async function canView(
   user: User,
 ): Promise<boolean> {
   if (report.orgId !== user.orgId) return false;
-  if (user.role === "System Admin" || user.role === "Accounting Admin")
+  if (user.roles.includes("System Admin") || user.roles.includes("Accounting Admin"))
     return true;
   // The employee always sees their own report regardless of status.
   if (user.id === report.employeeId) return true;
@@ -201,16 +201,16 @@ export async function canView(
   // Drafts, Submitted, Manager Review, Changes Requested, and Rejected
   // reports are invisible to finance — they belong to the employee/manager
   // half of the workflow.
-  if (user.role === "Finance Approver") {
-    return FINANCE_VISIBLE_SET.has(report.status);
+  if (user.roles.includes("Finance Approver")) {
+    if (FINANCE_VISIBLE_SET.has(report.status)) return true;
   }
-  if (user.role === "Manager Approver") {
+  if (user.roles.includes("Manager Approver")) {
     const employee = await db
       .select({ managerId: usersTable.managerId })
       .from(usersTable)
       .where(eq(usersTable.id, report.employeeId))
       .limit(1);
-    return employee[0]?.managerId === user.id;
+    if (employee[0]?.managerId === user.id) return true;
   }
   return false;
 }
@@ -223,9 +223,9 @@ export async function isReportManager(
   user: User,
 ): Promise<boolean> {
   if (report.orgId !== user.orgId) return false;
-  if (user.role === "System Admin" || user.role === "Accounting Admin")
+  if (user.roles.includes("System Admin") || user.roles.includes("Accounting Admin"))
     return true;
-  if (user.role !== "Manager Approver") return false;
+  if (!user.roles.includes("Manager Approver")) return false;
   const employee = await db
     .select({ managerId: usersTable.managerId })
     .from(usersTable)

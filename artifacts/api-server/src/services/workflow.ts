@@ -194,7 +194,7 @@ export type TransitionName = keyof typeof TRANSITIONS;
 
 export type Actor = {
   id: string;
-  role: Role;
+  roles: Role[];
 };
 
 export type ApplyTransitionInput = {
@@ -228,7 +228,7 @@ export async function applyTransition(
     if (c.from !== report.status) return false;
     return c.actors.some((a) => {
       if (a === "self") return allowSelf && actor.id === report.employeeId;
-      return a === actor.role;
+      return actor.roles.includes(a);
     });
   });
 
@@ -236,7 +236,7 @@ export async function applyTransition(
     throw new HttpError(
       409,
       "Invalid Transition",
-      `Cannot ${transition} a report in status "${report.status}" as ${actor.role}.`,
+      `Cannot ${transition} a report in status "${report.status}" as ${actor.roles.join(", ")}.`,
     );
   }
 
@@ -265,7 +265,7 @@ export async function applyTransition(
       .values({
         reportId: report.id,
         actorId: actor.id,
-        actorRole: actor.role,
+        actorRoles: actor.roles,
         fromStatus: match.from,
         toStatus: match.to,
         comment: comment ?? null,

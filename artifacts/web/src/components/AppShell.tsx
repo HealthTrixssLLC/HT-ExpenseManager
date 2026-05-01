@@ -24,7 +24,7 @@ import {
   type Role,
 } from "@/lib/types";
 
-function buildSections(role: Role): NavSection[] {
+function buildSections(roles: Role[]): NavSection[] {
   const sections: NavSection[] = [
     {
       title: "My work",
@@ -35,7 +35,7 @@ function buildSections(role: Role): NavSection[] {
     },
   ];
 
-  if (roleCanManagerReview(role)) {
+  if (roleCanManagerReview(roles)) {
     sections.push({
       title: "Manager",
       items: [
@@ -49,7 +49,7 @@ function buildSections(role: Role): NavSection[] {
     });
   }
 
-  if (roleCanFinanceReview(role)) {
+  if (roleCanFinanceReview(roles)) {
     sections.push({
       title: "Finance",
       items: [
@@ -86,7 +86,7 @@ function buildSections(role: Role): NavSection[] {
     ],
   });
 
-  if (roleCanAdmin(role)) {
+  if (roleCanAdmin(roles)) {
     sections.push({
       title: "Admin",
       items: [
@@ -115,9 +115,9 @@ function buildSections(role: Role): NavSection[] {
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { user, role, logout } = useAuth();
-  if (!user || !role) return null;
-  const sections = buildSections(role);
+  const { user, roles, logout } = useAuth();
+  if (!user || roles.length === 0) return null;
+  const sections = buildSections(roles);
 
   return (
     <div
@@ -130,7 +130,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     >
       <DesktopTopbar
         user={user.fullName}
-        role={user.role}
+        roles={roles}
         onSignOut={() => {
           void logout();
         }}
@@ -151,7 +151,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <div style={{ fontWeight: 600, color: "var(--ht-ink-2)" }}>
                 {user.fullName}
               </div>
-              <div>{user.role}</div>
+              <div>{roles.join(" · ")}</div>
               {user.departmentName && <div>{user.departmentName}</div>}
             </div>
           }
@@ -176,11 +176,11 @@ export function ProtectedRoute({
   children,
   fallback,
 }: {
-  allow: (role: Role) => boolean;
+  allow: (roles: Role[]) => boolean;
   children: ReactNode;
   fallback: ReactNode;
 }) {
-  const { role } = useAuth();
-  if (!role) return null;
-  return allow(role) ? <>{children}</> : <>{fallback}</>;
+  const { roles } = useAuth();
+  if (roles.length === 0) return null;
+  return allow(roles) ? <>{children}</> : <>{fallback}</>;
 }

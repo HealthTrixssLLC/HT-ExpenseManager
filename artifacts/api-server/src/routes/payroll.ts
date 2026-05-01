@@ -231,7 +231,7 @@ router.post(
       for (const r of reports) {
         await applyTransition({
           report: r,
-          actor: { id: req.auth!.user.id, role: req.auth!.user.role },
+          actor: { id: req.auth!.user.id, roles: req.auth!.user.roles },
           transition: "markPaid",
           metadata: JSON.stringify({ batchId: batch.id }),
           tx,
@@ -341,7 +341,7 @@ router.post(
         const fresh = reportById.get(r.id) ?? r;
         await applyTransition({
           report: fresh,
-          actor: { id: req.auth!.user.id, role: req.auth!.user.role },
+          actor: { id: req.auth!.user.id, roles: req.auth!.user.roles },
           transition: "reconcile",
           metadata: JSON.stringify({ batchId: batch.id }),
           tx,

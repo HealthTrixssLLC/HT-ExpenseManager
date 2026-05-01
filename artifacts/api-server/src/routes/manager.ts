@@ -69,7 +69,10 @@ async function resolveDelegate(
       detail: "delegateOf user not found in this org.",
     };
   }
-  if (target.role !== "Manager Approver" && target.role !== "System Admin") {
+  if (
+    !target.roles.includes("Manager Approver") &&
+    !target.roles.includes("System Admin")
+  ) {
     return {
       ok: false,
       status: 400,
@@ -78,7 +81,7 @@ async function resolveDelegate(
     };
   }
   // System Admin can act for anyone — their role is already org-wide.
-  if (auth.user.role !== "System Admin") {
+  if (!auth.user.roles.includes("System Admin")) {
     const now = new Date();
     const rows = await db
       .select()
@@ -197,7 +200,7 @@ async function transitionRoute(
     : null;
   const result = await applyTransition({
     report,
-    actor: { id: req.auth!.user.id, role: req.auth!.user.role },
+    actor: { id: req.auth!.user.id, roles: req.auth!.user.roles },
     transition,
     comment: parsed.data.comment ?? null,
     metadata,

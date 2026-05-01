@@ -48,30 +48,35 @@ export type Role =
  * admins — so this is currently a no-op gate. Kept for symmetry with the
  * mockups' role badges.
  */
-export function roleCanCreateOwnReports(_role: Role): boolean {
+export function hasAnyRole(roles: Role[], allowed: readonly Role[]): boolean {
+  const set = new Set<Role>(allowed);
+  return roles.some((r) => set.has(r));
+}
+
+export function roleCanCreateOwnReports(_roles: Role[]): boolean {
   return true;
 }
 
-export function roleCanManagerReview(role: Role): boolean {
-  return (
-    role === "Manager Approver" ||
-    role === "Accounting Admin" ||
-    role === "System Admin"
-  );
+export function roleCanManagerReview(roles: Role[]): boolean {
+  return hasAnyRole(roles, [
+    "Manager Approver",
+    "Accounting Admin",
+    "System Admin",
+  ]);
 }
 
-export function roleCanFinanceReview(role: Role): boolean {
-  return (
-    role === "Finance Approver" ||
-    role === "Accounting Admin" ||
-    role === "System Admin"
-  );
+export function roleCanFinanceReview(roles: Role[]): boolean {
+  return hasAnyRole(roles, [
+    "Finance Approver",
+    "Accounting Admin",
+    "System Admin",
+  ]);
 }
 
-export function roleCanAdmin(role: Role): boolean {
-  return role === "Accounting Admin" || role === "System Admin";
+export function roleCanAdmin(roles: Role[]): boolean {
+  return hasAnyRole(roles, ["Accounting Admin", "System Admin"]);
 }
 
-export function roleCanViewAnalytics(_role: Role): boolean {
+export function roleCanViewAnalytics(_roles: Role[]): boolean {
   return true;
 }

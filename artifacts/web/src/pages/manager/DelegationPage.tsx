@@ -54,9 +54,12 @@ export function DelegationPage() {
   // For this page, we show delegations where the current user is the delegator
   // Unless they are an admin, in which case they see all. 
   // Let's just filter to current user's delegations to match the prompt's intent.
-  const myDelegations = currentUser.role.includes("Admin") 
-    ? delegations 
-    : delegations.filter(d => d.fromManagerId === currentUser.user.id);
+  const isAdmin = currentUser.roles.some(
+    (r) => r === "System Admin" || r === "Accounting Admin",
+  );
+  const myDelegations = isAdmin
+    ? delegations
+    : delegations.filter((d) => d.fromManagerId === currentUser.user.id);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -116,7 +119,7 @@ export function DelegationPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    {currentUser.role.includes("Admin") && <TableHead>Delegator</TableHead>}
+                    {isAdmin && <TableHead>Delegator</TableHead>}
                     <TableHead>Delegate To</TableHead>
                     <TableHead>Start Date</TableHead>
                     <TableHead>End Date</TableHead>
@@ -127,7 +130,7 @@ export function DelegationPage() {
                 <TableBody>
                   {myDelegations.map((d) => (
                     <TableRow key={d.id}>
-                      {currentUser.role.includes("Admin") && (
+                      {isAdmin && (
                         <TableCell>{d.fromManagerName}</TableCell>
                       )}
                       <TableCell className="font-medium">

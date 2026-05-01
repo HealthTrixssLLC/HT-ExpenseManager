@@ -26,7 +26,7 @@ import type { Role } from "./types";
 interface AuthCtx {
   status: "loading" | "anonymous" | "authenticated";
   user: User | null;
-  role: Role | null;
+  roles: Role[];
   session: AuthSession | null;
   login: (body: LoginBody) => Promise<AuthSession>;
   logout: () => Promise<void>;
@@ -81,7 +81,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const session = pendingSession ?? meQuery.data ?? null;
   const user = session?.user ?? null;
-  const role = (user?.role as Role | undefined) ?? null;
+  const roles = useMemo<Role[]>(
+    () => ((user?.roles as Role[] | undefined) ?? []),
+    [user],
+  );
 
   const login = useCallback<AuthCtx["login"]>(
     async (body) => {
@@ -125,7 +128,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       status,
       user,
-      role,
+      roles,
       session,
       login,
       logout,
@@ -137,7 +140,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [
       status,
       user,
-      role,
+      roles,
       session,
       login,
       logout,
@@ -159,10 +162,10 @@ export function useAuth(): AuthCtx {
 
 /** Strict variant — throws if the user is not signed in. Useful inside
  *  protected screens where the AppShell already gated the route. */
-export function useAuthedUser(): { user: User; role: Role; csrfToken: string } {
-  const { user, role, session } = useAuth();
-  if (!user || !role || !session) {
+export function useAuthedUser(): { user: User; roles: Role[]; csrfToken: string } {
+  const { user, roles, session } = useAuth();
+  if (!user || roles.length === 0 || !session) {
     throw new Error("useAuthedUser called without an authenticated session");
   }
-  return { user, role, csrfToken: session.csrfToken };
+  return { user, roles, csrfToken: session.csrfToken };
 }

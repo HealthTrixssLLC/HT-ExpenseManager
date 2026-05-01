@@ -13,7 +13,8 @@ export interface ApprovalAction {
   id: string;
   reportId: string;
   actor: UserRef;
-  actorRole: Role;
+  /** @minItems 1 */
+  actorRoles: Role[];
   fromStatus: WorkflowStatus;
   toStatus: WorkflowStatus;
   /** @nullable */

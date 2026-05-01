@@ -522,7 +522,7 @@ async function main(): Promise<void> {
   console.log("Creating users…");
   const userByEmail = new Map<
     string,
-    { id: string; role: Role; fullName: string }
+    { id: string; roles: Role[]; fullName: string }
   >();
   // First pass: insert all users without a manager.
   for (const spec of USERS) {
@@ -535,14 +535,14 @@ async function main(): Promise<void> {
         passwordHash,
         fullName: spec.fullName,
         title: spec.title,
-        role: spec.role,
+        roles: [spec.role],
         isAlsoEmployee: spec.isAlsoEmployee,
         departmentId: dept?.id ?? null,
       })
       .returning();
     userByEmail.set(spec.email, {
       id: user.id,
-      role: user.role,
+      roles: user.roles,
       fullName: user.fullName,
     });
   }
@@ -652,7 +652,7 @@ async function main(): Promise<void> {
       await db.insert(approvalActionsTable).values({
         reportId: report.id,
         actorId: actor.id,
-        actorRole: actor.role,
+        actorRoles: actor.roles,
         fromStatus: step.from,
         toStatus: step.to,
         comment:

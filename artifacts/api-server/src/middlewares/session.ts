@@ -98,7 +98,7 @@ export function requireRole(
       sendProblem(res, 401, "Unauthorized", "Sign in required.");
       return;
     }
-    if (!allowed.has(req.auth.user.role)) {
+    if (!req.auth.user.roles.some((r) => allowed.has(r))) {
       sendProblem(
         res,
         403,

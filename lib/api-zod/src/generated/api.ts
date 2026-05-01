@@ -60,13 +60,17 @@ export const RegisterUserBody = zod.object({
   fullName: zod.string().min(1),
   title: zod.string().nullish(),
   password: zod.string().min(registerUserBodyPasswordMin),
-  role: zod.enum([
-    "Employee",
-    "Manager Approver",
-    "Finance Approver",
-    "Accounting Admin",
-    "System Admin",
-  ]),
+  roles: zod
+    .array(
+      zod.enum([
+        "Employee",
+        "Manager Approver",
+        "Finance Approver",
+        "Accounting Admin",
+        "System Admin",
+      ]),
+    )
+    .min(1),
   isAlsoEmployee: zod.boolean().optional(),
   departmentId: zod.string().uuid().nullish(),
   managerId: zod.string().uuid().nullish(),
@@ -87,13 +91,17 @@ export const LoginResponse = zod.object({
     email: zod.string(),
     fullName: zod.string(),
     title: zod.string().nullish(),
-    role: zod.enum([
-      "Employee",
-      "Manager Approver",
-      "Finance Approver",
-      "Accounting Admin",
-      "System Admin",
-    ]),
+    roles: zod
+      .array(
+        zod.enum([
+          "Employee",
+          "Manager Approver",
+          "Finance Approver",
+          "Accounting Admin",
+          "System Admin",
+        ]),
+      )
+      .min(1),
     isAlsoEmployee: zod.boolean(),
     isActive: zod.boolean(),
     departmentId: zod.string().uuid().nullish(),
@@ -115,19 +123,24 @@ export const LoginResponse = zod.object({
 /**
  * @summary Current user + CSRF token
  */
+
 export const GetMeResponse = zod.object({
   user: zod.object({
     id: zod.string().uuid(),
     email: zod.string(),
     fullName: zod.string(),
     title: zod.string().nullish(),
-    role: zod.enum([
-      "Employee",
-      "Manager Approver",
-      "Finance Approver",
-      "Accounting Admin",
-      "System Admin",
-    ]),
+    roles: zod
+      .array(
+        zod.enum([
+          "Employee",
+          "Manager Approver",
+          "Finance Approver",
+          "Accounting Admin",
+          "System Admin",
+        ]),
+      )
+      .min(1),
     isAlsoEmployee: zod.boolean(),
     isActive: zod.boolean(),
     departmentId: zod.string().uuid().nullish(),
@@ -168,17 +181,22 @@ export const ListDepartmentsResponse = zod.array(ListDepartmentsResponseItem);
 /**
  * @summary Active users eligible to manage / approve other employees
  */
+
 export const ListManagersResponseItem = zod.object({
   id: zod.string().uuid(),
   fullName: zod.string(),
   email: zod.string().email(),
-  role: zod.enum([
-    "Employee",
-    "Manager Approver",
-    "Finance Approver",
-    "Accounting Admin",
-    "System Admin",
-  ]),
+  roles: zod
+    .array(
+      zod.enum([
+        "Employee",
+        "Manager Approver",
+        "Finance Approver",
+        "Accounting Admin",
+        "System Admin",
+      ]),
+    )
+    .min(1),
 });
 export const ListManagersResponse = zod.array(ListManagersResponseItem);
 
@@ -196,18 +214,23 @@ export const ListPolicyRulesResponse = zod.array(ListPolicyRulesResponseItem);
 /**
  * @summary List users
  */
+
 export const AdminListUsersResponseItem = zod.object({
   id: zod.string().uuid(),
   email: zod.string(),
   fullName: zod.string(),
   title: zod.string().nullish(),
-  role: zod.enum([
-    "Employee",
-    "Manager Approver",
-    "Finance Approver",
-    "Accounting Admin",
-    "System Admin",
-  ]),
+  roles: zod
+    .array(
+      zod.enum([
+        "Employee",
+        "Manager Approver",
+        "Finance Approver",
+        "Accounting Admin",
+        "System Admin",
+      ]),
+    )
+    .min(1),
   isAlsoEmployee: zod.boolean(),
   isActive: zod.boolean(),
   departmentId: zod.string().uuid().nullish(),
@@ -229,13 +252,17 @@ export const AdminCreateUserBody = zod.object({
   fullName: zod.string().min(1),
   title: zod.string().nullish(),
   password: zod.string().min(adminCreateUserBodyPasswordMin),
-  role: zod.enum([
-    "Employee",
-    "Manager Approver",
-    "Finance Approver",
-    "Accounting Admin",
-    "System Admin",
-  ]),
+  roles: zod
+    .array(
+      zod.enum([
+        "Employee",
+        "Manager Approver",
+        "Finance Approver",
+        "Accounting Admin",
+        "System Admin",
+      ]),
+    )
+    .min(1),
   isAlsoEmployee: zod.boolean().optional(),
   departmentId: zod.string().uuid().nullish(),
   managerId: zod.string().uuid().nullish(),
@@ -253,14 +280,17 @@ export const adminUpdateUserBodyPasswordMin = 8;
 export const AdminUpdateUserBody = zod.object({
   fullName: zod.string().optional(),
   title: zod.string().nullish(),
-  role: zod
-    .enum([
-      "Employee",
-      "Manager Approver",
-      "Finance Approver",
-      "Accounting Admin",
-      "System Admin",
-    ])
+  roles: zod
+    .array(
+      zod.enum([
+        "Employee",
+        "Manager Approver",
+        "Finance Approver",
+        "Accounting Admin",
+        "System Admin",
+      ]),
+    )
+    .min(1)
     .optional(),
   isAlsoEmployee: zod.boolean().optional(),
   departmentId: zod.string().uuid().nullish(),
@@ -274,13 +304,17 @@ export const AdminUpdateUserResponse = zod.object({
   email: zod.string(),
   fullName: zod.string(),
   title: zod.string().nullish(),
-  role: zod.enum([
-    "Employee",
-    "Manager Approver",
-    "Finance Approver",
-    "Accounting Admin",
-    "System Admin",
-  ]),
+  roles: zod
+    .array(
+      zod.enum([
+        "Employee",
+        "Manager Approver",
+        "Finance Approver",
+        "Accounting Admin",
+        "System Admin",
+      ]),
+    )
+    .min(1),
   isAlsoEmployee: zod.boolean(),
   isActive: zod.boolean(),
   departmentId: zod.string().uuid().nullish(),
@@ -471,21 +505,29 @@ export const AdminAuditLogResponseItem = zod.object({
   actor: zod.object({
     id: zod.string().uuid(),
     fullName: zod.string(),
-    role: zod.enum([
-      "Employee",
-      "Manager Approver",
-      "Finance Approver",
-      "Accounting Admin",
-      "System Admin",
-    ]),
+    roles: zod
+      .array(
+        zod.enum([
+          "Employee",
+          "Manager Approver",
+          "Finance Approver",
+          "Accounting Admin",
+          "System Admin",
+        ]),
+      )
+      .min(1),
   }),
-  actorRole: zod.enum([
-    "Employee",
-    "Manager Approver",
-    "Finance Approver",
-    "Accounting Admin",
-    "System Admin",
-  ]),
+  actorRoles: zod
+    .array(
+      zod.enum([
+        "Employee",
+        "Manager Approver",
+        "Finance Approver",
+        "Accounting Admin",
+        "System Admin",
+      ]),
+    )
+    .min(1),
   fromStatus: zod.enum([
     "Draft",
     "Submitted",
@@ -541,13 +583,17 @@ export const ListReportsResponseItem = zod.object({
   employee: zod.object({
     id: zod.string().uuid(),
     fullName: zod.string(),
-    role: zod.enum([
-      "Employee",
-      "Manager Approver",
-      "Finance Approver",
-      "Accounting Admin",
-      "System Admin",
-    ]),
+    roles: zod
+      .array(
+        zod.enum([
+          "Employee",
+          "Manager Approver",
+          "Finance Approver",
+          "Accounting Admin",
+          "System Admin",
+        ]),
+      )
+      .min(1),
   }),
   departmentName: zod.string().nullish(),
   period: zod.string().nullish(),
@@ -606,13 +652,17 @@ export const GetReportResponse = zod.object({
   employee: zod.object({
     id: zod.string().uuid(),
     fullName: zod.string(),
-    role: zod.enum([
-      "Employee",
-      "Manager Approver",
-      "Finance Approver",
-      "Accounting Admin",
-      "System Admin",
-    ]),
+    roles: zod
+      .array(
+        zod.enum([
+          "Employee",
+          "Manager Approver",
+          "Finance Approver",
+          "Accounting Admin",
+          "System Admin",
+        ]),
+      )
+      .min(1),
   }),
   departmentId: zod.string().uuid().nullish(),
   departmentName: zod.string().nullish(),
@@ -693,13 +743,17 @@ export const UpdateReportResponse = zod.object({
   employee: zod.object({
     id: zod.string().uuid(),
     fullName: zod.string(),
-    role: zod.enum([
-      "Employee",
-      "Manager Approver",
-      "Finance Approver",
-      "Accounting Admin",
-      "System Admin",
-    ]),
+    roles: zod
+      .array(
+        zod.enum([
+          "Employee",
+          "Manager Approver",
+          "Finance Approver",
+          "Accounting Admin",
+          "System Admin",
+        ]),
+      )
+      .min(1),
   }),
   departmentId: zod.string().uuid().nullish(),
   departmentName: zod.string().nullish(),
@@ -778,13 +832,17 @@ export const SubmitReportResponse = zod.object({
   employee: zod.object({
     id: zod.string().uuid(),
     fullName: zod.string(),
-    role: zod.enum([
-      "Employee",
-      "Manager Approver",
-      "Finance Approver",
-      "Accounting Admin",
-      "System Admin",
-    ]),
+    roles: zod
+      .array(
+        zod.enum([
+          "Employee",
+          "Manager Approver",
+          "Finance Approver",
+          "Accounting Admin",
+          "System Admin",
+        ]),
+      )
+      .min(1),
   }),
   departmentId: zod.string().uuid().nullish(),
   departmentName: zod.string().nullish(),
@@ -856,13 +914,17 @@ export const RecallReportResponse = zod.object({
   employee: zod.object({
     id: zod.string().uuid(),
     fullName: zod.string(),
-    role: zod.enum([
-      "Employee",
-      "Manager Approver",
-      "Finance Approver",
-      "Accounting Admin",
-      "System Admin",
-    ]),
+    roles: zod
+      .array(
+        zod.enum([
+          "Employee",
+          "Manager Approver",
+          "Finance Approver",
+          "Accounting Admin",
+          "System Admin",
+        ]),
+      )
+      .min(1),
   }),
   departmentId: zod.string().uuid().nullish(),
   departmentName: zod.string().nullish(),
@@ -939,13 +1001,17 @@ export const VoidReportResponse = zod.object({
   employee: zod.object({
     id: zod.string().uuid(),
     fullName: zod.string(),
-    role: zod.enum([
-      "Employee",
-      "Manager Approver",
-      "Finance Approver",
-      "Accounting Admin",
-      "System Admin",
-    ]),
+    roles: zod
+      .array(
+        zod.enum([
+          "Employee",
+          "Manager Approver",
+          "Finance Approver",
+          "Accounting Admin",
+          "System Admin",
+        ]),
+      )
+      .min(1),
   }),
   departmentId: zod.string().uuid().nullish(),
   departmentName: zod.string().nullish(),
@@ -1015,21 +1081,29 @@ export const GetReportTimelineResponseItem = zod.object({
   actor: zod.object({
     id: zod.string().uuid(),
     fullName: zod.string(),
-    role: zod.enum([
-      "Employee",
-      "Manager Approver",
-      "Finance Approver",
-      "Accounting Admin",
-      "System Admin",
-    ]),
+    roles: zod
+      .array(
+        zod.enum([
+          "Employee",
+          "Manager Approver",
+          "Finance Approver",
+          "Accounting Admin",
+          "System Admin",
+        ]),
+      )
+      .min(1),
   }),
-  actorRole: zod.enum([
-    "Employee",
-    "Manager Approver",
-    "Finance Approver",
-    "Accounting Admin",
-    "System Admin",
-  ]),
+  actorRoles: zod
+    .array(
+      zod.enum([
+        "Employee",
+        "Manager Approver",
+        "Finance Approver",
+        "Accounting Admin",
+        "System Admin",
+      ]),
+    )
+    .min(1),
   fromStatus: zod.enum([
     "Draft",
     "Submitted",
@@ -1252,6 +1326,7 @@ export const RequestUploadUrlResponse = zod.object({
 /**
  * @summary Reports awaiting the caller's manager review
  */
+
 export const ManagerQueueResponseItem = zod.object({
   id: zod.string().uuid(),
   displayCode: zod.string(),
@@ -1259,13 +1334,17 @@ export const ManagerQueueResponseItem = zod.object({
   employee: zod.object({
     id: zod.string().uuid(),
     fullName: zod.string(),
-    role: zod.enum([
-      "Employee",
-      "Manager Approver",
-      "Finance Approver",
-      "Accounting Admin",
-      "System Admin",
-    ]),
+    roles: zod
+      .array(
+        zod.enum([
+          "Employee",
+          "Manager Approver",
+          "Finance Approver",
+          "Accounting Admin",
+          "System Admin",
+        ]),
+      )
+      .min(1),
   }),
   departmentName: zod.string().nullish(),
   period: zod.string().nullish(),
@@ -1312,13 +1391,17 @@ export const ManagerApproveResponse = zod.object({
   employee: zod.object({
     id: zod.string().uuid(),
     fullName: zod.string(),
-    role: zod.enum([
-      "Employee",
-      "Manager Approver",
-      "Finance Approver",
-      "Accounting Admin",
-      "System Admin",
-    ]),
+    roles: zod
+      .array(
+        zod.enum([
+          "Employee",
+          "Manager Approver",
+          "Finance Approver",
+          "Accounting Admin",
+          "System Admin",
+        ]),
+      )
+      .min(1),
   }),
   departmentId: zod.string().uuid().nullish(),
   departmentName: zod.string().nullish(),
@@ -1391,13 +1474,17 @@ export const ManagerRequestChangesResponse = zod.object({
   employee: zod.object({
     id: zod.string().uuid(),
     fullName: zod.string(),
-    role: zod.enum([
-      "Employee",
-      "Manager Approver",
-      "Finance Approver",
-      "Accounting Admin",
-      "System Admin",
-    ]),
+    roles: zod
+      .array(
+        zod.enum([
+          "Employee",
+          "Manager Approver",
+          "Finance Approver",
+          "Accounting Admin",
+          "System Admin",
+        ]),
+      )
+      .min(1),
   }),
   departmentId: zod.string().uuid().nullish(),
   departmentName: zod.string().nullish(),
@@ -1470,13 +1557,17 @@ export const ManagerRejectResponse = zod.object({
   employee: zod.object({
     id: zod.string().uuid(),
     fullName: zod.string(),
-    role: zod.enum([
-      "Employee",
-      "Manager Approver",
-      "Finance Approver",
-      "Accounting Admin",
-      "System Admin",
-    ]),
+    roles: zod
+      .array(
+        zod.enum([
+          "Employee",
+          "Manager Approver",
+          "Finance Approver",
+          "Accounting Admin",
+          "System Admin",
+        ]),
+      )
+      .min(1),
   }),
   departmentId: zod.string().uuid().nullish(),
   departmentName: zod.string().nullish(),
@@ -1536,6 +1627,7 @@ export const ManagerRejectResponse = zod.object({
 /**
  * @summary Reports awaiting Finance review
  */
+
 export const FinanceQueueResponseItem = zod.object({
   id: zod.string().uuid(),
   displayCode: zod.string(),
@@ -1543,13 +1635,17 @@ export const FinanceQueueResponseItem = zod.object({
   employee: zod.object({
     id: zod.string().uuid(),
     fullName: zod.string(),
-    role: zod.enum([
-      "Employee",
-      "Manager Approver",
-      "Finance Approver",
-      "Accounting Admin",
-      "System Admin",
-    ]),
+    roles: zod
+      .array(
+        zod.enum([
+          "Employee",
+          "Manager Approver",
+          "Finance Approver",
+          "Accounting Admin",
+          "System Admin",
+        ]),
+      )
+      .min(1),
   }),
   departmentName: zod.string().nullish(),
   period: zod.string().nullish(),
@@ -1596,13 +1692,17 @@ export const FinanceApproveResponse = zod.object({
   employee: zod.object({
     id: zod.string().uuid(),
     fullName: zod.string(),
-    role: zod.enum([
-      "Employee",
-      "Manager Approver",
-      "Finance Approver",
-      "Accounting Admin",
-      "System Admin",
-    ]),
+    roles: zod
+      .array(
+        zod.enum([
+          "Employee",
+          "Manager Approver",
+          "Finance Approver",
+          "Accounting Admin",
+          "System Admin",
+        ]),
+      )
+      .min(1),
   }),
   departmentId: zod.string().uuid().nullish(),
   departmentName: zod.string().nullish(),
@@ -1675,13 +1775,17 @@ export const FinanceRejectResponse = zod.object({
   employee: zod.object({
     id: zod.string().uuid(),
     fullName: zod.string(),
-    role: zod.enum([
-      "Employee",
-      "Manager Approver",
-      "Finance Approver",
-      "Accounting Admin",
-      "System Admin",
-    ]),
+    roles: zod
+      .array(
+        zod.enum([
+          "Employee",
+          "Manager Approver",
+          "Finance Approver",
+          "Accounting Admin",
+          "System Admin",
+        ]),
+      )
+      .min(1),
   }),
   departmentId: zod.string().uuid().nullish(),
   departmentName: zod.string().nullish(),
@@ -1789,13 +1893,17 @@ export const PostToQuickbooksResponse = zod.object({
     employee: zod.object({
       id: zod.string().uuid(),
       fullName: zod.string(),
-      role: zod.enum([
-        "Employee",
-        "Manager Approver",
-        "Finance Approver",
-        "Accounting Admin",
-        "System Admin",
-      ]),
+      roles: zod
+        .array(
+          zod.enum([
+            "Employee",
+            "Manager Approver",
+            "Finance Approver",
+            "Accounting Admin",
+            "System Admin",
+          ]),
+        )
+        .min(1),
     }),
     departmentId: zod.string().uuid().nullish(),
     departmentName: zod.string().nullish(),
@@ -1872,13 +1980,17 @@ export const RetryQuickbooksPostResponse = zod.object({
     employee: zod.object({
       id: zod.string().uuid(),
       fullName: zod.string(),
-      role: zod.enum([
-        "Employee",
-        "Manager Approver",
-        "Finance Approver",
-        "Accounting Admin",
-        "System Admin",
-      ]),
+      roles: zod
+        .array(
+          zod.enum([
+            "Employee",
+            "Manager Approver",
+            "Finance Approver",
+            "Accounting Admin",
+            "System Admin",
+          ]),
+        )
+        .min(1),
     }),
     departmentId: zod.string().uuid().nullish(),
     departmentName: zod.string().nullish(),
@@ -1942,6 +2054,7 @@ export const RetryQuickbooksPostResponse = zod.object({
 /**
  * @summary Reports ready for payroll reimbursement
  */
+
 export const PayrollQueueResponseItem = zod.object({
   id: zod.string().uuid(),
   displayCode: zod.string(),
@@ -1949,13 +2062,17 @@ export const PayrollQueueResponseItem = zod.object({
   employee: zod.object({
     id: zod.string().uuid(),
     fullName: zod.string(),
-    role: zod.enum([
-      "Employee",
-      "Manager Approver",
-      "Finance Approver",
-      "Accounting Admin",
-      "System Admin",
-    ]),
+    roles: zod
+      .array(
+        zod.enum([
+          "Employee",
+          "Manager Approver",
+          "Finance Approver",
+          "Accounting Admin",
+          "System Admin",
+        ]),
+      )
+      .min(1),
   }),
   departmentName: zod.string().nullish(),
   period: zod.string().nullish(),
@@ -2005,13 +2122,17 @@ export const ListPayrollBatchesResponseItem = zod.object({
         employee: zod.object({
           id: zod.string().uuid(),
           fullName: zod.string(),
-          role: zod.enum([
-            "Employee",
-            "Manager Approver",
-            "Finance Approver",
-            "Accounting Admin",
-            "System Admin",
-          ]),
+          roles: zod
+            .array(
+              zod.enum([
+                "Employee",
+                "Manager Approver",
+                "Finance Approver",
+                "Accounting Admin",
+                "System Admin",
+              ]),
+            )
+            .min(1),
         }),
         departmentName: zod.string().nullish(),
         period: zod.string().nullish(),
@@ -2091,13 +2212,17 @@ export const GetPayrollBatchResponse = zod.object({
         employee: zod.object({
           id: zod.string().uuid(),
           fullName: zod.string(),
-          role: zod.enum([
-            "Employee",
-            "Manager Approver",
-            "Finance Approver",
-            "Accounting Admin",
-            "System Admin",
-          ]),
+          roles: zod
+            .array(
+              zod.enum([
+                "Employee",
+                "Manager Approver",
+                "Finance Approver",
+                "Accounting Admin",
+                "System Admin",
+              ]),
+            )
+            .min(1),
         }),
         departmentName: zod.string().nullish(),
         period: zod.string().nullish(),
@@ -2169,13 +2294,17 @@ export const MarkPayrollBatchPaidResponse = zod.object({
         employee: zod.object({
           id: zod.string().uuid(),
           fullName: zod.string(),
-          role: zod.enum([
-            "Employee",
-            "Manager Approver",
-            "Finance Approver",
-            "Accounting Admin",
-            "System Admin",
-          ]),
+          roles: zod
+            .array(
+              zod.enum([
+                "Employee",
+                "Manager Approver",
+                "Finance Approver",
+                "Accounting Admin",
+                "System Admin",
+              ]),
+            )
+            .min(1),
         }),
         departmentName: zod.string().nullish(),
         period: zod.string().nullish(),
@@ -2259,13 +2388,17 @@ export const ReconcilePayrollBatchResponse = zod.object({
         employee: zod.object({
           id: zod.string().uuid(),
           fullName: zod.string(),
-          role: zod.enum([
-            "Employee",
-            "Manager Approver",
-            "Finance Approver",
-            "Accounting Admin",
-            "System Admin",
-          ]),
+          roles: zod
+            .array(
+              zod.enum([
+                "Employee",
+                "Manager Approver",
+                "Finance Approver",
+                "Accounting Admin",
+                "System Admin",
+              ]),
+            )
+            .min(1),
         }),
         departmentName: zod.string().nullish(),
         period: zod.string().nullish(),

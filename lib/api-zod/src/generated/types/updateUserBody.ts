@@ -11,7 +11,8 @@ export interface UpdateUserBody {
   fullName?: string;
   /** @nullable */
   title?: string | null;
-  role?: Role;
+  /** @minItems 1 */
+  roles?: Role[];
   isAlsoEmployee?: boolean;
   /** @nullable */
   departmentId?: string | null;

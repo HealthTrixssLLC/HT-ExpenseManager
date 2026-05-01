@@ -70,9 +70,9 @@ router.get("/reports", async (req: Request, res: Response): Promise<void> => {
     where = and(where, eq(expenseReportsTable.employeeId, auth.user.id));
   } else if (scope === "manager") {
     if (
-      auth.user.role !== "Manager Approver" &&
-      auth.user.role !== "Accounting Admin" &&
-      auth.user.role !== "System Admin"
+      !auth.user.roles.some((r) =>
+        ["Manager Approver", "Accounting Admin", "System Admin"].includes(r),
+      )
     ) {
       sendProblem(res, 403, "Forbidden");
       return;
@@ -89,9 +89,9 @@ router.get("/reports", async (req: Request, res: Response): Promise<void> => {
     where = and(where, inArray(expenseReportsTable.employeeId, ids));
   } else if (scope === "finance") {
     if (
-      auth.user.role !== "Finance Approver" &&
-      auth.user.role !== "Accounting Admin" &&
-      auth.user.role !== "System Admin"
+      !auth.user.roles.some((r) =>
+        ["Finance Approver", "Accounting Admin", "System Admin"].includes(r),
+      )
     ) {
       sendProblem(res, 403, "Forbidden");
       return;
@@ -110,9 +110,9 @@ router.get("/reports", async (req: Request, res: Response): Promise<void> => {
     );
   } else if (scope === "payroll") {
     if (
-      auth.user.role !== "Finance Approver" &&
-      auth.user.role !== "Accounting Admin" &&
-      auth.user.role !== "System Admin"
+      !auth.user.roles.some((r) =>
+        ["Finance Approver", "Accounting Admin", "System Admin"].includes(r),
+      )
     ) {
       sendProblem(res, 403, "Forbidden");
       return;
@@ -127,7 +127,11 @@ router.get("/reports", async (req: Request, res: Response): Promise<void> => {
     );
   } else {
     // scope === "all"
-    if (auth.user.role !== "System Admin" && auth.user.role !== "Accounting Admin") {
+    if (
+      !auth.user.roles.some((r) =>
+        ["System Admin", "Accounting Admin"].includes(r),
+      )
+    ) {
       sendProblem(res, 403, "Forbidden");
       return;
     }
@@ -285,7 +289,7 @@ router.post("/reports/:id/submit", async (req, res): Promise<void> => {
     const report = await fetchReportOrThrow(id, req.auth!.user.orgId);
     const result = await applyTransition({
       report,
-      actor: { id: req.auth!.user.id, role: req.auth!.user.role },
+      actor: { id: req.auth!.user.id, roles: req.auth!.user.roles },
       transition: "submit",
       allowSelf: true,
       comment: typeof req.body?.comment === "string" ? req.body.comment : null,
@@ -302,7 +306,7 @@ router.post("/reports/:id/recall", async (req, res): Promise<void> => {
     const report = await fetchReportOrThrow(id, req.auth!.user.orgId);
     const result = await applyTransition({
       report,
-      actor: { id: req.auth!.user.id, role: req.auth!.user.role },
+      actor: { id: req.auth!.user.id, roles: req.auth!.user.roles },
       transition: "withdraw",
       allowSelf: true,
       comment: typeof req.body?.comment === "string" ? req.body.comment : null,
@@ -321,7 +325,7 @@ router.post("/reports/:id/void", async (req, res): Promise<void> => {
     // applyTransition's per-status actor whitelist enforces the matrix.
     const result = await applyTransition({
       report,
-      actor: { id: req.auth!.user.id, role: req.auth!.user.role },
+      actor: { id: req.auth!.user.id, roles: req.auth!.user.roles },
       transition: "voidReport",
       allowSelf: true,
       comment: typeof req.body?.comment === "string" ? req.body.comment : null,
@@ -358,7 +362,7 @@ router.get("/reports/:id/timeline", async (req, res): Promise<void> => {
             actorById.get(a.actorId) ?? {
               id: a.actorId,
               fullName: "Unknown",
-              role: a.actorRole,
+              roles: a.actorRoles,
             } as Parameters<typeof toApprovalActionDto>[1],
           ),
         ),

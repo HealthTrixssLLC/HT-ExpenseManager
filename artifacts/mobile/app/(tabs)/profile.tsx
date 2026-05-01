@@ -22,7 +22,8 @@ export default function ProfileTab() {
   const router = useRouter();
   const { user, signOut } = useAuth();
   const [signingOut, setSigningOut] = useState(false);
-  const isSysAdmin = user?.role === "System Admin";
+  const userRoles = user?.roles ?? [];
+  const isSysAdmin = userRoles.includes("System Admin");
 
   const initials = (user?.fullName ?? "U")
     .split(" ")
@@ -65,8 +66,12 @@ export default function ProfileTab() {
         </View>
         <Text style={styles.name}>{user?.fullName ?? "—"}</Text>
         {user?.title ? <Text style={styles.title}>{user.title}</Text> : null}
-        <View style={styles.roleBadge}>
-          <Text style={styles.roleBadgeText}>{user?.role ?? "Employee"}</Text>
+        <View style={styles.roleBadgeRow}>
+          {(userRoles.length > 0 ? userRoles : ["Employee"]).map((r) => (
+            <View key={r} style={styles.roleBadge}>
+              <Text style={styles.roleBadgeText}>{r}</Text>
+            </View>
+          ))}
         </View>
       </View>
 
@@ -139,8 +144,14 @@ const styles = StyleSheet.create({
   avatarText: { fontFamily: "Inter_700Bold", color: HT.navy, fontSize: 28 },
   name: { fontFamily: "Inter_700Bold", fontSize: 22, color: HT.ink },
   title: { fontFamily: "Inter_500Medium", fontSize: 14, color: HT.ink3, marginTop: 2 },
-  roleBadge: {
+  roleBadgeRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: 6,
     marginTop: 8,
+  },
+  roleBadge: {
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 999,

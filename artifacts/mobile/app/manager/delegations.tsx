@@ -79,7 +79,7 @@ export default function ManagerDelegationsScreen() {
   const [endsAt, setEndsAt] = useState<string>("");
   const [formError, setFormError] = useState<string | null>(null);
 
-  const isAdmin = me?.role === "System Admin";
+  const isAdmin = me?.roles?.includes("System Admin") ?? false;
 
   const allDelegations = useMemo(() => delegationsQ.data ?? [], [delegationsQ.data]);
 

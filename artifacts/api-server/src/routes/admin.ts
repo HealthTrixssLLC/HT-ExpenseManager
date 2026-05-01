@@ -102,7 +102,7 @@ router.post(
         passwordHash,
         fullName: parsed.data.fullName,
         title: parsed.data.title ?? null,
-        role: parsed.data.role,
+        roles: Array.from(new Set(parsed.data.roles)),
         isAlsoEmployee: parsed.data.isAlsoEmployee ?? false,
         departmentId: parsed.data.departmentId ?? null,
         managerId: parsed.data.managerId ?? null,
@@ -165,7 +165,8 @@ router.patch(
     const updates: Partial<typeof existing> = {};
     if (parsed.data.fullName !== undefined) updates.fullName = parsed.data.fullName;
     if (parsed.data.title !== undefined) updates.title = parsed.data.title;
-    if (parsed.data.role !== undefined) updates.role = parsed.data.role;
+    if (parsed.data.roles !== undefined)
+      updates.roles = Array.from(new Set(parsed.data.roles));
     if (parsed.data.isAlsoEmployee !== undefined)
       updates.isAlsoEmployee = parsed.data.isAlsoEmployee;
     if (parsed.data.departmentId !== undefined)
@@ -473,7 +474,10 @@ router.post(
       return;
     }
     const okRoles = new Set(["Manager Approver", "System Admin"]);
-    if (!okRoles.has(from.role) || !okRoles.has(to.role)) {
+    if (
+      !from.roles.some((r) => okRoles.has(r)) ||
+      !to.roles.some((r) => okRoles.has(r))
+    ) {
       sendProblem(
         res,
         400,

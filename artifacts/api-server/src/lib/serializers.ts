@@ -18,7 +18,7 @@ import type {
 export type UserRefDto = {
   id: string;
   fullName: string;
-  role: Role;
+  roles: Role[];
 };
 
 export type UserDto = {
@@ -26,7 +26,7 @@ export type UserDto = {
   email: string;
   fullName: string;
   title: string | null;
-  role: Role;
+  roles: Role[];
   isAlsoEmployee: boolean;
   isActive: boolean;
   departmentId: string | null;
@@ -66,7 +66,7 @@ export type ApprovalActionDto = {
   id: string;
   reportId: string;
   actor: UserRefDto;
-  actorRole: Role;
+  actorRoles: Role[];
   fromStatus: WorkflowStatus;
   toStatus: WorkflowStatus;
   comment: string | null;
@@ -103,8 +103,8 @@ export type ExpenseReportDto = ExpenseReportSummaryDto & {
   receipts: ReceiptDto[];
 };
 
-export function toUserRef(user: Pick<User, "id" | "fullName" | "role">): UserRefDto {
-  return { id: user.id, fullName: user.fullName, role: user.role };
+export function toUserRef(user: Pick<User, "id" | "fullName" | "roles">): UserRefDto {
+  return { id: user.id, fullName: user.fullName, roles: user.roles };
 }
 
 export function toUserDto(
@@ -117,7 +117,7 @@ export function toUserDto(
     email: user.email,
     fullName: user.fullName,
     title: user.title ?? null,
-    role: user.role,
+    roles: user.roles,
     isAlsoEmployee: user.isAlsoEmployee,
     isActive: user.isActive,
     departmentId: department?.id ?? null,
@@ -169,7 +169,7 @@ export function toApprovalActionDto(
     id: action.id,
     reportId: action.reportId,
     actor: toUserRef(actor),
-    actorRole: action.actorRole,
+    actorRoles: action.actorRoles,
     fromStatus: action.fromStatus,
     toStatus: action.toStatus,
     comment: action.comment,

@@ -113,7 +113,7 @@ router.post("/auth/bootstrap", async (req, res): Promise<void> => {
         email: parsed.data.email.toLowerCase(),
         passwordHash,
         fullName: parsed.data.fullName,
-        role: "System Admin",
+        roles: ["System Admin"],
         isAlsoEmployee: true,
       })
       .returning();
@@ -316,7 +316,7 @@ router.post(
         passwordHash,
         fullName: parsed.data.fullName,
         title: parsed.data.title ?? null,
-        role: parsed.data.role,
+        roles: parsed.data.roles,
         isAlsoEmployee: parsed.data.isAlsoEmployee ?? false,
         departmentId: parsed.data.departmentId ?? null,
         managerId: parsed.data.managerId ?? null,

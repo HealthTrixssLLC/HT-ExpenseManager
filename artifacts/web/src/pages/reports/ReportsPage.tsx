@@ -21,8 +21,10 @@ import {
 } from "recharts";
 
 export function ReportsPage() {
-  const user = useAuthedUser();
-  const isAdminOrFinance = user.role === "System Admin" || user.role === "Accounting Admin" || user.role === "Finance Approver";
+  const { roles } = useAuthedUser();
+  const isAdminOrFinance = roles.some((r) =>
+    ["System Admin", "Accounting Admin", "Finance Approver"].includes(r),
+  );
   
   const scope = isAdminOrFinance ? "all" : "mine";
   const { data: reports = [], isLoading } = useListReports(

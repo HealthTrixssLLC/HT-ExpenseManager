@@ -118,14 +118,15 @@ export default function ReportDetailScreen() {
 
   const report = reportQ.data as ExpenseReport;
   const isOwner = report.employee.id === user?.id;
-  const isManager = user?.role === "Manager Approver";
+  const userRoles = user?.roles ?? [];
+  const isManager = userRoles.includes("Manager Approver");
   const editable = isOwner && isEditable(report.status);
   const canSubmit = editable;
   const canRecall = isOwner && report.status === "Submitted";
   const canVoid =
     (isOwner && (report.status === "Draft" || report.status === "Changes Requested")) ||
-    user?.role === "Accounting Admin" ||
-    user?.role === "System Admin";
+    userRoles.includes("Accounting Admin") ||
+    userRoles.includes("System Admin");
   const canDelete = isOwner && report.status === "Draft";
   const canManagerAct = isManager && report.status === "Manager Review";
 

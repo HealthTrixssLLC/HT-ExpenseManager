@@ -221,9 +221,16 @@ export function ReportDetailPage({ id }: { id: string }) {
                       </div>
                       <div className="text-xs text-[var(--ht-ink-3)] mt-0.5">
                         {event.actor?.fullName}
-                        {event.actorRole && (
-                          <span className="ml-1 inline-block px-1.5 py-px rounded bg-gray-100 text-[var(--ht-ink-2)] uppercase tracking-wide text-[10px]">
-                            {event.actorRole}
+                        {event.actorRoles?.length > 0 && (
+                          <span className="ml-1 inline-flex flex-wrap gap-1">
+                            {event.actorRoles.map((r) => (
+                              <span
+                                key={r}
+                                className="inline-block px-1.5 py-px rounded bg-gray-100 text-[var(--ht-ink-2)] uppercase tracking-wide text-[10px]"
+                              >
+                                {r}
+                              </span>
+                            ))}
                           </span>
                         )}
                         <span className="mx-1">•</span>

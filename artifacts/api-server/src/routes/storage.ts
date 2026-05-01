@@ -158,9 +158,9 @@ router.delete(
       if (req.auth!.user.id === report.employeeId) {
         allowed = true;
       } else if (
-        req.auth!.user.role === "System Admin" ||
-        req.auth!.user.role === "Accounting Admin" ||
-        req.auth!.user.role === "Finance Approver"
+        req.auth!.user.roles.some((r) =>
+          ["System Admin", "Accounting Admin", "Finance Approver"].includes(r),
+        )
       ) {
         allowed = true;
       }
