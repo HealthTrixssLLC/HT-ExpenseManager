@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   ScrollIcon,
   UserCircle,
+  DatabaseBackup,
 } from "lucide-react";
 import { DesktopTopbar } from "@/components/brand/BrandHeader";
 import { SidebarNav, type NavSection } from "@/components/brand/SidebarNav";
@@ -22,6 +23,7 @@ import {
   roleCanFinanceReview,
   roleCanManagerReview,
   roleCanAdmin,
+  roleCanSysAdmin,
   type Role,
 } from "@/lib/types";
 
@@ -109,6 +111,15 @@ function buildSections(roles: Role[]): NavSection[] {
           href: "/admin/qbo",
         },
         { label: "Audit log", icon: <ScrollText size={16} />, href: "/admin/audit" },
+        ...(roleCanSysAdmin(roles)
+          ? [
+              {
+                label: "Backup & restore",
+                icon: <DatabaseBackup size={16} />,
+                href: "/admin/backup-restore",
+              },
+            ]
+          : []),
       ],
     });
   }

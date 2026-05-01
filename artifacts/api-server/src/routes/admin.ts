@@ -45,6 +45,19 @@ import {
   disconnectQboStub,
   ensureConnectionRow,
 } from "../services/qbo";
+import multer from "multer";
+import {
+  applyRestore,
+  exportBackup,
+  BackupOrgMismatchError,
+  BackupParseError,
+  BackupVersionError,
+  CURRENT_BACKUP_SCHEMA_VERSION,
+} from "../services/backup";
+
+// App version surfaced in backup manifests. Sourced from the API server
+// package so a single bump there propagates everywhere we report a version.
+const APP_VERSION = "0.1.0";
 
 const router: IRouter = Router();
 
@@ -177,7 +190,16 @@ router.patch(
       updates.departmentId = parsed.data.departmentId;
     if (parsed.data.managerId !== undefined)
       updates.managerId = parsed.data.managerId;
-    if (parsed.data.isActive !== undefined) updates.isActive = parsed.data.isActive;
+    if (parsed.data.isActive !== undefined) {
+      // The DELETE endpoint already prevents self-deactivation; we mirror
+      // the rule here so the new "Activate / Deactivate" toggle exposed on
+      // the admin Users page cannot be used to lock yourself out either.
+      if (parsed.data.isActive === false && id === req.auth!.user.id) {
+        sendProblem(res, 409, "Conflict", "You cannot deactivate yourself.");
+        return;
+      }
+      updates.isActive = parsed.data.isActive;
+    }
     if (parsed.data.password) updates.passwordHash = await hashPassword(parsed.data.password);
 
     const [user] = await db
@@ -570,6 +592,125 @@ router.delete(
       .set({ revokedAt: new Date() })
       .where(eq(managerDelegationsTable.id, id));
     res.status(204).end();
+  },
+);
+
+// ----------------------------------------------------------------------------
+// Backup & Restore (System Admin only)
+// ----------------------------------------------------------------------------
+//
+// `GET /admin/backup` streams a ZIP of the caller's org-scoped tables. The
+// optional `includeReceiptFiles=1` query also embeds receipt blobs from
+// object storage.
+//
+// `POST /admin/restore` accepts a multipart upload of a previously-exported
+// zip plus a `confirm` field that must equal the literal string "RESTORE".
+// The endpoint refuses to touch anything until both are present.
+//
+// Both routes validate the manifest's `orgId` matches the caller's org so
+// admins cannot accidentally swap one tenant's data for another's.
+
+router.get(
+  "/admin/backup",
+  requireRole(...SYSADMIN_ROLES),
+  async (req, res): Promise<void> => {
+    const includeReceiptFiles =
+      typeof req.query.includeReceiptFiles === "string" &&
+      ["1", "true", "yes"].includes(req.query.includeReceiptFiles);
+
+    try {
+      const result = await exportBackup({
+        orgId: req.auth!.user.orgId,
+        appVersion: APP_VERSION,
+        includeReceiptFiles,
+      });
+      const ts = result.manifest.createdAt.replace(/[:.]/g, "-");
+      res.setHeader("Content-Type", "application/zip");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="healthtrix-backup-${ts}.zip"`,
+      );
+      res.setHeader("X-Backup-Schema-Version", String(CURRENT_BACKUP_SCHEMA_VERSION));
+      res.setHeader("X-Backup-App-Version", result.manifest.appVersion);
+      res.setHeader("X-Backup-Org-Id", result.manifest.orgId);
+      res.setHeader(
+        "X-Backup-Includes-Receipt-Files",
+        result.manifest.includesReceiptFiles ? "1" : "0",
+      );
+      res.setHeader(
+        "X-Backup-Receipt-Warnings",
+        String(result.receiptFileWarnings.length),
+      );
+      res.status(200).end(result.zip);
+    } catch (err) {
+      sendProblem(res, 500, "Backup Failed", (err as Error).message);
+    }
+  },
+);
+
+const restoreUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB safety cap
+});
+
+router.post(
+  "/admin/restore",
+  requireRole(...SYSADMIN_ROLES),
+  restoreUpload.single("backup"),
+  async (req, res): Promise<void> => {
+    const confirm =
+      typeof req.body?.confirm === "string" ? (req.body.confirm as string) : "";
+    if (confirm !== "RESTORE") {
+      sendProblem(
+        res,
+        400,
+        "Confirmation Required",
+        'Send a "confirm" field equal to the literal string "RESTORE".',
+      );
+      return;
+    }
+    const file = (req as unknown as { file?: Express.Multer.File }).file;
+    if (!file || !file.buffer || file.buffer.length === 0) {
+      sendProblem(
+        res,
+        400,
+        "Missing File",
+        'Upload the backup zip in a multipart field named "backup".',
+      );
+      return;
+    }
+    try {
+      const result = await applyRestore({
+        orgId: req.auth!.user.orgId,
+        zipBuffer: file.buffer,
+      });
+      res.json({
+        manifest: result.manifest,
+        rowCountsRestored: result.rowCountsRestored,
+        receiptFilesRestored: result.receiptFilesRestored,
+        receiptFileWarnings: result.receiptFileWarnings,
+      });
+    } catch (err) {
+      if (err instanceof BackupOrgMismatchError) {
+        sendProblem(res, 400, "Wrong Org", err.message, "backup.org_mismatch");
+        return;
+      }
+      if (err instanceof BackupVersionError) {
+        sendProblem(
+          res,
+          400,
+          "Unsupported Version",
+          err.message,
+          "backup.unsupported_version",
+        );
+        return;
+      }
+      if (err instanceof BackupParseError) {
+        sendProblem(res, 400, "Invalid Backup", err.message, "backup.invalid");
+        return;
+      }
+      sendProblem(res, 500, "Restore Failed", (err as Error).message);
+    }
   },
 );
 

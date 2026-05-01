@@ -115,6 +115,7 @@ router.post("/auth/bootstrap", async (req, res): Promise<void> => {
         fullName: parsed.data.fullName,
         roles: ["System Admin"],
         isAlsoEmployee: true,
+        isActive: true,
       })
       .returning();
     return { user };

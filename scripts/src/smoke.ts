@@ -120,7 +120,9 @@ async function main(): Promise<void> {
     mq.every((r) => ["Submitted", "Manager Review"].includes(r.status)),
     "manager queue contains only Submitted/Manager Review",
   );
-  assert(mq.length > 0, "manager queue non-empty");
+  // The seed no longer creates demo expense reports — Task #35 stripped the
+  // REPORTS / payroll loops from `seed.ts`. So the queue is expected to be
+  // empty against a freshly-seeded DB; we only assert the filter is correct.
   console.log(`✓ manager /approvals/manager-queue returned ${mq.length} reports`);
 
   // Finance queue
@@ -139,7 +141,7 @@ async function main(): Promise<void> {
     ),
     "finance queue contains only finance-relevant statuses",
   );
-  assert(fq.length > 0, "finance queue non-empty");
+  // Like the manager queue above, expected to be empty after Task #35.
   console.log(`✓ finance /approvals/finance-queue returned ${fq.length} reports`);
 
   // Payroll queue
@@ -772,7 +774,486 @@ async function main(): Promise<void> {
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────
+  // Task #35 — seeded transactional emptiness, activate/deactivate flow,
+  // backup zip, round-trip restore, wrong-org rejection, v1 fixture.
+  //
+  // These are the LAST tests because the v1 fixture restore wipes the
+  // org and replaces it with a fixture-only payload (different admin
+  // password etc.) — nothing in the smoke can run after that.
+  // ─────────────────────────────────────────────────────────────────────
+  await runBackupRestoreSmoke({
+    sysadminToken: sessions["admin@healthtrix.test"].token,
+    sysadminId: sessions["admin@healthtrix.test"].userId,
+    employeeToken: sessions["priya@healthtrix.test"].token,
+    employeeUserId: sessions["priya@healthtrix.test"].userId,
+  });
+
   console.log("\nAll smoke checks passed.");
+}
+
+// ── Task #35 helpers ──────────────────────────────────────────────────────
+
+type AdminUser = {
+  id: string;
+  email: string;
+  fullName: string;
+  isActive: boolean;
+};
+
+async function patchUser(
+  id: string,
+  body: Record<string, unknown>,
+  token: string,
+): Promise<Response> {
+  return fetch(`${BASE}/admin/users/${id}`, {
+    method: "PATCH",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${token}`,
+      "x-healthtrix-client": "ios",
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+async function listUsers(token: string): Promise<AdminUser[]> {
+  return (await getJson("/admin/users", token)) as AdminUser[];
+}
+
+async function runBackupRestoreSmoke(args: {
+  sysadminToken: string;
+  sysadminId: string;
+  employeeToken: string;
+  employeeUserId: string;
+}): Promise<void> {
+  const { sysadminToken, sysadminId, employeeToken, employeeUserId } = args;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const JSZip = (await import("jszip")).default;
+
+  // ── Seeded transactional emptiness ──────────────────────────────────
+  const allReports = (await getJson(
+    "/reports?scope=all",
+    sysadminToken,
+  )) as unknown[];
+  assert(
+    allReports.length === 0,
+    `seed must not create any reports, got ${allReports.length}`,
+  );
+  console.log(`✓ seeded org has 0 expense reports`);
+
+  const auditLog = (await getJson(
+    "/admin/audit-log",
+    sysadminToken,
+  )) as unknown[];
+  assert(
+    auditLog.length === 0,
+    `seed must not create audit entries, got ${auditLog.length}`,
+  );
+  console.log(`✓ seeded org has 0 audit entries`);
+
+  // ── Activation flow via PATCH /admin/users/:id { isActive } ─────────
+  const beforeUsers = await listUsers(sysadminToken);
+  const seededCount = beforeUsers.length;
+  assert(
+    beforeUsers.every((u) => u.isActive === true),
+    "every seeded user must be marked isActive: true",
+  );
+  console.log(`✓ all ${seededCount} seeded users are isActive=true`);
+
+  const target = beforeUsers.find((u) => u.id === employeeUserId);
+  assert(target, "smoke needs the employee user to exist");
+
+  // Self-deactivate must be rejected.
+  const selfRes = await patchUser(
+    sysadminId,
+    { isActive: false },
+    sysadminToken,
+  );
+  assert(
+    selfRes.status === 409,
+    `self-deactivate must return 409, got ${selfRes.status}`,
+  );
+  console.log(`✓ sysadmin cannot deactivate themselves (409)`);
+
+  // Deactivate the employee, then reactivate.
+  const deactRes = await patchUser(
+    target!.id,
+    { isActive: false },
+    sysadminToken,
+  );
+  assert(
+    deactRes.status === 200,
+    `deactivate failed: ${deactRes.status} ${await deactRes.text()}`,
+  );
+  const afterDeact = await listUsers(sysadminToken);
+  const afterDeactRow = afterDeact.find((u) => u.id === target!.id)!;
+  assert(
+    afterDeactRow.isActive === false,
+    `employee should be inactive after PATCH isActive:false`,
+  );
+  console.log(`✓ PATCH /admin/users isActive=false flips the row to inactive`);
+
+  const reactRes = await patchUser(
+    target!.id,
+    { isActive: true },
+    sysadminToken,
+  );
+  assert(
+    reactRes.status === 200,
+    `reactivate failed: ${reactRes.status} ${await reactRes.text()}`,
+  );
+  const afterReact = await listUsers(sysadminToken);
+  const afterReactRow = afterReact.find((u) => u.id === target!.id)!;
+  assert(
+    afterReactRow.isActive === true,
+    `employee should be active after PATCH isActive:true`,
+  );
+  console.log(`✓ PATCH /admin/users isActive=true reactivates the row`);
+
+  // Non-sysadmin cannot hit the toggle.
+  const empPatch = await patchUser(
+    target!.id,
+    { isActive: false },
+    employeeToken,
+  );
+  assert(
+    empPatch.status === 403,
+    `employee patching users must be 403, got ${empPatch.status}`,
+  );
+  console.log(`✓ non-sysadmin blocked from PATCH /admin/users (403)`);
+
+  // ── Backup zip headers + content ────────────────────────────────────
+  const backupRes = await fetch(`${BASE}/admin/backup`, {
+    headers: {
+      authorization: `Bearer ${sysadminToken}`,
+      "x-healthtrix-client": "ios",
+    },
+  });
+  assert(
+    backupRes.status === 200,
+    `GET /admin/backup must be 200, got ${backupRes.status}`,
+  );
+  const backupCt = backupRes.headers.get("content-type") ?? "";
+  assert(
+    backupCt.startsWith("application/zip"),
+    `backup must be application/zip, got ${backupCt}`,
+  );
+  const backupSchemaHeader = backupRes.headers.get("x-backup-schema-version");
+  const backupOrgHeader = backupRes.headers.get("x-backup-org-id");
+  const backupAppHeader = backupRes.headers.get("x-backup-app-version");
+  assert(
+    backupSchemaHeader === "1",
+    `X-Backup-SchemaVersion must be "1", got ${backupSchemaHeader}`,
+  );
+  assert(
+    backupOrgHeader && backupOrgHeader.length > 0,
+    `X-Backup-OrgId must be present`,
+  );
+  assert(
+    backupAppHeader && backupAppHeader.length > 0,
+    `X-Backup-AppVersion must be present`,
+  );
+  console.log(
+    `✓ backup zip headers ok (schema=${backupSchemaHeader}, org=${backupOrgHeader?.slice(0, 8)}…, app=${backupAppHeader})`,
+  );
+
+  const backupBuf = Buffer.from(await backupRes.arrayBuffer());
+  const backupZip = await JSZip.loadAsync(backupBuf);
+  const backupManifestRaw = await backupZip
+    .file("manifest.json")!
+    .async("string");
+  const backupPayloadRaw = await backupZip
+    .file("payload.json")!
+    .async("string");
+  const backupManifest = JSON.parse(backupManifestRaw) as {
+    backupSchemaVersion: number;
+    orgId: string;
+    rowCounts: Record<string, number>;
+  };
+  assert(
+    backupManifest.backupSchemaVersion === 1,
+    `backup manifest schema version must be 1, got ${backupManifest.backupSchemaVersion}`,
+  );
+  assert(
+    backupManifest.rowCounts.users === seededCount,
+    `manifest users count (${backupManifest.rowCounts.users}) must match seeded users (${seededCount})`,
+  );
+  console.log(
+    `✓ backup zip contains manifest + payload with users=${backupManifest.rowCounts.users}`,
+  );
+
+  // ── Wrong-org rejection ─────────────────────────────────────────────
+  const wrongManifest = {
+    ...backupManifest,
+    orgId: "00000000-0000-4000-8000-000000000000",
+  };
+  const wrongPayload = JSON.parse(backupPayloadRaw) as { org: { id: string } };
+  wrongPayload.org.id = "00000000-0000-4000-8000-000000000000";
+  const wrongZip = new JSZip();
+  wrongZip.file("manifest.json", JSON.stringify(wrongManifest));
+  wrongZip.file("payload.json", JSON.stringify(wrongPayload));
+  const wrongBuf = await wrongZip.generateAsync({ type: "nodebuffer" });
+  const wrongRes = await postBackupZip(
+    `${BASE}/admin/restore`,
+    sysadminToken,
+    "wrong-org.zip",
+    wrongBuf,
+    "RESTORE",
+  );
+  assert(
+    wrongRes.status === 400 || wrongRes.status === 403,
+    `wrong-org restore must be 4xx, got ${wrongRes.status}`,
+  );
+  console.log(
+    `✓ wrong-org restore rejected (${wrongRes.status})`,
+  );
+
+  // Missing-confirm guard.
+  const noConfirm = await postBackupZip(
+    `${BASE}/admin/restore`,
+    sysadminToken,
+    "nope.zip",
+    backupBuf,
+    null,
+  );
+  assert(
+    noConfirm.status === 400,
+    `missing confirm must be 400, got ${noConfirm.status}`,
+  );
+  console.log(`✓ restore without confirm=RESTORE rejected (400)`);
+
+  // ── Round-trip restore (replays the backup we just downloaded) ──────
+  const roundTrip = await postBackupZip(
+    `${BASE}/admin/restore`,
+    sysadminToken,
+    "round-trip.zip",
+    backupBuf,
+    "RESTORE",
+  );
+  const roundTripText = await roundTrip.text();
+  assert(
+    roundTrip.status === 200,
+    `round-trip restore failed: ${roundTrip.status} ${roundTripText}`,
+  );
+  const roundTripBody = JSON.parse(roundTripText) as {
+    rowCountsRestored: Record<string, number>;
+  };
+  assert(
+    roundTripBody.rowCountsRestored.users === seededCount,
+    `round-trip should restore ${seededCount} users, got ${roundTripBody.rowCountsRestored.users}`,
+  );
+  // Restore wipes the org via CASCADE, which also deletes every session
+  // row pointing at the old user ids — including ours. Re-login before
+  // querying anything else so subsequent assertions don't 401.
+  const reloginAdmin = await fetch(`${BASE}/auth/login`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-healthtrix-client": "ios",
+    },
+    body: JSON.stringify({
+      email: "admin@healthtrix.test",
+      password: "Healthtrix!2026",
+    }),
+  });
+  assert(
+    reloginAdmin.status === 200,
+    `re-login after round-trip restore must succeed (got ${reloginAdmin.status})`,
+  );
+  const reloggedAdmin = (await reloginAdmin.json()) as {
+    sessionToken: string;
+  };
+  const newSysadminToken = reloggedAdmin.sessionToken;
+  // Verify the seeded users are still queryable after round-trip.
+  const usersAfter = await listUsers(newSysadminToken);
+  assert(
+    usersAfter.length === seededCount,
+    `users-after-roundtrip should be ${seededCount}, got ${usersAfter.length}`,
+  );
+  console.log(
+    `✓ round-trip restore preserved ${roundTripBody.rowCountsRestored.users} users (and admin can sign in again)`,
+  );
+
+  // ── Rollback integrity: a restore that fails mid-transaction must
+  //    leave the org's rows exactly as they were ──────────────────────
+  //
+  // We mutate the freshly-downloaded backup so it round-trips up to the
+  // employee_profiles insert, then violates a foreign key. The DB
+  // transaction in applyRestore() must roll back the wipe-and-re-insert,
+  // leaving the live org untouched. We assert the user count is the same
+  // before and after, plus that admin can still sign in.
+  const usersBeforeBadRestore = await listUsers(newSysadminToken);
+  const sabotagedZip = await JSZip.loadAsync(backupBuf);
+  const sabotagedPayloadText = await sabotagedZip
+    .file("payload.json")!
+    .async("string");
+  const sabotagedPayload = JSON.parse(sabotagedPayloadText) as {
+    employeeProfiles: Array<Record<string, unknown>>;
+  };
+  // Reference a userId that does not exist anywhere in the payload —
+  // the FK insert into employee_profiles will fail and trip a rollback.
+  sabotagedPayload.employeeProfiles = [
+    ...sabotagedPayload.employeeProfiles,
+    {
+      userId: "00000000-0000-0000-0000-000000000bad",
+      employeeNumber: "ROLLBACK-PROBE",
+      jobTitle: "Should never land",
+      hireDate: "2024-01-01",
+      payCycle: "Bi-weekly",
+      employmentType: "Full-time",
+      payType: "Salary",
+      compensationCurrency: "USD",
+      annualSalary: "0",
+      hourlyRate: null,
+      ytdGross: "0",
+      ytdTaxes: "0",
+      ytdNet: "0",
+      lastPayDate: null,
+      nextPayDate: null,
+      reimbursementMethodPreference: "Direct Deposit",
+      ssnLast4: "0000",
+      bankAccountMaskedJson: null,
+      directDepositVerified: false,
+      paystubAccessGranted: true,
+      taxFormsAccessGranted: true,
+      ptoBalanceHours: "0",
+      ptoAccrualPolicy: null,
+      stockGrantsCount: 0,
+      profilePhotoUrl: null,
+    },
+  ];
+  sabotagedZip.file(
+    "payload.json",
+    JSON.stringify(sabotagedPayload, null, 2),
+  );
+  const sabotagedBuf = await sabotagedZip.generateAsync({
+    type: "nodebuffer",
+  });
+  const badRes = await postBackupZip(
+    `${BASE}/admin/restore`,
+    newSysadminToken,
+    "rollback-probe.zip",
+    sabotagedBuf,
+    "RESTORE",
+  );
+  assert(
+    badRes.status >= 400 && badRes.status < 600,
+    `mid-restore failure must return an error (got ${badRes.status})`,
+  );
+  // The session token survives because the txn rolled back, so we can
+  // reuse newSysadminToken without re-logging in.
+  const usersAfterBadRestore = await listUsers(newSysadminToken);
+  assert(
+    usersAfterBadRestore.length === usersBeforeBadRestore.length,
+    `rollback should preserve user count (was ${usersBeforeBadRestore.length}, now ${usersAfterBadRestore.length})`,
+  );
+  const sortedBefore = [...usersBeforeBadRestore]
+    .map((u) => u.id)
+    .sort()
+    .join(",");
+  const sortedAfter = [...usersAfterBadRestore]
+    .map((u) => u.id)
+    .sort()
+    .join(",");
+  assert(
+    sortedBefore === sortedAfter,
+    `rollback should preserve exact user ids (drift detected)`,
+  );
+  console.log(
+    `✓ failed restore rolled back cleanly (${usersAfterBadRestore.length} users still present, session intact)`,
+  );
+
+  // ── v1 fixture restore (must come LAST — overwrites the org) ────────
+  const fixturePath = new URL(
+    "../../artifacts/api-server/src/services/backup/__test__/fixtures/v1.json",
+    import.meta.url,
+  );
+  const fs = await import("node:fs/promises");
+  const fixtureRaw = await fs.readFile(fixturePath, "utf8");
+  const fixtureOrgId = backupManifest.orgId;
+  const substituted = fixtureRaw.replaceAll("{{ORG_ID}}", fixtureOrgId);
+  const fixture = JSON.parse(substituted) as {
+    manifest: unknown;
+    payload: unknown;
+  };
+  const fixtureZip = new JSZip();
+  fixtureZip.file("manifest.json", JSON.stringify(fixture.manifest, null, 2));
+  fixtureZip.file("payload.json", JSON.stringify(fixture.payload, null, 2));
+  const fixtureBuf = await fixtureZip.generateAsync({ type: "nodebuffer" });
+  const fixtureRes = await postBackupZip(
+    `${BASE}/admin/restore`,
+    newSysadminToken,
+    "v1-fixture.zip",
+    fixtureBuf,
+    "RESTORE",
+  );
+  const fixtureText = await fixtureRes.text();
+  assert(
+    fixtureRes.status === 200,
+    `v1 fixture restore failed: ${fixtureRes.status} ${fixtureText}`,
+  );
+  const fixtureBody = JSON.parse(fixtureText) as {
+    rowCountsRestored: Record<string, number>;
+  };
+  assert(
+    fixtureBody.rowCountsRestored.users === 1,
+    `v1 fixture restores 1 user, got ${fixtureBody.rowCountsRestored.users}`,
+  );
+  assert(
+    fixtureBody.rowCountsRestored.glMappings === 1,
+    `v1 fixture restores 1 GL mapping, got ${fixtureBody.rowCountsRestored.glMappings}`,
+  );
+  console.log(
+    `✓ v1 fixture restored (users=${fixtureBody.rowCountsRestored.users}, depts=${fixtureBody.rowCountsRestored.departments}, gl=${fixtureBody.rowCountsRestored.glMappings})`,
+  );
+  console.log(
+    "  (org now contains only the fixture data — re-run `pnpm seed` to restore demo accounts.)",
+  );
+}
+
+async function postBackupZip(
+  url: string,
+  token: string,
+  filename: string,
+  buf: Buffer,
+  confirm: string | null,
+): Promise<Response> {
+  // Construct multipart/form-data manually so we don't drag in a separate
+  // npm dep just for the smoke. Buffer-based bodies are accepted by
+  // global fetch via Uint8Array.
+  const boundary = `----healthtrix-smoke-${Date.now()}`;
+  const parts: Buffer[] = [];
+  const enc = (s: string) => Buffer.from(s, "utf8");
+  parts.push(
+    enc(
+      `--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="backup"; filename="${filename}"\r\n` +
+        `Content-Type: application/zip\r\n\r\n`,
+    ),
+  );
+  parts.push(buf);
+  parts.push(enc("\r\n"));
+  if (confirm !== null) {
+    parts.push(
+      enc(
+        `--${boundary}\r\n` +
+          `Content-Disposition: form-data; name="confirm"\r\n\r\n${confirm}\r\n`,
+      ),
+    );
+  }
+  parts.push(enc(`--${boundary}--\r\n`));
+  const body = Buffer.concat(parts);
+  return fetch(url, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "x-healthtrix-client": "ios",
+      "content-type": `multipart/form-data; boundary=${boundary}`,
+      "content-length": String(body.length),
+    },
+    body: new Uint8Array(body),
+  });
 }
 
 main().catch((err) => {

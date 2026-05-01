@@ -59,6 +59,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
       "admin-qbo",
       "admin-delegations",
       "admin-audit",
+      "admin-backup-restore",
     ],
   },
   {
@@ -838,7 +839,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     id: "admin-users",
     category: "admin",
     title: "Managing users (multi-role)",
-    summary: "Add, edit, and deactivate users. Roles can be combined per user.",
+    summary: "Add, edit, activate, and deactivate users. Roles can be combined per user.",
     roles: ["System Admin"],
     blocks: [
       {
@@ -847,8 +848,14 @@ export const HELP_TOPICS: HelpTopic[] = [
           "Open Admin → Users.",
           "Click Add User. Provide full name, email, password, one or more roles, department, and an optional manager.",
           "To edit, click the edit icon on a row. You can change roles, department, manager, and active status.",
-          "To deactivate, click Deactivate. An in-app confirmation appears — confirm to disable sign-in for that user.",
+          "To deactivate, click the red person-with-X icon. An in-app confirmation appears — confirm to disable sign-in for that user.",
+          "To re-activate someone you turned off earlier, click the green person-with-check icon on their (greyed-out) row and confirm.",
         ],
+      },
+      {
+        type: "p",
+        text:
+          "Active vs inactive: only active users can sign in. Inactive users still appear in the Users list (rendered greyed-out with an Inactive badge) so you can audit them or reactivate them later. Their existing roles, manager, and department assignments are preserved across the toggle. You cannot deactivate yourself — the deactivate button is disabled on your own row to prevent locking the org out of admin access.",
       },
       {
         type: "callout",
@@ -988,6 +995,54 @@ export const HELP_TOPICS: HelpTopic[] = [
         ],
       },
     ],
+  },
+  {
+    id: "admin-backup-restore",
+    category: "admin",
+    title: "Backup & restore",
+    summary:
+      "Export every record in your org to a single ZIP, or restore a previously-exported backup.",
+    roles: ["System Admin"],
+    blocks: [
+      {
+        type: "p",
+        text:
+          "Backup & restore is a System-Admin-only tool. It lets you take a complete, point-in-time snapshot of everything in your org — departments, GL mappings, policy rules, the QuickBooks connection record, users, expense reports and their line items, audit entries, and payroll batches — and download it as a single .zip file. You can later restore that snapshot back into the same org, replacing whatever is currently there.",
+      },
+      {
+        type: "ol",
+        items: [
+          "Open Admin → Backup & restore.",
+          "Under Export backup, optionally tick 'Also include uploaded receipt image files' (this makes the ZIP much larger).",
+          "Click Download backup. The browser will save a file like healthtrix-backup-<timestamp>.zip.",
+          "Store the file somewhere safe — anyone who gets it can replicate your org's data.",
+        ],
+      },
+      {
+        type: "callout",
+        tone: "warning",
+        title: "Restore is destructive",
+        text:
+          "Restoring will permanently delete every record currently in this org and replace it with the contents of the backup. There is no undo from inside the app. Backups can only be restored into the org they were exported from — uploading a backup from a different org is rejected.",
+      },
+      {
+        type: "ol",
+        items: [
+          "Under Restore from backup, click the file picker and select your .zip file.",
+          "Click 'Restore from this file'.",
+          "In the confirmation dialog, type RESTORE (in capital letters) into the text field, then click Restore.",
+          "After a few seconds you'll see a summary of what was restored, including row counts per table and how many receipt files were re-uploaded.",
+        ],
+      },
+      {
+        type: "callout",
+        tone: "info",
+        title: "Older backup versions",
+        text:
+          "Backups carry a schema version. If you restore an older backup, the app will run a chain of small upgrade steps in memory to bring it up to the current schema before writing it to the database. You don't need to do anything manually.",
+      },
+    ],
+    related: ["admin-users", "admin-audit"],
   },
 
   // ---------------- Reports & analytics ----------------

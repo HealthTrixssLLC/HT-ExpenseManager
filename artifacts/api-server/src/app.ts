@@ -70,7 +70,16 @@ app.use(
       "X-CSRF-Token",
       "X-Healthtrix-Client",
     ],
-    exposedHeaders: ["X-Healthtrix-Client", "X-New-Session-Token"],
+    exposedHeaders: [
+      "X-Healthtrix-Client",
+      "X-New-Session-Token",
+      "X-Backup-Schema-Version",
+      "X-Backup-App-Version",
+      "X-Backup-Org-Id",
+      "X-Backup-Includes-Receipt-Files",
+      "X-Backup-Receipt-Warnings",
+      "Content-Disposition",
+    ],
   }),
 );
 

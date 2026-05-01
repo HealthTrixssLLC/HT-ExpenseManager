@@ -5,7 +5,6 @@ import {
   getAdminListUsersQueryKey,
   useAdminCreateUser,
   useAdminUpdateUser,
-  useAdminDeactivateUser,
   useListDepartments,
   getListDepartmentsQueryKey,
   useListManagers,
@@ -35,6 +34,16 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -42,7 +51,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Pencil, UserPlus, UserX } from "lucide-react";
+import { Pencil, UserCheck, UserPlus, UserX } from "lucide-react";
+import { useAuth } from "@/lib/auth-context";
 
 const ALL_ROLES: Role[] = [
   Role.Employee,
@@ -122,7 +132,10 @@ export function UsersPage() {
 
   const createUser = useAdminCreateUser();
   const updateUser = useAdminUpdateUser();
-  const deactivateUser = useAdminDeactivateUser();
+  const { user: currentUser } = useAuth();
+  const [confirmTarget, setConfirmTarget] = useState<
+    { user: User; mode: "activate" | "deactivate" } | null
+  >(null);
 
   const handleCreate = () => {
     if (roles.size === 0) return;
@@ -169,17 +182,18 @@ export function UsersPage() {
     );
   };
 
-  const handleDeactivate = (id: string) => {
-    if (confirm("Are you sure you want to deactivate this user?")) {
-      deactivateUser.mutate(
-        { id },
-        {
-          onSuccess: () => {
-            qc.invalidateQueries({ queryKey: getAdminListUsersQueryKey() });
-          },
+  const confirmActivation = () => {
+    if (!confirmTarget) return;
+    const { user, mode } = confirmTarget;
+    updateUser.mutate(
+      { id: user.id, data: { isActive: mode === "activate" } },
+      {
+        onSuccess: () => {
+          setConfirmTarget(null);
+          qc.invalidateQueries({ queryKey: getAdminListUsersQueryKey() });
         },
-      );
-    }
+      },
+    );
   };
 
   const resetForm = () => {
@@ -246,7 +260,15 @@ export function UsersPage() {
             </TableHeader>
             <TableBody>
               {users.map((user) => (
-                <TableRow key={user.id}>
+                <TableRow
+                  key={user.id}
+                  data-testid={`row-user-${user.email}`}
+                  className={
+                    user.isActive
+                      ? undefined
+                      : "bg-muted/40 text-[var(--ht-ink-3)]"
+                  }
+                >
                   <TableCell className="font-medium">{user.fullName}</TableCell>
                   <TableCell className="text-[var(--ht-ink-2)]">
                     {user.email}
@@ -281,16 +303,42 @@ export function UsersPage() {
                     )}
                   </TableCell>
                   <TableCell className="text-right">
-                    <Button variant="ghost" size="sm" onClick={() => openEdit(user)}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => openEdit(user)}
+                      data-testid={`btn-edit-${user.email}`}
+                    >
                       <Pencil className="w-4 h-4" />
                     </Button>
-                    {user.isActive && (
+                    {user.isActive ? (
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => handleDeactivate(user.id)}
+                        title={
+                          currentUser?.id === user.id
+                            ? "You can't deactivate your own account."
+                            : "Deactivate user"
+                        }
+                        disabled={currentUser?.id === user.id}
+                        onClick={() =>
+                          setConfirmTarget({ user, mode: "deactivate" })
+                        }
+                        data-testid={`btn-deactivate-${user.email}`}
                       >
                         <UserX className="w-4 h-4 text-red-500" />
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        title="Activate user"
+                        onClick={() =>
+                          setConfirmTarget({ user, mode: "activate" })
+                        }
+                        data-testid={`btn-activate-${user.email}`}
+                      >
+                        <UserCheck className="w-4 h-4 text-emerald-600" />
                       </Button>
                     )}
                   </TableCell>
@@ -397,6 +445,60 @@ export function UsersPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Activate / Deactivate confirmation */}
+      <AlertDialog
+        open={confirmTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmTarget(null);
+        }}
+      >
+        <AlertDialogContent data-testid="dialog-activation">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {confirmTarget?.mode === "activate"
+                ? "Activate user?"
+                : "Deactivate user?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmTarget?.mode === "activate" ? (
+                <>
+                  <strong>{confirmTarget?.user.fullName}</strong> will be able
+                  to sign in again immediately. Their existing roles, manager,
+                  and department are preserved.
+                </>
+              ) : (
+                <>
+                  <strong>{confirmTarget?.user.fullName}</strong> will no
+                  longer be able to sign in. Their reports remain in the
+                  system. You can reactivate them at any time.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="btn-confirm-cancel">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                confirmActivation();
+              }}
+              disabled={updateUser.isPending}
+              data-testid="btn-confirm-activation"
+            >
+              {confirmTarget?.mode === "activate"
+                ? updateUser.isPending
+                  ? "Activating..."
+                  : "Activate"
+                : updateUser.isPending
+                  ? "Deactivating..."
+                  : "Deactivate"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Edit User Dialog */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>

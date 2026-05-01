@@ -1,0 +1,96 @@
+{
+  "_comment": "Locked v1 backup fixture. Used by the smoke test to prove that today's restore code can still ingest a wire-format backup whose schema version is 1. The placeholder string `{{ORG_ID}}` is substituted at runtime with the caller's actual org id (so the manifest.orgId == caller.orgId check passes); every other id stays verbatim. Adding a new schema version means: bump CURRENT_BACKUP_SCHEMA_VERSION, add an upgrader in versions.ts, and add a new fixture file (do NOT mutate this one).",
+  "manifest": {
+    "backupSchemaVersion": 1,
+    "appVersion": "0.1.0-fixture",
+    "orgId": "{{ORG_ID}}",
+    "orgName": "Fixture Org (v1)",
+    "createdAt": "2026-04-01T00:00:00.000Z",
+    "includesReceiptFiles": false,
+    "receiptCount": 0,
+    "rowCounts": {
+      "departments": 1,
+      "users": 1,
+      "employeeProfiles": 0,
+      "glMappings": 1,
+      "policyRules": 1,
+      "qboConnection": 0,
+      "qboPostingEvents": 0,
+      "managerDelegations": 0,
+      "expenseReports": 0,
+      "lineItems": 0,
+      "receipts": 0,
+      "approvalActions": 0,
+      "auditEntries": 0,
+      "payrollBatches": 0,
+      "payrollBatchItems": 0,
+      "reconciliationRecords": 0
+    }
+  },
+  "payload": {
+    "org": {
+      "id": "{{ORG_ID}}",
+      "name": "Fixture Org (v1)",
+      "createdAt": "2026-04-01T00:00:00.000Z"
+    },
+    "departments": [
+      {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "orgId": "{{ORG_ID}}",
+        "name": "Fixture Department",
+        "createdAt": "2026-04-01T00:00:00.000Z"
+      }
+    ],
+    "users": [
+      {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "orgId": "{{ORG_ID}}",
+        "email": "fixture-admin@healthtrix.fixture",
+        "passwordHash": "$2b$10$abcdefghijklmnopqrstuvCWXLLRcUVNZG7R0sb5yL.lDlu0RdTk.S",
+        "fullName": "Fixture Admin",
+        "title": null,
+        "roles": ["System Admin"],
+        "isAlsoEmployee": false,
+        "departmentId": "11111111-1111-4111-8111-111111111111",
+        "managerId": null,
+        "isActive": true,
+        "createdAt": "2026-04-01T00:00:00.000Z",
+        "updatedAt": "2026-04-01T00:00:00.000Z"
+      }
+    ],
+    "employeeProfiles": [],
+    "glMappings": [
+      {
+        "id": "33333333-3333-4333-8333-333333333333",
+        "orgId": "{{ORG_ID}}",
+        "code": "Travel:Airfare",
+        "qboAccount": "Travel Expense",
+        "qboAccountId": null,
+        "active": true,
+        "createdAt": "2026-04-01T00:00:00.000Z",
+        "updatedAt": "2026-04-01T00:00:00.000Z"
+      }
+    ],
+    "policyRules": [
+      {
+        "id": "44444444-4444-4444-8444-444444444444",
+        "orgId": "{{ORG_ID}}",
+        "name": "receipt.threshold_usd",
+        "value": 75,
+        "description": "Receipt required above this amount.",
+        "updatedAt": "2026-04-01T00:00:00.000Z"
+      }
+    ],
+    "qboConnection": null,
+    "qboPostingEvents": [],
+    "managerDelegations": [],
+    "expenseReports": [],
+    "lineItems": [],
+    "receipts": [],
+    "approvalActions": [],
+    "auditEntries": [],
+    "payrollBatches": [],
+    "payrollBatchItems": [],
+    "reconciliationRecords": []
+  }
+}

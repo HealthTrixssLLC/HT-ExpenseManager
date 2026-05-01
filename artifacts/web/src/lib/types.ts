@@ -77,6 +77,14 @@ export function roleCanAdmin(roles: Role[]): boolean {
   return hasAnyRole(roles, ["Accounting Admin", "System Admin"]);
 }
 
+/**
+ * System-Admin-only operations such as backup & restore. Accounting Admins
+ * intentionally cannot trigger these, since they would wipe org data.
+ */
+export function roleCanSysAdmin(roles: Role[]): boolean {
+  return hasAnyRole(roles, ["System Admin"]);
+}
+
 export function roleCanViewAnalytics(_roles: Role[]): boolean {
   return true;
 }
