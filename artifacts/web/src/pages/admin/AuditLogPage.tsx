@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   useAdminAuditLog,
   getAdminAuditLogQueryKey,
@@ -15,11 +15,22 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const ENTITY_LABELS: Record<string, string> = {
   report: "Report",
   line_item: "Line item",
   receipt: "Receipt",
+  qbo_config: "QBO connection",
+  qbo_tag: "QBO tag",
+  qbo_mapping: "QBO mapping",
+  qbo_posting: "QBO posting",
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -39,6 +50,31 @@ const FIELD_LABELS: Record<string, string> = {
   filename: "File name",
   objectPath: "Storage path",
   lineItemId: "Linked line item",
+  // QBO config fields
+  environment: "Environment",
+  hasClientId: "Client ID stored",
+  hasClientSecret: "Client Secret stored",
+  realmId: "QBO Realm ID",
+  companyName: "Company name",
+  status: "Status",
+  mode: "Mode",
+  connectionHealth: "Connection health",
+  autoPostOnApproval: "Auto-post on approval",
+  defaultMemoTemplate: "Default memo",
+  defaultPayableAccountId: "Default payable acct ID",
+  defaultPayableAccountName: "Default payable acct",
+  // tags / mappings
+  name: "Name",
+  color: "Color",
+  active: "Active",
+  qboAccount: "QBO account",
+  qboAccountId: "QBO account ID",
+  qboAccountType: "QBO account type",
+  // posting
+  qboJournalId: "QBO Journal ID",
+  attachableCount: "Attachments uploaded",
+  tagsSent: "Tags sent",
+  errorMessage: "Error",
 };
 
 function fieldLabel(field: string): string {
@@ -95,7 +131,15 @@ function entityLabel(item: ChangeFeedItem): string {
   }
   if (item.kind === "content" && item.content) {
     const e = ENTITY_LABELS[item.content.entityType] ?? item.content.entityType;
-    return `${e} on Report (${item.content.reportId.slice(0, 8)}…)`;
+    if (item.content.category === "qbo") {
+      // QBO events frequently aren't tied to a single report. Show the
+      // entity ID so each tag/mapping/connection change is identifiable.
+      return `${e} (${item.content.entityId.slice(0, 8)}…)`;
+    }
+    if (item.content.reportId) {
+      return `${e} on Report (${item.content.reportId.slice(0, 8)}…)`;
+    }
+    return e;
   }
   return "—";
 }
@@ -103,6 +147,31 @@ function entityLabel(item: ChangeFeedItem): string {
 function actorName(item: ChangeFeedItem): string {
   if (item.kind === "approval") return item.approval?.actor?.fullName ?? "—";
   return item.content?.actor?.fullName ?? "—";
+}
+
+function categoryBadge(item: ChangeFeedItem): React.ReactNode {
+  if (item.kind === "approval") {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border bg-blue-50 text-blue-800 border-blue-100">
+        Approval
+      </span>
+    );
+  }
+  if (item.kind === "content" && item.content) {
+    if (item.content.category === "qbo") {
+      return (
+        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border bg-emerald-50 text-emerald-800 border-emerald-100">
+          QBO
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border bg-amber-50 text-amber-800 border-amber-100">
+        Edit
+      </span>
+    );
+  }
+  return null;
 }
 
 function FieldDiffList({ diffs }: { diffs: AuditFieldDiff[] }) {
@@ -164,7 +233,11 @@ function DetailPanel({ item }: { item: ChangeFeedItem }) {
           {item.content.actorRoles?.length
             ? item.content.actorRoles.join(", ")
             : "—"}{" "}
-          • Entity ID: <span className="font-mono">{item.content.entityId}</span>
+          • Category:{" "}
+          <span className="font-mono">{item.content.category}</span>{" "}
+          • Entity:{" "}
+          <span className="font-mono">{item.content.entityType}</span>{" "}
+          • ID: <span className="font-mono">{item.content.entityId}</span>
         </div>
         <FieldDiffList diffs={item.content.fieldDiffs} />
       </div>
@@ -173,24 +246,48 @@ function DetailPanel({ item }: { item: ChangeFeedItem }) {
   return null;
 }
 
+type CategoryFilter = "all" | "report" | "qbo";
+
 export function AuditLogPage() {
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [category, setCategory] = useState<CategoryFilter>("all");
 
-  const { data: logs = [], isLoading } = useAdminAuditLog(
-    {},
-    { query: { queryKey: getAdminAuditLogQueryKey() } },
+  const params = useMemo(
+    () => (category === "all" ? {} : { category }),
+    [category],
   );
+
+  const { data: logs = [], isLoading } = useAdminAuditLog(params, {
+    query: { queryKey: getAdminAuditLogQueryKey(params) },
+  });
 
   return (
     <div className="space-y-6" data-testid="page-auditlog">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-[var(--ht-ink)]">
             Audit Log
           </h1>
           <p className="text-sm text-[var(--ht-ink-3)]">
-            Workflow approvals and field-level edits across every report.
+            Workflow approvals, report edits, and QuickBooks integration events
+            across the org.
           </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-[var(--ht-ink-3)]">Filter</span>
+          <Select
+            value={category}
+            onValueChange={(v) => setCategory(v as CategoryFilter)}
+          >
+            <SelectTrigger className="w-44" data-testid="select-audit-category">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All events</SelectItem>
+              <SelectItem value="report">Reports only</SelectItem>
+              <SelectItem value="qbo">QBO only</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
@@ -231,17 +328,7 @@ export function AuditLogPage() {
                       <TableCell className="font-medium">
                         {actorName(log)}
                       </TableCell>
-                      <TableCell>
-                        <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${
-                            log.kind === "approval"
-                              ? "bg-blue-50 text-blue-800 border-blue-100"
-                              : "bg-amber-50 text-amber-800 border-amber-100"
-                          }`}
-                        >
-                          {log.kind === "approval" ? "Approval" : "Edit"}
-                        </span>
-                      </TableCell>
+                      <TableCell>{categoryBadge(log)}</TableCell>
                       <TableCell>{actionLabel(log)}</TableCell>
                       <TableCell className="text-[var(--ht-ink-2)] text-sm">
                         {entityLabel(log)}

@@ -17,6 +17,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
       "add-line-items",
       "upload-receipts",
       "attach-receipts",
+      "report-tags",
       "submit-report",
       "changes-requested",
       "report-status-timeline",
@@ -55,8 +56,14 @@ export const HELP_CATEGORIES: HelpCategory[] = [
     topicIds: [
       "admin-users",
       "admin-gl",
+      "admin-gl-mapping-picker",
       "admin-policy",
       "admin-qbo",
+      "admin-qbo-config",
+      "admin-qbo-oauth",
+      "admin-qbo-health",
+      "admin-qbo-tags",
+      "admin-qbo-posting-history",
       "admin-delegations",
       "admin-audit",
       "admin-backup-restore",
@@ -886,9 +893,17 @@ export const HELP_TOPICS: HelpTopic[] = [
         items: [
           "Open Admin → Departments & GL.",
           "Each row pairs a category and a department with a QuickBooks account ref.",
-          "Click the edit icon, type the new account ref, and click the check icon to save.",
+          "Click the edit icon, then type to search the live QBO Chart of Accounts (when a real connection is configured). Pick an account from the dropdown and click the check icon to save.",
+          "If you're in stub mode, the picker falls back to a free-text input — type the account ref by hand.",
           "Use the X icon to cancel an edit without saving.",
         ],
+      },
+      {
+        type: "callout",
+        tone: "info",
+        title: "Account list refresh",
+        text:
+          "The QBO account list is cached for 10 minutes. Click Refresh accounts on the GL page to fetch the latest from Intuit if you've added new accounts in QuickBooks.",
       },
       {
         type: "callout",
@@ -930,16 +945,22 @@ export const HELP_TOPICS: HelpTopic[] = [
     id: "admin-qbo",
     category: "admin",
     title: "QuickBooks connection",
-    summary: "Connect or disconnect QuickBooks Online so finance can post.",
+    summary: "Configure Intuit credentials, connect via OAuth, and tune posting defaults.",
     roles: ["System Admin", "Accounting Admin"],
     blocks: [
+      {
+        type: "p",
+        text:
+          "Healthtrix Expense supports two QuickBooks Online modes: a built-in demo stub (no Intuit account required) for screenshots and walkthroughs, and a real Intuit integration that posts live JournalEntry records and uploads receipt files as Attachables. Real mode requires an Intuit Developer app — you provide the Client ID and Client Secret, choose Sandbox or Production, then complete a one-time OAuth handshake.",
+      },
       {
         type: "ol",
         items: [
           "Open Admin → QuickBooks.",
-          "If not connected, click Connect to QuickBooks. (This is a stub integration in demo mode.)",
-          "Once connected you'll see the realm ID and connected-at timestamp.",
-          "Click Disconnect to revoke. Posting will fail until you reconnect.",
+          "Under Configuration, paste your Intuit Client ID + Client Secret and choose Sandbox or Production. Save. The plaintext is encrypted at rest and never echoed back.",
+          "Under Connection, click Connect to QuickBooks. A new tab opens for Intuit's OAuth flow; sign in and authorize Healthtrix Expense.",
+          "After authorization the browser returns to this page with a green Connected banner and the company name + realm ID.",
+          "Open Posting Preferences to set the default payable account, memo template, and whether finance approval should auto-post.",
         ],
       },
       {
@@ -949,8 +970,228 @@ export const HELP_TOPICS: HelpTopic[] = [
         text:
           "Disconnecting while reports are mid-post will leave them in Sync Error. Reconnect, then retry from the finance queue.",
       },
+      {
+        type: "callout",
+        tone: "info",
+        title: "Demo mode fallback",
+        text:
+          "If you click Connect demo stub instead of providing Intuit credentials, posting runs entirely in-process — no live QBO calls. The stub is useful for trial accounts and product demos.",
+      },
     ],
-    related: ["post-qbo", "sync-errors"],
+    related: ["admin-qbo-oauth", "admin-qbo-tags", "admin-qbo-posting-history", "admin-gl", "post-qbo", "sync-errors"],
+  },
+  {
+    id: "admin-qbo-oauth",
+    category: "admin",
+    title: "Intuit OAuth setup (real mode)",
+    summary: "Register your Intuit Developer app and configure the redirect URI Healthtrix Expense expects.",
+    roles: ["System Admin", "Accounting Admin"],
+    blocks: [
+      {
+        type: "ol",
+        items: [
+          "Sign in to developer.intuit.com and create or open your app.",
+          "Under Keys & OAuth, copy the Client ID and Client Secret for the environment you plan to use (Sandbox or Production).",
+          "Add the Healthtrix Expense callback URL to the Redirect URIs list. The exact URL is shown on the QuickBooks admin page once you've saved credentials; it ends in /api/admin/qbo-connection/oauth/callback.",
+          "Back in Healthtrix Expense, paste Client ID, Client Secret, choose the matching environment, and Save.",
+          "Click Connect to QuickBooks. After Intuit authorization, the browser redirects back with a Connected banner.",
+        ],
+      },
+      {
+        type: "callout",
+        tone: "warning",
+        title: "Sandbox vs Production",
+        text:
+          "Sandbox credentials only work with Intuit's sandbox companies. Production credentials require Intuit app review. The Environment field on the credentials card must match the credentials you paste in.",
+      },
+      {
+        type: "p",
+        text:
+          "Healthtrix Expense automatically refreshes Intuit access tokens in the background every 15 minutes. You can also force a refresh from the Connection card. If the refresh token expires (after 100 days of inactivity, or if you revoke it on the Intuit side), the connection enters Reconnect Required and you'll need to repeat the Connect step.",
+      },
+    ],
+    related: ["admin-qbo", "admin-qbo-posting-history"],
+  },
+  {
+    id: "admin-qbo-tags",
+    category: "admin",
+    title: "QBO tags",
+    summary: "Org-wide labels that ride along with each posted JournalEntry.",
+    roles: ["System Admin", "Accounting Admin"],
+    blocks: [
+      {
+        type: "p",
+        text:
+          "QBO tags let you classify expense reports beyond category and department. Tag values are sent in the JournalEntry's TxnTagList field when posting, so they show up in QuickBooks reports and filters.",
+      },
+      {
+        type: "ol",
+        items: [
+          "Open Admin → QBO tags to create, rename, recolor, archive, or delete tags.",
+          "Open any expense report and use the Tags picker (under the report header) to apply or remove tags.",
+          "When the report posts, the active tag names are sent to Intuit. Inactive tags are skipped.",
+        ],
+      },
+    ],
+    related: ["admin-qbo", "post-qbo"],
+  },
+  {
+    id: "admin-qbo-posting-history",
+    category: "admin",
+    title: "QBO posting history",
+    summary: "Audit every JournalEntry attempt — successes, failures, and the reason.",
+    roles: ["System Admin", "Accounting Admin"],
+    blocks: [
+      {
+        type: "p",
+        text:
+          "The QuickBooks admin page includes a Posting History panel listing the most recent posting attempts across the org. Each row shows the report, status (Posted or Error), the QBO Journal ID (when posted), the number of receipt attachments uploaded, the tags sent, and the error message (when it failed).",
+      },
+      {
+        type: "ul",
+        items: [
+          "Successful rows let you click through to the report and into QuickBooks to verify the entry.",
+          "Error rows surface Intuit's full error text so you can identify schema, permission, or mapping issues.",
+          "Use the Audit Log (Admin → Audit log, filter by category=qbo) to see who triggered each post and connection change.",
+        ],
+      },
+    ],
+    related: ["admin-qbo", "post-qbo", "sync-errors"],
+  },
+  {
+    id: "admin-qbo-config",
+    category: "admin",
+    title: "QBO Configuration card",
+    summary: "Where you paste Intuit Client ID/Secret, choose Sandbox vs Production, and rotate credentials.",
+    roles: ["System Admin", "Accounting Admin"],
+    blocks: [
+      {
+        type: "p",
+        text:
+          "The Configuration card on the QuickBooks admin page is the single place where Intuit OAuth credentials live for your org. Both the Client ID and Client Secret are encrypted at rest with AES-256-GCM the moment you click Save — the plaintext is never written to logs and is never echoed back to the browser. Subsequent loads only show a masked preview (last 4 characters of the secret).",
+      },
+      {
+        type: "ol",
+        items: [
+          "Paste Client ID + Client Secret from your Intuit Developer app.",
+          "Choose Sandbox or Production. The environment must match the credentials you pasted — Sandbox secrets only work against Intuit's sandbox companies.",
+          "Click Save. The card refreshes with the masked secret preview and shows the canonical OAuth callback URL to copy into the Intuit app config.",
+          "To rotate the secret, click Edit, paste the new value, and Save again. Existing OAuth tokens stay valid — you only need to reconnect if Intuit revoked them.",
+          "To remove credentials entirely, click Disconnect on the Connection card. That clears the encrypted credentials and forces the org back into stub mode.",
+        ],
+      },
+      {
+        type: "callout",
+        tone: "info",
+        title: "Audit trail",
+        text:
+          "Every save, environment change, and disconnect writes a 'qbo_config' entry to the Audit Log with diffed fields. Secret values themselves never appear in the audit — only that they changed.",
+      },
+    ],
+    related: ["admin-qbo", "admin-qbo-oauth", "admin-qbo-health", "admin-audit"],
+  },
+  {
+    id: "admin-qbo-health",
+    category: "admin",
+    title: "QBO Connection health panel",
+    summary: "Read connection status, last token refresh, and recover from refresh failures.",
+    roles: ["System Admin", "Accounting Admin"],
+    blocks: [
+      {
+        type: "p",
+        text:
+          "The Health panel surfaces the live state of your Intuit connection so you can spot problems before finance hits Sync Errors. It refreshes every minute and after every manual action.",
+      },
+      {
+        type: "ul",
+        items: [
+          "Status badge — Connected (green), Refresh Failed (amber), Reconnect Required (red), or Disconnected (gray).",
+          "Last successful token refresh timestamp + expiry of the current access token.",
+          "Last refresh error (if any), with Intuit's exact error text.",
+          "Recent refresh attempts — the last few automatic refresh sweeps and their outcome.",
+          "Refresh now button to force a token refresh out of band; useful right before a large posting batch.",
+          "Reconnect button (only shown when status is Reconnect Required) that restarts the OAuth flow without wiping your credentials.",
+        ],
+      },
+      {
+        type: "callout",
+        tone: "warning",
+        title: "Reconnect Required",
+        text:
+          "If Intuit's refresh token expires (100 days of inactivity, or you revoked the app on Intuit's side), the panel switches to Reconnect Required. Click Reconnect and complete OAuth again — credentials are preserved, only the tokens are re-issued.",
+      },
+    ],
+    related: ["admin-qbo", "admin-qbo-config", "admin-qbo-oauth", "admin-qbo-posting-history"],
+  },
+  {
+    id: "admin-gl-mapping-picker",
+    category: "admin",
+    title: "GL mapping account picker",
+    summary: "How the typeahead picker works against the live QBO Chart of Accounts and what the Inactive warning means.",
+    roles: ["System Admin", "Accounting Admin"],
+    blocks: [
+      {
+        type: "p",
+        text:
+          "When the org is real-connected to QuickBooks, the GL mapping page replaces the free-text account field with a typeahead picker backed by the live Chart of Accounts. Pasting an arbitrary string is no longer possible — the only way to set an account is to pick one from the dropdown, which guarantees the AccountRef.value sent at posting time is a real QBO account ID.",
+      },
+      {
+        type: "ol",
+        items: [
+          "Click the pencil icon on a mapping row to enter edit mode.",
+          "Start typing in the QuickBooks account field. Matches from the org's COA (cached for ~10 minutes) appear below the input.",
+          "Inactive accounts in the dropdown show an amber 'Inactive' badge and are dimmed. You can still pick one, but JournalEntry posting will fail until the account is re-activated in QBO.",
+          "Pick a row. The mapping captures the account name, account ID, and account type so finance previews and the JournalEntry payload stay consistent.",
+          "Click the check icon to save, or the X icon to cancel.",
+        ],
+      },
+      {
+        type: "callout",
+        tone: "warning",
+        title: "Inactive mapping warning",
+        text:
+          "If a saved mapping points at an account that has since been deactivated (or deleted) in QuickBooks, the row shows an amber 'Inactive' badge in display mode. Re-edit the row and pick a replacement before finance tries to post against this category/department.",
+      },
+      {
+        type: "callout",
+        tone: "info",
+        title: "Stub mode fallback",
+        text:
+          "In demo/stub mode the typeahead is replaced by a free-text input. Type any account ref string — the stub will accept it. Once you flip to real mode, you'll need to re-pick mappings from the live picker.",
+      },
+    ],
+    related: ["admin-gl", "admin-qbo", "admin-qbo-config", "sync-errors"],
+  },
+  {
+    id: "report-tags",
+    category: "employees",
+    title: "Tagging an expense report",
+    summary: "Apply org-wide QBO tags to your reports so finance can group them in QuickBooks.",
+    roles: ["Employee", "Manager Approver", "Finance Approver", "Accounting Admin", "System Admin"],
+    blocks: [
+      {
+        type: "p",
+        text:
+          "QBO tags are org-wide labels (configured by your admin) that travel with each report when it posts to QuickBooks. Tagging is optional, but useful when finance wants to group spend by project, client, or initiative inside QBO reports.",
+      },
+      {
+        type: "ol",
+        items: [
+          "Open any of your expense reports.",
+          "Find the Tags row near the top of the report.",
+          "Click Add tag to pick from the active tag list. Click an applied tag's X to remove it.",
+          "Tag changes save instantly and don't require re-submitting the report. They're allowed up until the report is posted to QuickBooks.",
+        ],
+      },
+      {
+        type: "callout",
+        tone: "info",
+        title: "Who can edit tags",
+        text:
+          "Owners can tag their own reports during the edit window (Draft / Changes Requested). Managers can tag any report assigned to them. Finance and admins can tag any report. After a report posts to QBO, tags become read-only.",
+      },
+    ],
+    related: ["admin-qbo-tags", "submit-report"],
   },
   {
     id: "admin-delegations",

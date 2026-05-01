@@ -50,6 +50,43 @@ canonical backend for the Healthtrix Expense product (mockups under
   email domains, since the seed contract may evolve.
 - **Smoke**: `pnpm --filter @workspace/api-server run smoke` runs all
   24 end-to-end checks against a live server.
+- **Encryption test**: `pnpm --filter @workspace/api-server run test:encryption`
+  runs the standalone unit suite for `src/lib/encryption.ts` (AES-256-GCM
+  round-trip, tamper rejection, wrong-key rejection, masking).
+
+## QuickBooks Online integration
+
+The QBO integration runs in two modes per org, selected automatically:
+- **Stub mode**: simulated connection used in demos and dev. No external
+  network traffic; posting fakes a `qboJournalId`.
+- **Real mode**: per-org Intuit OAuth (Sandbox or Production). Activates as
+  soon as the admin saves a Client ID + Client Secret.
+
+Key pieces:
+- **Encryption**: `artifacts/api-server/src/lib/encryption.ts` — AES-256-GCM
+  keyed by the `QBO_CREDENTIAL_ENCRYPTION_KEY` env var (any string; SHA-256
+  is used to derive the 32-byte key). All Intuit Client IDs/Secrets, access
+  tokens and refresh tokens are encrypted at rest.
+- **Intuit client**: `artifacts/api-server/src/services/intuitClient.ts` —
+  raw HTTP client for Intuit OAuth (`/oauth2/v1/tokens`, revoke) and the
+  Accounting API (JournalEntry, Attachable, Account query) with retries.
+- **QBO service**: `artifacts/api-server/src/services/qbo.ts` — encryption
+  helpers, mode detection, OAuth start/callback/disconnect, real
+  JournalEntry posting, receipts uploaded as Attachables, tag assignments,
+  COA cache, token refresh job, audit logging under category `qbo`.
+- **OAuth callback**: public route at
+  `/api/admin/qbo-connection/oauth/callback` (registered in
+  `routes/qboOauth.ts` before `requireAuth`). Redirects back to
+  `/admin/qbo?qboStatus=connected|error&qboMessage=...`.
+- **Token refresh**: `index.ts` schedules a sweep 30 s after boot and every
+  15 min thereafter (gated by `NODE_ENV !== "test"`).
+- **Admin UI**: `artifacts/web/src/pages/admin/QboPage.tsx` (Configuration,
+  Connection, Health, Posting Preferences, Posting History, Reconnect
+  banner) + `QboTagsPage.tsx` (CRUD for org tags) +
+  `GlMappingPage.tsx` (typeahead account picker for real-mode, free text
+  for stub) + `AuditLogPage.tsx` (category filter, QBO event labels).
+- **Report tags**: `ReportTagPicker` on the report detail page lets admins
+  toggle org-wide tags onto a report; tags are sent on the JournalEntry.
 
 ## Healthtrix Expense Help Center
 

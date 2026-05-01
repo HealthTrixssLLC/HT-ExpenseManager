@@ -1,16 +1,66 @@
+/**
+ * QuickBooks Online integration service.
+ *
+ * This module supports two modes per org:
+ *
+ *  - "stub" mode (default): the connection is simulated. JournalEntry
+ *    payloads are still constructed, persisted to `qbo_posting_events`, and
+ *    surfaced to finance, but no real Intuit API calls are made. This keeps
+ *    the public demo working without configured Intuit credentials.
+ *
+ *  - "real" mode: the org has a stored Intuit Client ID + Secret and has
+ *    completed the OAuth dance. We then talk to the Intuit Accounting API:
+ *    JournalEntry posting, Attachable upload for receipts, CompanyInfo
+ *    fetch, and Chart of Accounts fetch (cached).
+ *
+ * Mode detection is per-request: `resolveMode(orgId)` looks at the row.
+ *
+ * All credential blobs (clientId, clientSecret, access/refresh tokens) are
+ * encrypted at rest via `lib/encryption.ts`. The plaintext only ever lives
+ * in process memory long enough to call Intuit, then is discarded.
+ */
+
 import { customAlphabet } from "nanoid";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, lte, sql } from "drizzle-orm";
 import {
   db,
   expenseReportsTable,
   glMappingsTable,
   lineItemsTable,
   orgsTable,
+  qboAccountsCacheTable,
   qboConnectionTable,
+  qboOauthStatesTable,
   qboPostingEventsTable,
+  qboTagAssignmentsTable,
+  qboTagsTable,
+  qboTokenRefreshLogTable,
+  receiptsTable,
+  usersTable,
   type ExpenseReport,
   type QboConnection,
+  type QboEnvironment,
+  type Role,
 } from "@workspace/db";
+import {
+  decryptNullable,
+  decryptString,
+  encryptionAvailable,
+  encryptString,
+} from "../lib/encryption";
+import { ObjectStorageService } from "../lib/objectStorage";
+import {
+  buildAuthorizationUrl,
+  createIntuitAccountingClient,
+  describeIntuitError,
+  exchangeCodeForTokens,
+  IntuitApiError,
+  refreshAccessToken,
+  revokeToken,
+  type IntuitTokenResponse,
+} from "./intuitClient";
+import { recordAudit } from "./audit";
+import { logger } from "../lib/logger";
 
 const NANOID = customAlphabet("0123456789ABCDEFGHJKMNPQRSTVWXYZ", 8);
 const REALM_NANOID = customAlphabet("0123456789", 16);
@@ -18,6 +68,20 @@ const REALM_NANOID = customAlphabet("0123456789", 16);
 const FALLBACK_ACCOUNT = "Uncategorized Expense";
 const PAYABLE_ACCOUNT = "Employee Reimbursement Payable";
 const CURRENCY = "USD";
+const ACCOUNTS_CACHE_TTL_MS = 10 * 60 * 1000;
+
+export type GlPreviewLine = {
+  account: string;
+  /**
+   * Durable QBO Chart-of-Accounts Id for this line, when the GL mapping has
+   * been linked to a real QBO account. The posting payload prefers this over
+   * the human-readable name because Intuit's API matches by Id, and the name
+   * could change in QBO without our knowledge.
+   */
+  accountId: string | null;
+  category: string;
+  amount: string;
+};
 
 export type GlPreview = {
   reportId: string;
@@ -29,12 +93,6 @@ export type GlPreview = {
   totalDebits: string;
   totalCredits: string;
   currency: string;
-};
-
-export type GlPreviewLine = {
-  account: string;
-  category: string;
-  amount: string;
 };
 
 function centsToDecimal(cents: number): string {
@@ -50,7 +108,7 @@ function todayIso(): string {
 export async function buildGlPreview(
   report: ExpenseReport,
 ): Promise<GlPreview> {
-  const [lines, mappings] = await Promise.all([
+  const [lines, mappings, conn] = await Promise.all([
     db
       .select()
       .from(lineItemsTable)
@@ -59,17 +117,22 @@ export async function buildGlPreview(
       .select()
       .from(glMappingsTable)
       .where(eq(glMappingsTable.orgId, report.orgId)),
+    db
+      .select()
+      .from(qboConnectionTable)
+      .where(eq(qboConnectionTable.orgId, report.orgId))
+      .limit(1)
+      .then((rows) => rows[0]),
   ]);
 
   const accountByCategory = new Map(
-    mappings.map((m) => [m.code, m.qboAccount] as const),
+    mappings.map((m) => [
+      m.code,
+      { name: m.qboAccount, id: m.qboAccountId ?? null },
+    ] as const),
   );
 
-  // One debit line per CATEGORY total (not per account). If two categories
-  // happen to map to the same QBO account, they remain distinct debit lines
-  // in the GL preview — this preserves category-level fidelity for finance
-  // review and downstream reconciliation. The category→account lookup happens
-  // per category, so the journal entry still references the right account.
+  // One debit line per category total (preserves category-level fidelity).
   const debitsByCategory = new Map<string, number>();
   let totalCents = 0;
   for (const line of lines) {
@@ -84,24 +147,37 @@ export async function buildGlPreview(
   const debits: GlPreviewLine[] = [...debitsByCategory.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([category, cents]) => ({
-      account: accountByCategory.get(category) ?? FALLBACK_ACCOUNT,
+      account: accountByCategory.get(category)?.name ?? FALLBACK_ACCOUNT,
+      accountId: accountByCategory.get(category)?.id ?? null,
       category,
       amount: centsToDecimal(cents),
     }));
 
+  const payableName =
+    conn?.defaultPayableAccountName ?? PAYABLE_ACCOUNT;
+  const payableId = conn?.defaultPayableAccountId ?? null;
+
   const credits: GlPreviewLine[] = [
     {
-      account: PAYABLE_ACCOUNT,
-      category: PAYABLE_ACCOUNT,
+      account: payableName,
+      accountId: payableId,
+      category: payableName,
       amount: centsToDecimal(totalCents),
     },
   ];
+
+  const memoTemplate =
+    conn?.defaultMemoTemplate ??
+    "Healthtrix Expense — {displayCode} — {title}";
+  const memo = memoTemplate
+    .replace("{displayCode}", report.displayCode)
+    .replace("{title}", report.title);
 
   return {
     reportId: report.id,
     displayCode: report.displayCode,
     journalDate: todayIso(),
-    memo: `Healthtrix Expense — ${report.displayCode} — ${report.title}`,
+    memo,
     debits,
     credits,
     totalDebits: centsToDecimal(totalCents),
@@ -110,160 +186,9 @@ export async function buildGlPreview(
   };
 }
 
-export type StubPostResult =
-  | {
-      status: "posted";
-      journalId: string;
-      payload: Record<string, unknown>;
-    }
-  | {
-      status: "error";
-      errorMessage: string;
-      payload: Record<string, unknown>;
-    };
-
-// Deterministic Intuit-shaped JournalEntry payload. Roughly 1-in-50 posts
-// fail with a sync error, controlled by a tiny digest-based pseudo-random.
-export async function postReportToQbo(
-  report: ExpenseReport,
-  options: { forceSuccess?: boolean } = {},
-): Promise<StubPostResult> {
-  const preview = await buildGlPreview(report);
-  const journalId = `QBO-J-${NANOID()}`;
-  const payload = {
-    JournalEntry: {
-      DocNumber: report.displayCode,
-      TxnDate: preview.journalDate,
-      PrivateNote: preview.memo,
-      Line: [
-        ...preview.debits.map((d, idx) => ({
-          Id: String(idx + 1),
-          Description: d.category,
-          Amount: parseFloat(d.amount),
-          DetailType: "JournalEntryLineDetail",
-          JournalEntryLineDetail: {
-            PostingType: "Debit",
-            AccountRef: { name: d.account },
-          },
-        })),
-        ...preview.credits.map((c, idx) => ({
-          Id: String(preview.debits.length + idx + 1),
-          Description: c.category,
-          Amount: parseFloat(c.amount),
-          DetailType: "JournalEntryLineDetail",
-          JournalEntryLineDetail: {
-            PostingType: "Credit",
-            AccountRef: { name: c.account },
-          },
-        })),
-      ],
-      CurrencyRef: { value: preview.currency },
-      TotalAmt: parseFloat(preview.totalDebits),
-    },
-  };
-
-  // Stub QuickBooks sync errors are gated behind a feature flag so production
-  // deploys never inject random failures. The default error rate is 0; demo /
-  // dev environments can set QBO_STUB_SYNC_ERROR_RATE=0.02 to exercise the
-  // retry path. The failure bucket is deterministic per (report) so retries
-  // hit the same outcome unless `forceSuccess` is set.
-  const errorRate = parseStubErrorRate(process.env["QBO_STUB_SYNC_ERROR_RATE"]);
-  const failThreshold = Math.round(errorRate * 50);
-  const shouldFail =
-    !options.forceSuccess &&
-    failThreshold > 0 &&
-    hashFailureBucket(report.id) < failThreshold;
-  if (shouldFail) {
-    await db.insert(qboPostingEventsTable).values({
-      orgId: report.orgId,
-      reportId: report.id,
-      journalId,
-      payload,
-      status: "error",
-      errorMessage:
-        "QuickBooks: Account 'Employee Reimbursement Payable' is inactive (stub)",
-    });
-    return {
-      status: "error",
-      errorMessage:
-        "QuickBooks: Account 'Employee Reimbursement Payable' is inactive (stub)",
-      payload,
-    };
-  }
-
-  await db.insert(qboPostingEventsTable).values({
-    orgId: report.orgId,
-    reportId: report.id,
-    journalId,
-    payload,
-    status: "posted",
-  });
-  return { status: "posted", journalId, payload };
-}
-
-function hashFailureBucket(s: string): number {
-  let h = 0;
-  for (const ch of s) {
-    h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  }
-  return h % 50;
-}
-
-function parseStubErrorRate(raw: string | undefined): number {
-  if (!raw) return 0;
-  const v = Number(raw);
-  if (!Number.isFinite(v) || v <= 0) return 0;
-  return Math.min(v, 1);
-}
-
-/**
- * Find or create the org's QuickBooks connection row, then mark it as
- * connected with a freshly-generated realm id and a sandbox-suffixed
- * company name. This is the stub equivalent of completing the Intuit
- * OAuth dance — we always return a "<org name> · Sandbox" string so it
- * is obvious in the UI that this is the stub connection, not a real
- * Intuit-issued company.
- */
-export async function connectQboStub(orgId: string): Promise<QboConnection> {
-  const [org] = await db
-    .select({ name: orgsTable.name })
-    .from(orgsTable)
-    .where(eq(orgsTable.id, orgId))
-    .limit(1);
-  if (!org) {
-    throw new Error(`Org ${orgId} not found while connecting QuickBooks stub`);
-  }
-  const realmId = REALM_NANOID();
-  const companyName = `${org.name} · Sandbox`;
-  await ensureConnectionRow(orgId);
-  const [updated] = await db
-    .update(qboConnectionTable)
-    .set({
-      status: "connected",
-      realmId,
-      companyName,
-      connectedAt: new Date(),
-      lastSyncError: null,
-    })
-    .where(eq(qboConnectionTable.orgId, orgId))
-    .returning();
-  return updated;
-}
-
-export async function disconnectQboStub(orgId: string): Promise<QboConnection> {
-  await ensureConnectionRow(orgId);
-  const [updated] = await db
-    .update(qboConnectionTable)
-    .set({
-      status: "disconnected",
-      realmId: null,
-      companyName: null,
-      connectedAt: null,
-    })
-    .where(eq(qboConnectionTable.orgId, orgId))
-    .returning();
-  return updated;
-}
+// ---------------------------------------------------------------------------
+// Connection row helpers
+// ---------------------------------------------------------------------------
 
 export async function ensureConnectionRow(orgId: string): Promise<QboConnection> {
   const existing = (
@@ -281,9 +206,1320 @@ export async function ensureConnectionRow(orgId: string): Promise<QboConnection>
   return created;
 }
 
+/** Returns "real" if the org has stored encrypted client credentials, else "stub". */
+export function hasRealCredentials(conn: QboConnection): boolean {
+  return Boolean(conn.clientIdEncrypted && conn.clientSecretEncrypted);
+}
+
+/** Returns "real" iff has tokens AND credentials. */
+export function isRealConnected(conn: QboConnection): boolean {
+  return (
+    hasRealCredentials(conn) &&
+    Boolean(conn.accessTokenEncrypted) &&
+    Boolean(conn.refreshTokenEncrypted) &&
+    conn.status === "connected" &&
+    conn.mode === "real"
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Stub flow (kept for demo orgs).
+// ---------------------------------------------------------------------------
+
+export async function connectQboStub(orgId: string): Promise<QboConnection> {
+  const [org] = await db
+    .select({ name: orgsTable.name })
+    .from(orgsTable)
+    .where(eq(orgsTable.id, orgId))
+    .limit(1);
+  if (!org) {
+    throw new Error(`Org ${orgId} not found while connecting QuickBooks stub`);
+  }
+  const realmId = REALM_NANOID();
+  const companyName = `${org.name} · Sandbox`;
+  await ensureConnectionRow(orgId);
+  const [updated] = await db
+    .update(qboConnectionTable)
+    .set({
+      status: "connected",
+      mode: "stub",
+      environment: "sandbox",
+      realmId,
+      companyName,
+      connectedAt: new Date(),
+      lastSyncError: null,
+      connectionHealth: "healthy",
+    })
+    .where(eq(qboConnectionTable.orgId, orgId))
+    .returning();
+  return updated;
+}
+
+export async function disconnectQboStub(orgId: string): Promise<QboConnection> {
+  await ensureConnectionRow(orgId);
+  const [updated] = await db
+    .update(qboConnectionTable)
+    .set({
+      status: "disconnected",
+      mode: "stub",
+      realmId: null,
+      companyName: null,
+      connectedAt: null,
+      connectionHealth: "disconnected",
+    })
+    .where(eq(qboConnectionTable.orgId, orgId))
+    .returning();
+  return updated;
+}
+
+// ---------------------------------------------------------------------------
+// Real OAuth flow
+// ---------------------------------------------------------------------------
+
+export type SaveCredentialsInput = {
+  orgId: string;
+  environment: QboEnvironment;
+  clientId?: string | null; // null/undefined keeps existing
+  clientSecret?: string | null;
+};
+
+/** Persist (encrypt) the org's Intuit Client ID + Secret + chosen environment. */
+export async function saveQboCredentials(
+  args: SaveCredentialsInput,
+): Promise<QboConnection> {
+  if (
+    (args.clientId !== undefined && args.clientId !== null && !encryptionAvailable()) ||
+    (args.clientSecret !== undefined && args.clientSecret !== null && !encryptionAvailable())
+  ) {
+    throw new Error(
+      "Cannot save QBO credentials: QBO_CREDENTIAL_ENCRYPTION_KEY is not configured.",
+    );
+  }
+  const conn = await ensureConnectionRow(args.orgId);
+  const updates: Partial<typeof qboConnectionTable.$inferInsert> = {
+    environment: args.environment,
+  };
+  if (typeof args.clientId === "string" && args.clientId.length > 0) {
+    updates.clientIdEncrypted = encryptString(args.clientId);
+  } else if (args.clientId === null) {
+    updates.clientIdEncrypted = null;
+  }
+  if (typeof args.clientSecret === "string" && args.clientSecret.length > 0) {
+    updates.clientSecretEncrypted = encryptString(args.clientSecret);
+  } else if (args.clientSecret === null) {
+    updates.clientSecretEncrypted = null;
+  }
+  // If credentials are now configured AND we have no live tokens yet, set
+  // mode=real but keep status=disconnected so the UI shows "ready to connect".
+  // Note: a key set to null in `updates` represents an explicit clear, so we
+  // can't use `??` (which would fall through to the existing value).
+  const nextClientId =
+    "clientIdEncrypted" in updates ? updates.clientIdEncrypted : conn.clientIdEncrypted;
+  const nextClientSecret =
+    "clientSecretEncrypted" in updates
+      ? updates.clientSecretEncrypted
+      : conn.clientSecretEncrypted;
+  const willHaveCreds = Boolean(nextClientId) && Boolean(nextClientSecret);
+  if (willHaveCreds && !conn.accessTokenEncrypted) {
+    updates.mode = "real";
+  }
+  // If credentials are being CLEARED, also drop any stored tokens / realm /
+  // company name and reset the connection to a clean disconnected/stub
+  // state. Otherwise we'd leave behind tokens that no longer match a
+  // configured client app, plus a misleading mode/status combination.
+  if (!willHaveCreds) {
+    updates.accessTokenEncrypted = null;
+    updates.refreshTokenEncrypted = null;
+    updates.tokenExpiresAt = null;
+    updates.refreshTokenExpiresAt = null;
+    updates.realmId = null;
+    updates.companyName = null;
+    updates.mode = "stub";
+    updates.status = "disconnected";
+    updates.connectionHealth = "disconnected";
+    updates.lastTokenRefreshError = null;
+    updates.lastSyncError = null;
+  }
+  const [updated] = await db
+    .update(qboConnectionTable)
+    .set(updates)
+    .where(eq(qboConnectionTable.orgId, args.orgId))
+    .returning();
+  return updated;
+}
+
+export type SavePostingPreferencesInput = {
+  orgId: string;
+  autoPostOnApproval?: boolean;
+  defaultMemoTemplate?: string | null;
+  defaultPayableAccountId?: string | null;
+  defaultPayableAccountName?: string | null;
+};
+
+export async function savePostingPreferences(
+  args: SavePostingPreferencesInput,
+): Promise<QboConnection> {
+  await ensureConnectionRow(args.orgId);
+  const updates: Partial<typeof qboConnectionTable.$inferInsert> = {};
+  if (args.autoPostOnApproval !== undefined) {
+    updates.autoPostOnApproval = args.autoPostOnApproval;
+  }
+  if (args.defaultMemoTemplate !== undefined) {
+    updates.defaultMemoTemplate = args.defaultMemoTemplate;
+  }
+  if (args.defaultPayableAccountId !== undefined) {
+    updates.defaultPayableAccountId = args.defaultPayableAccountId;
+  }
+  if (args.defaultPayableAccountName !== undefined) {
+    updates.defaultPayableAccountName = args.defaultPayableAccountName;
+  }
+  const [updated] = await db
+    .update(qboConnectionTable)
+    .set(updates)
+    .where(eq(qboConnectionTable.orgId, args.orgId))
+    .returning();
+  return updated;
+}
+
+/** Build the Intuit authorization URL and persist a one-time state. */
+export async function startQboOauth(args: {
+  orgId: string;
+  userId: string;
+  redirectUri: string;
+}): Promise<{ url: string; state: string }> {
+  const conn = await ensureConnectionRow(args.orgId);
+  if (!hasRealCredentials(conn)) {
+    throw new Error(
+      "QBO credentials are not configured. Save Client ID and Client Secret first.",
+    );
+  }
+  const clientId = decryptString(conn.clientIdEncrypted!);
+  const state = `${NANOID()}${NANOID()}${NANOID()}`;
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+  await db.insert(qboOauthStatesTable).values({
+    orgId: args.orgId,
+    state,
+    createdById: args.userId,
+    expiresAt,
+  });
+  const url = buildAuthorizationUrl({
+    environment: conn.environment,
+    clientId,
+    redirectUri: args.redirectUri,
+    state,
+  });
+  return { url, state };
+}
+
+export type OauthCallbackResult = {
+  ok: boolean;
+  errorMessage?: string;
+  conn?: QboConnection;
+};
+
+/**
+ * Handle the OAuth callback: exchange code, persist tokens, fetch CompanyInfo.
+ * The `state` value is an opaque nonce — the orgId (and the user who initiated
+ * the flow) are resolved server-side from the qbo_oauth_states row. Callers
+ * MUST NOT pass orgId from the front-channel.
+ */
+export async function handleQboOauthCallback(args: {
+  state: string;
+  code: string;
+  realmId: string;
+  redirectUri: string;
+  fetchFn?: typeof fetch;
+}): Promise<OauthCallbackResult> {
+  const stateRow = (
+    await db
+      .select()
+      .from(qboOauthStatesTable)
+      .where(eq(qboOauthStatesTable.state, args.state))
+      .limit(1)
+  )[0];
+  if (!stateRow) {
+    return { ok: false, errorMessage: "Invalid or unknown OAuth state." };
+  }
+  if (stateRow.consumedAt) {
+    return { ok: false, errorMessage: "OAuth state has already been used." };
+  }
+  if (stateRow.expiresAt.getTime() < Date.now()) {
+    return { ok: false, errorMessage: "OAuth state has expired. Please retry the connect flow." };
+  }
+  await db
+    .update(qboOauthStatesTable)
+    .set({ consumedAt: new Date() })
+    .where(eq(qboOauthStatesTable.id, stateRow.id));
+
+  const orgId = stateRow.orgId;
+  const initiatorUserId = stateRow.createdById;
+  const conn = await ensureConnectionRow(orgId);
+  if (!hasRealCredentials(conn)) {
+    return {
+      ok: false,
+      errorMessage: "QBO credentials are not configured for this org.",
+    };
+  }
+  const clientId = decryptString(conn.clientIdEncrypted!);
+  const clientSecret = decryptString(conn.clientSecretEncrypted!);
+
+  let tokens: IntuitTokenResponse;
+  try {
+    tokens = await exchangeCodeForTokens({
+      environment: conn.environment,
+      clientId,
+      clientSecret,
+      redirectUri: args.redirectUri,
+      code: args.code,
+      fetchFn: args.fetchFn,
+    });
+  } catch (err) {
+    return { ok: false, errorMessage: describeIntuitError(err) };
+  }
+
+  // Probe CompanyInfo so we can store the human-readable company name.
+  let companyName = "";
+  try {
+    const client = createIntuitAccountingClient({
+      environment: conn.environment,
+      clientId,
+      clientSecret,
+      realmId: args.realmId,
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      fetchFn: args.fetchFn,
+    });
+    const info = await client.fetchCompanyInfo();
+    companyName = info.companyName;
+  } catch (err) {
+    logger.warn(
+      { err, orgId },
+      "Could not fetch CompanyInfo after OAuth; storing tokens anyway",
+    );
+  }
+
+  const now = new Date();
+  const tokenExpiresAt = new Date(now.getTime() + tokens.expires_in * 1000);
+  const refreshExpiresAt = new Date(
+    now.getTime() + tokens.x_refresh_token_expires_in * 1000,
+  );
+  const finalCompanyName = companyName || `Intuit · ${args.realmId}`;
+  const [updated] = await db
+    .update(qboConnectionTable)
+    .set({
+      mode: "real",
+      status: "connected",
+      realmId: args.realmId,
+      companyName: finalCompanyName,
+      accessTokenEncrypted: encryptString(tokens.access_token),
+      refreshTokenEncrypted: encryptString(tokens.refresh_token),
+      tokenExpiresAt,
+      refreshTokenExpiresAt: refreshExpiresAt,
+      lastTokenRefreshAt: now,
+      lastTokenRefreshError: null,
+      connectionHealth: "healthy",
+      connectedAt: now,
+      lastSyncError: null,
+    })
+    .where(eq(qboConnectionTable.orgId, orgId))
+    .returning();
+
+  // Audit the real connect under qbo_config, attributed to the user who
+  // initiated the OAuth flow. Diff captures the user-visible state changes.
+  const initiator = (
+    await db
+      .select({ id: usersTable.id, roles: usersTable.roles })
+      .from(usersTable)
+      .where(eq(usersTable.id, initiatorUserId))
+      .limit(1)
+  )[0];
+  if (initiator) {
+    await recordQboAudit({
+      orgId,
+      actor: { id: initiator.id, roles: initiator.roles as Role[] },
+      entityType: "qbo_config",
+      entityId: orgId,
+      action: "updated",
+      fieldDiffs: [
+        { field: "mode", before: conn.mode, after: "real" },
+        { field: "status", before: conn.status, after: "connected" },
+        { field: "environment", before: conn.environment, after: conn.environment },
+        { field: "realmId", before: conn.realmId, after: args.realmId },
+        { field: "companyName", before: conn.companyName, after: finalCompanyName },
+        { field: "connectionHealth", before: conn.connectionHealth, after: "healthy" },
+      ],
+    });
+  } else {
+    // Fall back to system-attributed audit if the initiator was somehow
+    // deleted between start and callback.
+    await recordQboSystemAudit({
+      orgId,
+      entityType: "qbo_config",
+      entityId: orgId,
+      action: "updated",
+      fieldDiffs: [
+        { field: "mode", before: conn.mode, after: "real" },
+        { field: "status", before: conn.status, after: "connected" },
+        { field: "realmId", before: conn.realmId, after: args.realmId },
+        { field: "companyName", before: conn.companyName, after: finalCompanyName },
+      ],
+    });
+  }
+  return { ok: true, conn: updated };
+}
+
+/**
+ * Disconnect: revoke the refresh token at Intuit, then wipe BOTH tokens AND
+ * the encrypted Client ID / Client Secret from the row. The row is reset to
+ * `mode: "stub"` so the UI is consistent with "no real credentials stored".
+ *
+ * Admins must re-enter their Intuit Client ID / Secret before they can
+ * connect again — this matches the security expectation that disconnecting
+ * fully revokes the org's QBO trust, not just the tokens.
+ */
+export async function disconnectQboReal(args: {
+  orgId: string;
+  fetchFn?: typeof fetch;
+}): Promise<QboConnection> {
+  const conn = await ensureConnectionRow(args.orgId);
+  if (
+    conn.clientIdEncrypted &&
+    conn.clientSecretEncrypted &&
+    conn.refreshTokenEncrypted
+  ) {
+    try {
+      await revokeToken({
+        environment: conn.environment,
+        clientId: decryptString(conn.clientIdEncrypted),
+        clientSecret: decryptString(conn.clientSecretEncrypted),
+        token: decryptString(conn.refreshTokenEncrypted),
+        fetchFn: args.fetchFn,
+      });
+    } catch (err) {
+      logger.warn(
+        { err, orgId: args.orgId },
+        "Intuit token revoke failed; clearing local state anyway",
+      );
+    }
+  }
+  const [updated] = await db
+    .update(qboConnectionTable)
+    .set({
+      status: "disconnected",
+      mode: "stub",
+      // Wipe encrypted credentials in addition to tokens.
+      clientIdEncrypted: null,
+      clientSecretEncrypted: null,
+      accessTokenEncrypted: null,
+      refreshTokenEncrypted: null,
+      tokenExpiresAt: null,
+      refreshTokenExpiresAt: null,
+      lastTokenRefreshAt: null,
+      lastTokenRefreshError: null,
+      realmId: null,
+      companyName: null,
+      connectedAt: null,
+      connectionHealth: "disconnected",
+    })
+    .where(eq(qboConnectionTable.orgId, args.orgId))
+    .returning();
+  return updated;
+}
+
+// ---------------------------------------------------------------------------
+// Token refresh job
+// ---------------------------------------------------------------------------
+
+/** Refresh a single org's tokens if needed. Returns the new conn row. */
+export async function refreshOrgTokensIfNeeded(args: {
+  orgId: string;
+  /** Override "needs refresh" check; useful for manual-refresh button. */
+  force?: boolean;
+  fetchFn?: typeof fetch;
+}): Promise<QboConnection> {
+  const conn = await ensureConnectionRow(args.orgId);
+  if (
+    !conn.refreshTokenEncrypted ||
+    !conn.clientIdEncrypted ||
+    !conn.clientSecretEncrypted ||
+    conn.status !== "connected"
+  ) {
+    return conn;
+  }
+  const expiresInMs = conn.tokenExpiresAt
+    ? conn.tokenExpiresAt.getTime() - Date.now()
+    : 0;
+  const oneHour = 60 * 60 * 1000;
+  if (!args.force && expiresInMs > oneHour) {
+    return conn;
+  }
+  try {
+    const tokens = await refreshAccessToken({
+      environment: conn.environment,
+      clientId: decryptString(conn.clientIdEncrypted),
+      clientSecret: decryptString(conn.clientSecretEncrypted),
+      refreshToken: decryptString(conn.refreshTokenEncrypted),
+      fetchFn: args.fetchFn,
+    });
+    const now = new Date();
+    const tokenExpiresAt = new Date(now.getTime() + tokens.expires_in * 1000);
+    const refreshExpiresAt = new Date(
+      now.getTime() + tokens.x_refresh_token_expires_in * 1000,
+    );
+    const [updated] = await db
+      .update(qboConnectionTable)
+      .set({
+        accessTokenEncrypted: encryptString(tokens.access_token),
+        refreshTokenEncrypted: encryptString(tokens.refresh_token),
+        tokenExpiresAt,
+        refreshTokenExpiresAt: refreshExpiresAt,
+        lastTokenRefreshAt: now,
+        lastTokenRefreshError: null,
+        connectionHealth: "healthy",
+      })
+      .where(eq(qboConnectionTable.orgId, args.orgId))
+      .returning();
+    await db.insert(qboTokenRefreshLogTable).values({
+      orgId: args.orgId,
+      success: true,
+      expiresInSeconds: tokens.expires_in,
+    });
+    return updated;
+  } catch (err) {
+    const msg = describeIntuitError(err);
+    const isRevoked =
+      err instanceof IntuitApiError &&
+      err.code === "refresh_token_revoked";
+    const [updated] = await db
+      .update(qboConnectionTable)
+      .set({
+        lastTokenRefreshAt: new Date(),
+        lastTokenRefreshError: msg,
+        connectionHealth: isRevoked ? "reconnect_required" : "refresh_failed",
+        ...(isRevoked
+          ? { status: "error" as const }
+          : {}),
+      })
+      .where(eq(qboConnectionTable.orgId, args.orgId))
+      .returning();
+    await db.insert(qboTokenRefreshLogTable).values({
+      orgId: args.orgId,
+      success: false,
+      errorMessage: msg,
+    });
+    // Surface refresh failures in the QBO audit log so admins can see the
+    // health change show up in the same view as their other QBO actions.
+    // Attributed to a real org admin (system actor) since the audit table
+    // requires a non-null actorId.
+    await recordQboSystemAudit({
+      orgId: args.orgId,
+      entityType: "qbo_config",
+      entityId: updated.id,
+      action: "updated",
+      fieldDiffs: [
+        {
+          field: "connectionHealth",
+          before: conn.connectionHealth,
+          after: updated.connectionHealth,
+        },
+        {
+          field: "lastTokenRefreshError",
+          before: conn.lastTokenRefreshError,
+          after: msg,
+        },
+        ...(isRevoked
+          ? [
+              {
+                field: "status",
+                before: conn.status,
+                after: "error",
+              },
+            ]
+          : []),
+      ],
+    });
+    return updated;
+  }
+}
+
+/** Run the refresh sweep across every connected org. */
+export async function runTokenRefreshSweep(args?: {
+  fetchFn?: typeof fetch;
+}): Promise<{ checked: number; refreshed: number; failed: number }> {
+  const oneHourFromNow = new Date(Date.now() + 60 * 60 * 1000);
+  // Pull every connected real-mode connection whose token is near expiry.
+  const rows = await db
+    .select()
+    .from(qboConnectionTable)
+    .where(
+      and(
+        eq(qboConnectionTable.mode, "real"),
+        eq(qboConnectionTable.status, "connected"),
+        lte(qboConnectionTable.tokenExpiresAt, oneHourFromNow),
+      ),
+    );
+  let refreshed = 0;
+  let failed = 0;
+  for (const row of rows) {
+    const updated = await refreshOrgTokensIfNeeded({
+      orgId: row.orgId,
+      force: true,
+      ...(args?.fetchFn ? { fetchFn: args.fetchFn } : {}),
+    });
+    if (updated.connectionHealth === "healthy") refreshed++;
+    else failed++;
+  }
+  return { checked: rows.length, refreshed, failed };
+}
+
+// ---------------------------------------------------------------------------
+// Posting (real + stub)
+// ---------------------------------------------------------------------------
+
+export type PostResult =
+  | {
+      status: "posted" | "retried";
+      journalId: string;
+      qboJournalId: string | null;
+      qboSyncToken: string | null;
+      attachableIds: string[];
+      tagsSent: string[];
+      payload: Record<string, unknown>;
+    }
+  | {
+      status: "error";
+      errorMessage: string;
+      payload: Record<string, unknown>;
+    };
+
+export type PostOptions = {
+  forceSuccess?: boolean;
+  /**
+   * When true, a successful post is recorded as `status: "retried"` so the
+   * Posting History panel can distinguish retries from first-attempt posts.
+   * Set by the `/reports/:id/retry-qbo` route.
+   */
+  retry?: boolean;
+  fetchFn?: typeof fetch;
+};
+
+export async function postReportToQbo(
+  report: ExpenseReport,
+  options: PostOptions = {},
+): Promise<PostResult> {
+  const conn = await ensureConnectionRow(report.orgId);
+
+  // Stub fallback only applies to orgs that have NEVER configured real
+  // credentials (demo/sandbox orgs). Once real credentials are stored we
+  // never silently downgrade to stub — a degraded real connection (token
+  // revoked, status=error, reconnect_required, etc.) must surface as a
+  // posting error so finance knows to reconnect, instead of producing a
+  // fake "posted" event with no real JournalEntry on the Intuit side.
+  if (hasRealCredentials(conn) || conn.mode === "real") {
+    if (isRealConnected(conn)) {
+      return postReportToQboReal(report, conn, options);
+    }
+    const errorMessage =
+      "QuickBooks connection requires reconnect (status=" +
+      conn.status +
+      ", health=" +
+      conn.connectionHealth +
+      "). Please reconnect QuickBooks before posting.";
+    const tags = await listTagsForReport(report.id);
+    const tagNames = tags.map((t) => t.name);
+    const preview = await buildGlPreview(report);
+    const payload = buildJournalEntryPayload(preview, tagNames);
+    await db.insert(qboPostingEventsTable).values({
+      orgId: report.orgId,
+      reportId: report.id,
+      journalId: `QBO-J-${NANOID()}`,
+      payload,
+      status: "error",
+      errorMessage,
+      tagsSent: tagNames,
+      environment: conn.environment,
+      realmId: conn.realmId,
+    });
+    await db
+      .update(qboConnectionTable)
+      .set({ lastFailedPostAt: new Date(), lastSyncError: errorMessage })
+      .where(eq(qboConnectionTable.orgId, report.orgId));
+    return { status: "error", errorMessage, payload };
+  }
+
+  return postReportToQboStub(report, conn, options);
+}
+
+async function postReportToQboStub(
+  report: ExpenseReport,
+  _conn: QboConnection,
+  options: PostOptions,
+): Promise<PostResult> {
+  const preview = await buildGlPreview(report);
+  const tags = await listTagsForReport(report.id);
+  const tagNames = tags.map((t) => t.name);
+  const journalId = `QBO-J-${NANOID()}`;
+  const payload = buildJournalEntryPayload(preview, tagNames);
+
+  const errorRate = parseStubErrorRate(process.env["QBO_STUB_SYNC_ERROR_RATE"]);
+  const failThreshold = Math.round(errorRate * 50);
+  const shouldFail =
+    !options.forceSuccess &&
+    failThreshold > 0 &&
+    hashFailureBucket(report.id) < failThreshold;
+  if (shouldFail) {
+    const errorMessage =
+      "QuickBooks: Account 'Employee Reimbursement Payable' is inactive (stub)";
+    await db.insert(qboPostingEventsTable).values({
+      orgId: report.orgId,
+      reportId: report.id,
+      journalId,
+      payload,
+      status: "error",
+      errorMessage,
+      tagsSent: tagNames,
+      environment: _conn.environment,
+      realmId: _conn.realmId,
+    });
+    await db
+      .update(qboConnectionTable)
+      .set({ lastFailedPostAt: new Date(), lastSyncError: errorMessage })
+      .where(eq(qboConnectionTable.orgId, report.orgId));
+    return { status: "error", errorMessage, payload };
+  }
+
+  const successStatus: "posted" | "retried" = options.retry ? "retried" : "posted";
+  await db.insert(qboPostingEventsTable).values({
+    orgId: report.orgId,
+    reportId: report.id,
+    journalId,
+    payload,
+    status: successStatus,
+    tagsSent: tagNames,
+    environment: _conn.environment,
+    realmId: _conn.realmId,
+  });
+  await db
+    .update(qboConnectionTable)
+    .set({ lastSuccessfulPostAt: new Date(), lastSyncAt: new Date() })
+    .where(eq(qboConnectionTable.orgId, report.orgId));
+  return {
+    status: successStatus,
+    journalId,
+    qboJournalId: null,
+    qboSyncToken: null,
+    attachableIds: [],
+    tagsSent: tagNames,
+    payload,
+  };
+}
+
+async function postReportToQboReal(
+  report: ExpenseReport,
+  conn: QboConnection,
+  options: PostOptions,
+): Promise<PostResult> {
+  const preview = await buildGlPreview(report);
+  const tags = await listTagsForReport(report.id);
+  const tagNames = tags.map((t) => t.name);
+  const payload = buildJournalEntryPayload(preview, tagNames);
+  // Refresh tokens if near-expired before posting.
+  const fresh = await refreshOrgTokensIfNeeded({
+    orgId: report.orgId,
+    ...(options.fetchFn ? { fetchFn: options.fetchFn } : {}),
+  });
+  const liveConn = fresh.accessTokenEncrypted ? fresh : conn;
+  if (
+    !liveConn.accessTokenEncrypted ||
+    !liveConn.refreshTokenEncrypted ||
+    !liveConn.clientIdEncrypted ||
+    !liveConn.clientSecretEncrypted ||
+    !liveConn.realmId
+  ) {
+    const errorMessage = "QuickBooks connection is incomplete; reconnect required.";
+    await persistPostingFailure(report, liveConn, payload, tagNames, errorMessage);
+    return { status: "error", errorMessage, payload };
+  }
+  const client = createIntuitAccountingClient({
+    environment: liveConn.environment,
+    clientId: decryptString(liveConn.clientIdEncrypted),
+    clientSecret: decryptString(liveConn.clientSecretEncrypted),
+    realmId: liveConn.realmId,
+    accessToken: decryptString(liveConn.accessTokenEncrypted),
+    refreshToken: decryptString(liveConn.refreshTokenEncrypted),
+    ...(options.fetchFn ? { fetchFn: options.fetchFn } : {}),
+    onTokenRefresh: async (tokens) => {
+      // Persist refreshed tokens so the next request picks them up.
+      const now = new Date();
+      const tokenExpiresAt = new Date(now.getTime() + tokens.expires_in * 1000);
+      const refreshExpiresAt = new Date(
+        now.getTime() + tokens.x_refresh_token_expires_in * 1000,
+      );
+      await db
+        .update(qboConnectionTable)
+        .set({
+          accessTokenEncrypted: encryptString(tokens.access_token),
+          refreshTokenEncrypted: encryptString(tokens.refresh_token),
+          tokenExpiresAt,
+          refreshTokenExpiresAt: refreshExpiresAt,
+          lastTokenRefreshAt: now,
+        })
+        .where(eq(qboConnectionTable.orgId, report.orgId));
+    },
+  });
+
+  // Idempotency key: report id + attempt count (existing posting events).
+  const priorAttempts = await db
+    .select({ id: qboPostingEventsTable.id })
+    .from(qboPostingEventsTable)
+    .where(eq(qboPostingEventsTable.reportId, report.id));
+  const idempotencyKey = `${report.id}-${priorAttempts.length}`;
+
+  let postResult;
+  try {
+    postResult = await client.postJournalEntry(payload, idempotencyKey);
+  } catch (err) {
+    const errorMessage = describeIntuitError(err);
+    await persistPostingFailure(report, liveConn, payload, tagNames, errorMessage);
+    return { status: "error", errorMessage, payload };
+  }
+
+  // Upload receipts as Attachables linked to the journal entry. We tolerate
+  // partial failures here — the journal entry is the primary action, and an
+  // attachable failure should not roll the journal back. We log warnings.
+  const attachableIds = await uploadReceiptsAsAttachables({
+    reportId: report.id,
+    journalEntryId: postResult.Id,
+    client,
+  });
+
+  const journalId = `QBO-J-${NANOID()}`;
+  const successStatus: "posted" | "retried" = options.retry ? "retried" : "posted";
+  await db.insert(qboPostingEventsTable).values({
+    orgId: report.orgId,
+    reportId: report.id,
+    journalId,
+    qboJournalId: postResult.Id,
+    qboSyncToken: postResult.SyncToken,
+    payload,
+    status: successStatus,
+    tagsSent: tagNames,
+    attachableIds,
+    environment: liveConn.environment,
+    realmId: liveConn.realmId,
+  });
+  await db
+    .update(qboConnectionTable)
+    .set({
+      lastSuccessfulPostAt: new Date(),
+      lastSyncAt: new Date(),
+      lastSyncError: null,
+    })
+    .where(eq(qboConnectionTable.orgId, report.orgId));
+
+  return {
+    status: successStatus,
+    journalId,
+    qboJournalId: postResult.Id,
+    qboSyncToken: postResult.SyncToken,
+    attachableIds,
+    tagsSent: tagNames,
+    payload,
+  };
+}
+
+async function persistPostingFailure(
+  report: ExpenseReport,
+  conn: QboConnection,
+  payload: Record<string, unknown>,
+  tagNames: string[],
+  errorMessage: string,
+): Promise<void> {
+  const journalId = `QBO-J-${NANOID()}`;
+  await db.insert(qboPostingEventsTable).values({
+    orgId: report.orgId,
+    reportId: report.id,
+    journalId,
+    payload,
+    status: "error",
+    errorMessage,
+    tagsSent: tagNames,
+    environment: conn.environment,
+    realmId: conn.realmId,
+  });
+  await db
+    .update(qboConnectionTable)
+    .set({ lastFailedPostAt: new Date(), lastSyncError: errorMessage })
+    .where(eq(qboConnectionTable.orgId, report.orgId));
+}
+
+async function uploadReceiptsAsAttachables(args: {
+  reportId: string;
+  journalEntryId: string;
+  client: ReturnType<typeof createIntuitAccountingClient>;
+}): Promise<string[]> {
+  const receipts = await db
+    .select()
+    .from(receiptsTable)
+    .where(eq(receiptsTable.reportId, args.reportId));
+  if (receipts.length === 0) return [];
+
+  const storage = new ObjectStorageService();
+  const ids: string[] = [];
+  for (const receipt of receipts) {
+    try {
+      const file = await storage.getObjectEntityFile(receipt.objectPath);
+      const [buffer] = await file.download();
+      const result = await args.client.uploadAttachable({
+        journalEntryId: args.journalEntryId,
+        fileName: receipt.filename,
+        contentType: receipt.mimeType,
+        fileBytes: buffer,
+        note: `Receipt for report ${args.reportId}`,
+      });
+      ids.push(result.Id);
+    } catch (err) {
+      logger.warn(
+        { err, receiptId: receipt.id, journalId: args.journalEntryId },
+        "Failed to upload receipt as Attachable",
+      );
+    }
+  }
+  return ids;
+}
+
+/**
+ * Build an Intuit JournalEntry payload from the GL preview.
+ *
+ * AccountRef prefers the durable QBO account `value` (Id) when the GL
+ * mapping has been linked to a real Chart-of-Accounts entry. Intuit matches
+ * by Id and the human-readable name can drift in QBO without our knowledge.
+ * In stub mode (no real QBO connection, accountId is null) we fall back to
+ * AccountRef-by-name, which the stub posting path tolerates.
+ */
+function buildAccountRef(line: GlPreviewLine): Record<string, string> {
+  if (line.accountId) {
+    return { value: line.accountId, name: line.account };
+  }
+  return { name: line.account };
+}
+
+function buildJournalEntryPayload(
+  preview: GlPreview,
+  tagNames: string[],
+): Record<string, unknown> {
+  return {
+    JournalEntry: {
+      DocNumber: preview.displayCode,
+      TxnDate: preview.journalDate,
+      PrivateNote: preview.memo,
+      Line: [
+        ...preview.debits.map((d, idx) => ({
+          Id: String(idx + 1),
+          Description: d.category,
+          Amount: parseFloat(d.amount),
+          DetailType: "JournalEntryLineDetail",
+          JournalEntryLineDetail: {
+            PostingType: "Debit",
+            AccountRef: buildAccountRef(d),
+          },
+        })),
+        ...preview.credits.map((c, idx) => ({
+          Id: String(preview.debits.length + idx + 1),
+          Description: c.category,
+          Amount: parseFloat(c.amount),
+          DetailType: "JournalEntryLineDetail",
+          JournalEntryLineDetail: {
+            PostingType: "Credit",
+            AccountRef: buildAccountRef(c),
+          },
+        })),
+      ],
+      CurrencyRef: { value: preview.currency },
+      TotalAmt: parseFloat(preview.totalDebits),
+      // Intuit uses a free-form `Tag` association on the entry header to
+      // allow finance to filter journal entries by tag.
+      ...(tagNames.length > 0 ? { Tag: tagNames.join(",") } : {}),
+    },
+  };
+}
+
+function hashFailureBucket(s: string): number {
+  let h = 0;
+  for (const ch of s) {
+    h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  }
+  return h % 50;
+}
+
+function parseStubErrorRate(raw: string | undefined): number {
+  if (!raw) return 0;
+  const v = Number(raw);
+  if (!Number.isFinite(v) || v <= 0) return 0;
+  return Math.min(v, 1);
+}
+
+// ---------------------------------------------------------------------------
+// Tags
+// ---------------------------------------------------------------------------
+
+export async function listTags(orgId: string) {
+  return db
+    .select()
+    .from(qboTagsTable)
+    .where(eq(qboTagsTable.orgId, orgId));
+}
+
+export async function createTag(args: {
+  orgId: string;
+  name: string;
+  color?: string | null;
+}) {
+  const [row] = await db
+    .insert(qboTagsTable)
+    .values({
+      orgId: args.orgId,
+      name: args.name,
+      color: args.color ?? null,
+    })
+    .returning();
+  return row;
+}
+
+export async function updateTag(args: {
+  orgId: string;
+  id: string;
+  name?: string;
+  color?: string | null;
+  active?: boolean;
+}) {
+  const updates: Partial<typeof qboTagsTable.$inferInsert> = {};
+  if (args.name !== undefined) updates.name = args.name;
+  if (args.color !== undefined) updates.color = args.color;
+  if (args.active !== undefined) updates.active = args.active;
+  const [row] = await db
+    .update(qboTagsTable)
+    .set(updates)
+    .where(and(eq(qboTagsTable.id, args.id), eq(qboTagsTable.orgId, args.orgId)))
+    .returning();
+  return row ?? null;
+}
+
+export async function deleteTag(args: { orgId: string; id: string }) {
+  const [row] = await db
+    .delete(qboTagsTable)
+    .where(and(eq(qboTagsTable.id, args.id), eq(qboTagsTable.orgId, args.orgId)))
+    .returning();
+  return row ?? null;
+}
+
+export async function listTagsForReport(reportId: string) {
+  return db
+    .select({
+      id: qboTagsTable.id,
+      name: qboTagsTable.name,
+      color: qboTagsTable.color,
+      active: qboTagsTable.active,
+    })
+    .from(qboTagAssignmentsTable)
+    .innerJoin(qboTagsTable, eq(qboTagAssignmentsTable.tagId, qboTagsTable.id))
+    .where(eq(qboTagAssignmentsTable.reportId, reportId));
+}
+
+export async function setReportTags(args: {
+  orgId: string;
+  reportId: string;
+  tagIds: string[];
+}) {
+  // Validate all tags exist in the org.
+  if (args.tagIds.length > 0) {
+    const found = await db
+      .select({ id: qboTagsTable.id })
+      .from(qboTagsTable)
+      .where(
+        and(
+          eq(qboTagsTable.orgId, args.orgId),
+          inArray(qboTagsTable.id, args.tagIds),
+        ),
+      );
+    if (found.length !== args.tagIds.length) {
+      throw new Error("One or more tag ids are not in this org.");
+    }
+  }
+  await db.transaction(async (tx) => {
+    await tx
+      .delete(qboTagAssignmentsTable)
+      .where(eq(qboTagAssignmentsTable.reportId, args.reportId));
+    if (args.tagIds.length > 0) {
+      await tx.insert(qboTagAssignmentsTable).values(
+        args.tagIds.map((tagId) => ({
+          orgId: args.orgId,
+          reportId: args.reportId,
+          tagId,
+        })),
+      );
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Chart of Accounts (real-only; stub-mode returns empty list).
+// ---------------------------------------------------------------------------
+
+export type CachedAccount = {
+  id: string;
+  name: string;
+  fullyQualifiedName: string;
+  accountType: string;
+  accountSubType: string | null;
+  classification: string | null;
+  active: boolean;
+};
+
+export async function listChartOfAccounts(args: {
+  orgId: string;
+  forceRefresh?: boolean;
+  fetchFn?: typeof fetch;
+}): Promise<CachedAccount[]> {
+  const conn = await ensureConnectionRow(args.orgId);
+  if (!isRealConnected(conn)) return [];
+  const cached = await db
+    .select()
+    .from(qboAccountsCacheTable)
+    .where(eq(qboAccountsCacheTable.orgId, args.orgId));
+  const fresh = cached.length > 0
+    ? Date.now() - cached[0].fetchedAt.getTime() < ACCOUNTS_CACHE_TTL_MS
+    : false;
+  if (fresh && !args.forceRefresh) {
+    return cached.map(toCachedAccountDto);
+  }
+  // Fetch fresh from QBO.
+  const liveConn = await refreshOrgTokensIfNeeded({
+    orgId: args.orgId,
+    ...(args.fetchFn ? { fetchFn: args.fetchFn } : {}),
+  });
+  if (
+    !liveConn.accessTokenEncrypted ||
+    !liveConn.clientIdEncrypted ||
+    !liveConn.clientSecretEncrypted ||
+    !liveConn.realmId
+  ) {
+    return [];
+  }
+  const client = createIntuitAccountingClient({
+    environment: liveConn.environment,
+    clientId: decryptString(liveConn.clientIdEncrypted),
+    clientSecret: decryptString(liveConn.clientSecretEncrypted),
+    realmId: liveConn.realmId,
+    accessToken: decryptString(liveConn.accessTokenEncrypted),
+    refreshToken: liveConn.refreshTokenEncrypted
+      ? decryptString(liveConn.refreshTokenEncrypted)
+      : null,
+    ...(args.fetchFn ? { fetchFn: args.fetchFn } : {}),
+  });
+  let accounts: CachedAccount[];
+  try {
+    const result = await client.query<{
+      QueryResponse?: {
+        Account?: Array<{
+          Id: string;
+          Name: string;
+          FullyQualifiedName: string;
+          AccountType: string;
+          AccountSubType?: string;
+          Classification?: string;
+          Active: boolean;
+          SyncToken?: string;
+        }>;
+      };
+    }>("SELECT * FROM Account MAXRESULTS 1000");
+    accounts = (result.QueryResponse?.Account ?? []).map((a) => ({
+      id: a.Id,
+      name: a.Name,
+      fullyQualifiedName: a.FullyQualifiedName,
+      accountType: a.AccountType,
+      accountSubType: a.AccountSubType ?? null,
+      classification: a.Classification ?? null,
+      active: a.Active,
+    }));
+  } catch (err) {
+    logger.warn(
+      { err, orgId: args.orgId },
+      "Failed to fetch QBO chart of accounts",
+    );
+    return cached.map(toCachedAccountDto);
+  }
+  await db.transaction(async (tx) => {
+    await tx
+      .delete(qboAccountsCacheTable)
+      .where(eq(qboAccountsCacheTable.orgId, args.orgId));
+    if (accounts.length > 0) {
+      await tx.insert(qboAccountsCacheTable).values(
+        accounts.map((a) => ({
+          orgId: args.orgId,
+          qboAccountId: a.id,
+          name: a.name,
+          fullyQualifiedName: a.fullyQualifiedName,
+          accountType: a.accountType,
+          accountSubType: a.accountSubType,
+          classification: a.classification,
+          active: a.active,
+        })),
+      );
+    }
+  });
+  return accounts;
+}
+
+function toCachedAccountDto(
+  row: typeof qboAccountsCacheTable.$inferSelect,
+): CachedAccount {
+  return {
+    id: row.qboAccountId,
+    name: row.name,
+    fullyQualifiedName: row.fullyQualifiedName,
+    accountType: row.accountType,
+    accountSubType: row.accountSubType,
+    classification: row.classification,
+    active: row.active,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Health and posting history
+// ---------------------------------------------------------------------------
+
+export type TokenRefreshLogDto = {
+  id: string;
+  success: boolean;
+  errorMessage: string | null;
+  expiresInSeconds: number | null;
+  createdAt: string;
+};
+
+export type ConnectionHealthDto = {
+  mode: QboConnection["mode"];
+  status: QboConnection["status"];
+  health: QboConnection["connectionHealth"];
+  environment: QboConnection["environment"];
+  realmId: string | null;
+  companyName: string | null;
+  hasCredentials: boolean;
+  lastTokenRefreshAt: string | null;
+  lastTokenRefreshError: string | null;
+  tokenExpiresAt: string | null;
+  refreshTokenExpiresAt: string | null;
+  lastSuccessfulPostAt: string | null;
+  lastFailedPostAt: string | null;
+  recentRefreshAttempts: TokenRefreshLogDto[];
+};
+
+export async function getConnectionHealth(orgId: string): Promise<ConnectionHealthDto> {
+  const conn = await ensureConnectionRow(orgId);
+  const recent = await db
+    .select()
+    .from(qboTokenRefreshLogTable)
+    .where(eq(qboTokenRefreshLogTable.orgId, orgId))
+    .orderBy(desc(qboTokenRefreshLogTable.createdAt))
+    .limit(10);
+  return {
+    mode: conn.mode,
+    status: conn.status,
+    health: conn.connectionHealth,
+    environment: conn.environment,
+    realmId: conn.realmId,
+    companyName: conn.companyName,
+    hasCredentials: hasRealCredentials(conn),
+    lastTokenRefreshAt: conn.lastTokenRefreshAt?.toISOString() ?? null,
+    lastTokenRefreshError: conn.lastTokenRefreshError,
+    tokenExpiresAt: conn.tokenExpiresAt?.toISOString() ?? null,
+    refreshTokenExpiresAt: conn.refreshTokenExpiresAt?.toISOString() ?? null,
+    lastSuccessfulPostAt: conn.lastSuccessfulPostAt?.toISOString() ?? null,
+    lastFailedPostAt: conn.lastFailedPostAt?.toISOString() ?? null,
+    recentRefreshAttempts: recent.map((r) => ({
+      id: r.id,
+      success: r.success,
+      errorMessage: r.errorMessage,
+      expiresInSeconds: r.expiresInSeconds,
+      createdAt: r.createdAt.toISOString(),
+    })),
+  };
+}
+
+export type PostingHistoryItemDto = {
+  id: string;
+  reportId: string;
+  reportDisplayCode: string;
+  status: "posted" | "retried" | "error";
+  journalId: string;
+  qboJournalId: string | null;
+  /** Environment of the QBO connection at posting time. */
+  environment: QboConnection["environment"];
+  realmId: string | null;
+  attachableCount: number;
+  tagsSent: string[];
+  errorMessage: string | null;
+  createdAt: string;
+};
+
+export async function listPostingHistory(args: {
+  orgId: string;
+  limit?: number;
+}): Promise<PostingHistoryItemDto[]> {
+  const limit = Math.min(Math.max(args.limit ?? 25, 1), 100);
+  // We snapshot environment + realmId on each posting event row at write
+  // time, so historical entries always link to the original Intuit tenant
+  // even if the org later disconnects, switches sandbox <-> prod, or moves
+  // to a different company.
+  const rows = await db
+    .select({
+      id: qboPostingEventsTable.id,
+      reportId: qboPostingEventsTable.reportId,
+      status: qboPostingEventsTable.status,
+      journalId: qboPostingEventsTable.journalId,
+      qboJournalId: qboPostingEventsTable.qboJournalId,
+      environment: qboPostingEventsTable.environment,
+      realmId: qboPostingEventsTable.realmId,
+      attachableIds: qboPostingEventsTable.attachableIds,
+      tagsSent: qboPostingEventsTable.tagsSent,
+      errorMessage: qboPostingEventsTable.errorMessage,
+      createdAt: qboPostingEventsTable.createdAt,
+      reportDisplayCode: expenseReportsTable.displayCode,
+    })
+    .from(qboPostingEventsTable)
+    .innerJoin(
+      expenseReportsTable,
+      eq(qboPostingEventsTable.reportId, expenseReportsTable.id),
+    )
+    .where(eq(qboPostingEventsTable.orgId, args.orgId))
+    .orderBy(desc(qboPostingEventsTable.createdAt))
+    .limit(limit);
+  return rows.map((r) => ({
+    id: r.id,
+    reportId: r.reportId,
+    reportDisplayCode: r.reportDisplayCode,
+    status: r.status,
+    journalId: r.journalId,
+    qboJournalId: r.qboJournalId,
+    environment: r.environment,
+    realmId: r.realmId,
+    attachableCount: Array.isArray(r.attachableIds) ? r.attachableIds.length : 0,
+    tagsSent: Array.isArray(r.tagsSent) ? r.tagsSent : [],
+    errorMessage: r.errorMessage,
+    createdAt: r.createdAt.toISOString(),
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Loose query helpers used by routes.
+// ---------------------------------------------------------------------------
+
 export async function loadLastPostingEvent(
   reportId: string,
-): Promise<{ journalId: string | null; status: "posted" | "error" } | null> {
+): Promise<{
+  journalId: string | null;
+  status: "posted" | "retried" | "error";
+} | null> {
   const rows = await db
     .select()
     .from(qboPostingEventsTable)
@@ -292,7 +1528,7 @@ export async function loadLastPostingEvent(
   const last = rows.sort(
     (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
   )[0];
-  return { journalId: last.journalId, status: last.status };
+  return { journalId: last.qboJournalId ?? last.journalId, status: last.status };
 }
 
 export async function pickReportForPosting(
@@ -330,4 +1566,69 @@ export async function markLineItemsForReview(
         .where(eq(lineItemsTable.id, line.id));
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Audit helpers (small wrapper that centralises QBO category)
+// ---------------------------------------------------------------------------
+
+export async function recordQboAudit(args: {
+  orgId: string;
+  actor: { id: string; roles: Role[] };
+  entityType: "qbo_config" | "qbo_tag" | "qbo_mapping" | "qbo_posting";
+  entityId: string;
+  action: "created" | "updated" | "deleted";
+  fieldDiffs?: Array<{ field: string; before: unknown; after: unknown }>;
+}): Promise<void> {
+  await recordAudit({
+    orgId: args.orgId,
+    actor: args.actor,
+    entityType: args.entityType,
+    entityId: args.entityId,
+    action: args.action,
+    category: "qbo",
+    fieldDiffs: args.fieldDiffs ?? [],
+  });
+}
+
+/**
+ * Record a QBO audit entry for a SYSTEM action (no real user — e.g. the
+ * background token-refresh sweep). The audit table requires a non-null
+ * actorId that FK's to users, so we attribute the action to an Accounting
+ * Admin / System Admin in the same org. We pick the most recently active
+ * admin so the event surfaces under a real account in the audit log. If no
+ * admin exists we silently skip the entry rather than block the sweep.
+ */
+export async function recordQboSystemAudit(args: {
+  orgId: string;
+  entityType: "qbo_config" | "qbo_tag" | "qbo_mapping" | "qbo_posting";
+  entityId: string;
+  action: "created" | "updated" | "deleted";
+  fieldDiffs?: Array<{ field: string; before: unknown; after: unknown }>;
+}): Promise<void> {
+  const admin = (
+    await db
+      .select({ id: usersTable.id, roles: usersTable.roles })
+      .from(usersTable)
+      .where(
+        and(
+          eq(usersTable.orgId, args.orgId),
+          // Either role suffices — both can manage QBO config.
+          sql`('Accounting Admin' = ANY(${usersTable.roles}) OR 'System Admin' = ANY(${usersTable.roles}))`,
+          eq(usersTable.isActive, true),
+        ),
+      )
+      .orderBy(desc(usersTable.createdAt))
+      .limit(1)
+  )[0];
+  if (!admin) return;
+  await recordAudit({
+    orgId: args.orgId,
+    actor: { id: admin.id, roles: admin.roles as Role[] },
+    entityType: args.entityType,
+    entityId: args.entityId,
+    action: args.action,
+    category: "qbo",
+    fieldDiffs: args.fieldDiffs ?? [],
+  });
 }

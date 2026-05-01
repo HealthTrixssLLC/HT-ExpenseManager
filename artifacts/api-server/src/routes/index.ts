@@ -8,6 +8,7 @@ import managerRouter from "./manager";
 import financeRouter from "./finance";
 import payrollRouter from "./payroll";
 import adminRouter from "./admin";
+import qboOauthRouter from "./qboOauth";
 
 const router: IRouter = Router();
 
@@ -19,6 +20,10 @@ router.use(reportsRouter);
 router.use(managerRouter);
 router.use(financeRouter);
 router.use(payrollRouter);
+// QBO OAuth callback must register BEFORE the admin router, since the admin
+// router's requireAuth gate would otherwise block the unauthenticated browser
+// redirect coming back from Intuit.
+router.use(qboOauthRouter);
 router.use(adminRouter);
 
 export default router;

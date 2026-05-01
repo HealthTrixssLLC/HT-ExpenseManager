@@ -5,10 +5,17 @@
  * Healthtrix Expense backend API
  * OpenAPI spec version: 0.1.0
  */
+import type { QboConnectionConnectionHealth } from "./qboConnectionConnectionHealth";
+import type { QboConnectionEnvironment } from "./qboConnectionEnvironment";
+import type { QboConnectionMode } from "./qboConnectionMode";
 import type { QboConnectionStatus } from "./qboConnectionStatus";
 
 export interface QboConnection {
   status: QboConnectionStatus;
+  /** "stub" = simulated demo connection. "real" = the org has stored Intuit Client credentials (live posting requires status=connected). */
+  mode: QboConnectionMode;
+  environment: QboConnectionEnvironment;
+  connectionHealth: QboConnectionConnectionHealth;
   /** @nullable */
   realmId?: string | null;
   /** @nullable */
@@ -19,4 +26,27 @@ export interface QboConnection {
   lastSyncAt?: Date | null;
   /** @nullable */
   lastSyncError?: string | null;
+  hasClientId: boolean;
+  hasClientSecret: boolean;
+  /** @nullable */
+  clientIdMasked?: string | null;
+  /** @nullable */
+  tokenExpiresAt?: Date | null;
+  /** @nullable */
+  refreshTokenExpiresAt?: Date | null;
+  /** @nullable */
+  lastTokenRefreshAt?: Date | null;
+  /** @nullable */
+  lastTokenRefreshError?: string | null;
+  /** @nullable */
+  lastSuccessfulPostAt?: Date | null;
+  /** @nullable */
+  lastFailedPostAt?: Date | null;
+  autoPostOnApproval: boolean;
+  /** @nullable */
+  defaultMemoTemplate?: string | null;
+  /** @nullable */
+  defaultPayableAccountId?: string | null;
+  /** @nullable */
+  defaultPayableAccountName?: string | null;
 }

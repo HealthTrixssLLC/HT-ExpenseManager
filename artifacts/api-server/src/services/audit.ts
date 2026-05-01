@@ -1,6 +1,7 @@
 import { db, auditEntriesTable } from "../lib/db";
 import type {
   AuditAction,
+  AuditCategory,
   AuditEntityType,
   AuditFieldDiff,
   AuditEntry,
@@ -12,12 +13,17 @@ type Tx = Parameters<Parameters<DbClient["transaction"]>[0]>[0];
 
 export type RecordAuditInput = {
   orgId: string;
-  reportId: string;
+  // reportId is nullable: QBO config / tag events are org-scoped and not
+  // tied to a single report.
+  reportId?: string | null;
   actor: { id: string; roles: Role[] };
   entityType: AuditEntityType;
   entityId: string;
   action: AuditAction;
   fieldDiffs: AuditFieldDiff[];
+  // Defaults to "report"; pass "qbo" for QBO connection / tag / mapping /
+  // posting events so the admin audit log can filter by category.
+  category?: AuditCategory;
   // Optional ambient transaction so the audit row is persisted in the same
   // transaction as the underlying mutation. If omitted we use the top-level
   // db client which is fine for single-statement updates.
@@ -37,12 +43,13 @@ export async function recordAudit(
     .insert(auditEntriesTable)
     .values({
       orgId: input.orgId,
-      reportId: input.reportId,
+      reportId: input.reportId ?? null,
       actorId: input.actor.id,
       actorRoles: input.actor.roles,
       entityType: input.entityType,
       entityId: input.entityId,
       action: input.action,
+      category: input.category ?? "report",
       fieldDiffs: input.fieldDiffs as unknown as object,
     })
     .returning();

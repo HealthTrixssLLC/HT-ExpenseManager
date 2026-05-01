@@ -13,4 +13,8 @@ export const AuditEntryEntityType = {
   report: "report",
   line_item: "line_item",
   receipt: "receipt",
+  qbo_config: "qbo_config",
+  qbo_tag: "qbo_tag",
+  qbo_mapping: "qbo_mapping",
+  qbo_posting: "qbo_posting",
 } as const;

@@ -26,6 +26,7 @@ import {
   type ExpenseReportSummaryDto,
 } from "./serializers";
 import { HttpError } from "./problem";
+import { listTagsForReport } from "../services/qbo";
 
 // Statuses a Finance Approver is allowed to see. Anything pre-manager-approval
 // is invisible to finance — the manager queue owns the editable funnel and
@@ -157,7 +158,7 @@ export async function loadFullReport(
   report: ExpenseReport,
 ): Promise<ExpenseReportDto> {
   const [summary] = await loadReportSummaries([report]);
-  const [lines, receipts] = await Promise.all([
+  const [lines, receipts, tags] = await Promise.all([
     db
       .select()
       .from(lineItemsTable)
@@ -166,6 +167,7 @@ export async function loadFullReport(
       .select()
       .from(receiptsTable)
       .where(eq(receiptsTable.reportId, report.id)),
+    listTagsForReport(report.id),
   ]);
   const receiptCountsByLine = new Map<string, number>();
   for (const r of receipts) {
@@ -188,6 +190,12 @@ export async function loadFullReport(
     ),
     receipts: receipts.map(toReceiptDto),
     editedSinceLastApproval,
+    tags: tags.map((t) => ({
+      id: t.id,
+      name: t.name,
+      color: t.color ?? null,
+      active: t.active,
+    })),
   };
 }
 
@@ -318,6 +326,67 @@ export async function canEditReport(
     };
   }
   return { ok: true };
+}
+
+/**
+ * Tag-assignment authorization. Tags are metadata (no financial impact) that
+ * the QBO posting pipeline forwards to QuickBooks as JournalEntry classes.
+ * The original task allows tag editing from BOTH employee report views and
+ * finance report views, so this gate is intentionally broader than
+ * `canEditReport`:
+ *
+ *  - Owner / direct manager / active manager-delegate: same as report edit
+ *    rights, but ONLY while the report is still content-editable. Once
+ *    finance owns the record, the owner-side flows hand off.
+ *  - Finance Approver / Accounting Admin / System Admin: allowed at any
+ *    status that's still tag-mutation-meaningful (i.e. before the report
+ *    has been Reconciled or Voided). They can correct tags right up to
+ *    the moment of QBO posting and still tweak them on a Sync Error.
+ *
+ * The lock for finance/admin uses a slightly wider status window than the
+ * owner path because finance needs to fix tag mistakes between Manager
+ * Approved and the Posted/Ready-for-Payroll handoff.
+ */
+const FINANCE_TAG_EDITABLE_STATUSES: ReadonlyArray<WorkflowStatus> = [
+  "Manager Approved",
+  "Finance Review",
+  "Finance Approved",
+  "Sync Error",
+  "Posted to QuickBooks",
+  "Ready for Payroll Reimbursement",
+];
+
+export async function canEditReportTags(
+  report: ExpenseReport,
+  user: User,
+): Promise<EditAuthResult> {
+  if (report.orgId !== user.orgId) {
+    return {
+      ok: false,
+      status: 403,
+      title: "Forbidden",
+      detail: "Report not in your organization.",
+    };
+  }
+  const isFinanceOrAdmin = user.roles.some(
+    (r) =>
+      r === "Finance Approver" ||
+      r === "Accounting Admin" ||
+      r === "System Admin",
+  );
+  if (isFinanceOrAdmin) {
+    if (!FINANCE_TAG_EDITABLE_STATUSES.includes(report.status)) {
+      return {
+        ok: false,
+        status: 409,
+        title: "Locked",
+        detail: `Cannot edit tags on a report in status "${report.status}".`,
+      };
+    }
+    return { ok: true };
+  }
+  // Fall through to the owner/manager rules.
+  return canEditReport(report, user);
 }
 
 // True if `user` is the direct manager of the employee with id

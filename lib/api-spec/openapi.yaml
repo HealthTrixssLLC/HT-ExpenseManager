@@ -382,13 +382,242 @@ paths:
     post:
       operationId: adminDisconnectQbo
       tags: [admin]
-      summary: Disconnect the stubbed QuickBooks Online connection
+      summary: Disconnect QuickBooks Online (stub or real-OAuth)
       responses:
         "200":
           description: Disconnected
           content:
             application/json:
               schema: { $ref: "#/components/schemas/QboConnection" }
+
+  /admin/qbo-connection/credentials:
+    put:
+      operationId: adminSaveQboCredentials
+      tags: [admin]
+      summary: Save (encrypt) the org's Intuit Client ID + Secret + environment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SaveQboCredentialsBody" }
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QboConnection" }
+
+  /admin/qbo-connection/posting-preferences:
+    put:
+      operationId: adminSaveQboPostingPreferences
+      tags: [admin]
+      summary: Update QBO posting defaults (auto-post, memo template, payable acct)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QboPostingPreferencesBody" }
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QboConnection" }
+
+  /admin/qbo-connection/oauth/start:
+    post:
+      operationId: adminStartQboOauth
+      tags: [admin]
+      summary: Begin the Intuit OAuth flow (returns the authorization URL to open)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QboOauthStartResponse" }
+
+  /admin/qbo-connection/refresh-token:
+    post:
+      operationId: adminRefreshQboToken
+      tags: [admin]
+      summary: Force a token refresh against Intuit
+      responses:
+        "200":
+          description: Refreshed (or refresh attempt persisted to health log)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QboConnection" }
+
+  /admin/qbo-connection/health:
+    get:
+      operationId: adminGetQboConnectionHealth
+      tags: [admin]
+      summary: |
+        Detailed connection health for the org (status, mode, environment,
+        token expiry timestamps, last refresh outcome, last successful /
+        failed post, and the last few token-refresh log entries).
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QboConnectionHealth" }
+
+  /admin/qbo-connection/posting-history:
+    get:
+      operationId: adminListQboPostingHistory
+      tags: [admin]
+      summary: Recent QBO posting events (success + failure)
+      parameters:
+        - in: query
+          name: limit
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/QboPostingHistoryItem" }
+
+  /admin/qbo-connection/accounts:
+    get:
+      operationId: adminListQboAccounts
+      tags: [admin]
+      summary: List the org's QBO Chart of Accounts (cached, real-only)
+      parameters:
+        - in: query
+          name: refresh
+          required: false
+          schema: { type: boolean, default: false }
+        - in: query
+          name: q
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/QboAccount" }
+
+  /admin/qbo-tags:
+    get:
+      operationId: adminListQboTags
+      tags: [admin]
+      summary: List org-wide QBO tags
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/QboTag" }
+    post:
+      operationId: adminCreateQboTag
+      tags: [admin]
+      summary: Create a new QBO tag
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateQboTagBody" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QboTag" }
+
+  /admin/qbo-tags/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      operationId: adminUpdateQboTag
+      tags: [admin]
+      summary: Update a QBO tag
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateQboTagBody" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QboTag" }
+    delete:
+      operationId: adminDeleteQboTag
+      tags: [admin]
+      summary: Delete a QBO tag
+      responses:
+        "204":
+          description: Deleted
+
+  /qbo-tags:
+    get:
+      operationId: listActiveQboTags
+      tags: [reports]
+      summary: List active QBO tags (catalog) for the report tag picker
+      description: |
+        Non-admin endpoint that returns active org-wide QBO tags so the
+        Report Tag Picker on report-detail pages can show the catalog to
+        employees and finance users without granting them admin scope.
+        Inactive tags are filtered out — admins manage those via
+        `GET /admin/qbo-tags`.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/QboTag" }
+
+  /reports/{id}/tags:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: listReportTags
+      tags: [reports]
+      summary: List the QBO tags applied to a report
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/QboTag" }
+    put:
+      operationId: setReportTags
+      tags: [reports]
+      summary: Replace the set of QBO tags applied to a report
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SetReportTagsBody" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/QboTag" }
 
   /admin/delegations:
     get:
@@ -453,6 +682,17 @@ paths:
           name: reportId
           required: false
           schema: { type: string, format: uuid }
+        - in: query
+          name: category
+          required: false
+          description: >-
+            Filter content edits by category. `report` returns
+            report/line-item/receipt edits; `qbo` returns QBO
+            config/tag/mapping/posting events. Approval rows are
+            included only when `category=report` or omitted.
+          schema:
+            type: string
+            enum: [report, qbo]
         - in: query
           name: limit
           required: false
@@ -1368,6 +1608,7 @@ components:
         code: { type: string }
         qboAccount: { type: string }
         qboAccountId: { type: ["string", "null"] }
+        qboAccountType: { type: ["string", "null"] }
         active: { type: boolean }
       required: [id, code, qboAccount, active]
 
@@ -1376,6 +1617,7 @@ components:
       properties:
         qboAccount: { type: string }
         qboAccountId: { type: ["string", "null"] }
+        qboAccountType: { type: ["string", "null"] }
         active: { type: boolean }
 
     QboConnection:
@@ -1384,12 +1626,48 @@ components:
         status:
           type: string
           enum: [connected, disconnected, error]
+        mode:
+          type: string
+          enum: [stub, real]
+          description: >-
+            "stub" = simulated demo connection. "real" = the org has stored
+            Intuit Client credentials (live posting requires status=connected).
+        environment:
+          type: string
+          enum: [sandbox, production]
+        connectionHealth:
+          type: string
+          enum: [healthy, refresh_failed, reconnect_required, disconnected]
         realmId: { type: ["string", "null"] }
         companyName: { type: ["string", "null"] }
         connectedAt: { type: ["string", "null"], format: date-time }
         lastSyncAt: { type: ["string", "null"], format: date-time }
         lastSyncError: { type: ["string", "null"] }
-      required: [status]
+        # Real-mode credential bookkeeping (never returns the plaintext).
+        hasClientId: { type: boolean }
+        hasClientSecret: { type: boolean }
+        clientIdMasked: { type: ["string", "null"] }
+        tokenExpiresAt: { type: ["string", "null"], format: date-time }
+        refreshTokenExpiresAt:
+          type: ["string", "null"]
+          format: date-time
+        lastTokenRefreshAt: { type: ["string", "null"], format: date-time }
+        lastTokenRefreshError: { type: ["string", "null"] }
+        lastSuccessfulPostAt: { type: ["string", "null"], format: date-time }
+        lastFailedPostAt: { type: ["string", "null"], format: date-time }
+        # Posting preferences.
+        autoPostOnApproval: { type: boolean }
+        defaultMemoTemplate: { type: ["string", "null"] }
+        defaultPayableAccountId: { type: ["string", "null"] }
+        defaultPayableAccountName: { type: ["string", "null"] }
+      required:
+        - status
+        - mode
+        - environment
+        - connectionHealth
+        - hasClientId
+        - hasClientSecret
+        - autoPostOnApproval
 
     UpdateQboConnectionBody:
       type: object
@@ -1398,6 +1676,176 @@ components:
           type: string
           enum: [connect, disconnect]
       required: [action]
+
+    SaveQboCredentialsBody:
+      type: object
+      description: >-
+        Store the org's Intuit Client ID + Client Secret encrypted at rest.
+        Pass `null` for either field to clear it. The plaintext is never
+        echoed back; only `hasClientId`/`clientIdMasked` etc are returned.
+      properties:
+        environment:
+          type: string
+          enum: [sandbox, production]
+        clientId:
+          type: ["string", "null"]
+          description: Plaintext Client ID (or null to clear).
+        clientSecret:
+          type: ["string", "null"]
+          description: Plaintext Client Secret (or null to clear).
+      required: [environment]
+
+    QboPostingPreferencesBody:
+      type: object
+      properties:
+        autoPostOnApproval: { type: boolean }
+        defaultMemoTemplate: { type: ["string", "null"] }
+        defaultPayableAccountId: { type: ["string", "null"] }
+        defaultPayableAccountName: { type: ["string", "null"] }
+
+    QboOauthStartResponse:
+      type: object
+      properties:
+        url: { type: string, format: uri }
+      required: [url]
+
+    QboPostingHistoryItem:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        reportId: { type: string, format: uuid }
+        reportDisplayCode: { type: string }
+        status:
+          type: string
+          enum: [posted, retried, error]
+          description: >-
+            "posted" = first successful post, "retried" = succeeded after a
+            previous Sync Error on the same report, "error" = the post failed.
+        journalId: { type: string }
+        qboJournalId: { type: ["string", "null"] }
+        # Environment of the connection at posting time. Used by the UI to
+        # build a deep-link to the journal entry inside QBO (sandbox vs
+        # production console).
+        environment:
+          type: string
+          enum: [sandbox, production]
+        realmId: { type: ["string", "null"] }
+        attachableCount: { type: integer }
+        tagsSent:
+          type: array
+          items: { type: string }
+        errorMessage: { type: ["string", "null"] }
+        createdAt: { type: string, format: date-time }
+      required:
+        - id
+        - reportId
+        - reportDisplayCode
+        - status
+        - journalId
+        - environment
+        - attachableCount
+        - tagsSent
+        - createdAt
+
+    QboTokenRefreshLogItem:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        success: { type: boolean }
+        errorMessage: { type: ["string", "null"] }
+        expiresInSeconds: { type: ["integer", "null"] }
+        createdAt: { type: string, format: date-time }
+      required: [id, success, createdAt]
+
+    QboConnectionHealth:
+      type: object
+      description: >-
+        Detailed connection health snapshot used by the admin Health card.
+        Includes everything the QboConnection summary exposes plus the most
+        recent token-refresh attempts.
+      properties:
+        mode:
+          type: string
+          enum: [stub, real]
+        status:
+          type: string
+          enum: [connected, disconnected, error]
+        health:
+          type: string
+          enum: [healthy, refresh_failed, reconnect_required, disconnected]
+        environment:
+          type: string
+          enum: [sandbox, production]
+        realmId: { type: ["string", "null"] }
+        companyName: { type: ["string", "null"] }
+        hasCredentials: { type: boolean }
+        tokenExpiresAt: { type: ["string", "null"], format: date-time }
+        refreshTokenExpiresAt:
+          type: ["string", "null"]
+          format: date-time
+        lastTokenRefreshAt: { type: ["string", "null"], format: date-time }
+        lastTokenRefreshError: { type: ["string", "null"] }
+        lastSuccessfulPostAt: { type: ["string", "null"], format: date-time }
+        lastFailedPostAt: { type: ["string", "null"], format: date-time }
+        recentRefreshAttempts:
+          type: array
+          items: { $ref: "#/components/schemas/QboTokenRefreshLogItem" }
+      required:
+        - mode
+        - status
+        - health
+        - environment
+        - hasCredentials
+        - recentRefreshAttempts
+
+    QboAccount:
+      type: object
+      description: An entry from the org's QBO Chart of Accounts (cached).
+      properties:
+        id: { type: string }
+        name: { type: string }
+        fullyQualifiedName: { type: string }
+        accountType: { type: string }
+        accountSubType: { type: ["string", "null"] }
+        classification: { type: ["string", "null"] }
+        active: { type: boolean }
+      required:
+        - id
+        - name
+        - fullyQualifiedName
+        - accountType
+        - active
+
+    QboTag:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        color: { type: ["string", "null"] }
+        active: { type: boolean }
+      required: [id, name, active]
+
+    CreateQboTagBody:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        color: { type: ["string", "null"] }
+      required: [name]
+
+    UpdateQboTagBody:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        color: { type: ["string", "null"] }
+        active: { type: boolean }
+
+    SetReportTagsBody:
+      type: object
+      properties:
+        tagIds:
+          type: array
+          items: { type: string, format: uuid }
+      required: [tagIds]
 
     ExpenseReportSummary:
       type: object
@@ -1490,6 +1938,12 @@ components:
             approval" banner on the manager / finance review pages so
             reviewers can see a re-edit happened without forcing a
             status auto-reset.
+        tags:
+          type: array
+          description: >-
+            QBO tags currently applied to this report. Sent on the next
+            JournalEntry post.
+          items: { $ref: "#/components/schemas/QboTag" }
       required:
         - id
         - displayCode
@@ -1504,6 +1958,7 @@ components:
         - lineItems
         - receipts
         - editedSinceLastApproval
+        - tags
 
     CreateReportBody:
       type: object
@@ -1693,20 +2148,39 @@ components:
       type: object
       description: >-
         A field-level content edit on a report or one of its children
-        (line item, receipt). Approval/status transitions live in
-        `ApprovalAction`; merge them via `ChangeFeedItem`.
+        (line item, receipt) — or, when `category=qbo`, a change to an
+        org-wide QBO config, tag, GL mapping, or posting event.
+        Approval/status transitions live in `ApprovalAction`; merge them
+        via `ChangeFeedItem`.
       properties:
         id: { type: string, format: uuid }
-        reportId: { type: string, format: uuid }
+        reportId:
+          type: string
+          format: uuid
+          nullable: true
+          description: >-
+            Null for QBO config/tag/mapping/posting events that are not
+            tied to a single report.
         actor: { $ref: "#/components/schemas/UserRef" }
         actorRoles:
           type: array
           items: { $ref: "#/components/schemas/Role" }
           minItems: 1
           uniqueItems: true
+        category:
+          type: string
+          enum: [report, qbo]
+          default: report
         entityType:
           type: string
-          enum: [report, line_item, receipt]
+          enum:
+            - report
+            - line_item
+            - receipt
+            - qbo_config
+            - qbo_tag
+            - qbo_mapping
+            - qbo_posting
         entityId: { type: string, format: uuid }
         action:
           type: string
@@ -1720,6 +2194,7 @@ components:
         - reportId
         - actor
         - actorRoles
+        - category
         - entityType
         - entityId
         - action
@@ -1751,6 +2226,12 @@ components:
       type: object
       properties:
         account: { type: string }
+        accountId:
+          type: ["string", "null"]
+          description: >-
+            Durable QBO Chart-of-Accounts Id, when the GL mapping has been
+            linked to a real account. Posting payloads prefer this over the
+            name because Intuit matches AccountRef by `value` (Id).
         category: { type: string }
         amount: { type: string }
       required: [account, category, amount]

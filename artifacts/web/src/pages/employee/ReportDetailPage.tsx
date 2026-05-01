@@ -27,6 +27,7 @@ import { ReceiptThumb } from "@/components/brand/ReceiptThumb";
 import { ChangeFeed } from "@/components/ChangeFeed";
 import { EditReportHeaderDialog } from "@/components/EditReportHeaderDialog";
 import { EditLineItemDialog } from "@/components/EditLineItemDialog";
+import { ReportTagPicker } from "@/components/ReportTagPicker";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -302,6 +303,8 @@ export function ReportDetailPage({ id }: { id: string }) {
               <StatusTracker current={report.status} />
             </div>
           </HtCard>
+
+          <ReportTagPicker reportId={report.id} />
 
           <HtCard>
             <HtCardHeader

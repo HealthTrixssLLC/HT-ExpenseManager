@@ -63,11 +63,38 @@ export const qboConnectionStatusEnum = pgEnum(
   QBO_CONNECTION_STATUS_VALUES,
 );
 
-export const QBO_POSTING_STATUS_VALUES = ["posted", "error"] as const;
+export const QBO_POSTING_STATUS_VALUES = ["posted", "retried", "error"] as const;
 export type QboPostingStatus = (typeof QBO_POSTING_STATUS_VALUES)[number];
 export const qboPostingStatusEnum = pgEnum(
   "qbo_posting_status",
   QBO_POSTING_STATUS_VALUES,
+);
+
+export const QBO_ENVIRONMENT_VALUES = ["sandbox", "production"] as const;
+export type QboEnvironment = (typeof QBO_ENVIRONMENT_VALUES)[number];
+export const qboEnvironmentEnum = pgEnum(
+  "qbo_environment",
+  QBO_ENVIRONMENT_VALUES,
+);
+
+export const QBO_CONNECTION_HEALTH_VALUES = [
+  "healthy",
+  "refresh_failed",
+  "reconnect_required",
+  "disconnected",
+] as const;
+export type QboConnectionHealth =
+  (typeof QBO_CONNECTION_HEALTH_VALUES)[number];
+export const qboConnectionHealthEnum = pgEnum(
+  "qbo_connection_health",
+  QBO_CONNECTION_HEALTH_VALUES,
+);
+
+export const QBO_CONNECTION_MODE_VALUES = ["stub", "real"] as const;
+export type QboConnectionMode = (typeof QBO_CONNECTION_MODE_VALUES)[number];
+export const qboConnectionModeEnum = pgEnum(
+  "qbo_connection_mode",
+  QBO_CONNECTION_MODE_VALUES,
 );
 
 export const PAYROLL_BATCH_STATUS_VALUES = [

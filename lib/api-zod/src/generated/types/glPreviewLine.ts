@@ -8,6 +8,11 @@
 
 export interface GlPreviewLine {
   account: string;
+  /**
+   * Durable QBO Chart-of-Accounts Id, when the GL mapping has been linked to a real account. Posting payloads prefer this over the name because Intuit matches AccountRef by `value` (Id).
+   * @nullable
+   */
+  accountId?: string | null;
   category: string;
   amount: string;
 }

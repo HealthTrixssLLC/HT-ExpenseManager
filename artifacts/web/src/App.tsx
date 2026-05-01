@@ -40,6 +40,7 @@ import { UsersPage } from "@/pages/admin/UsersPage";
 import { GlMappingPage } from "@/pages/admin/GlMappingPage";
 import { PolicyPage } from "@/pages/admin/PolicyPage";
 import { QboPage } from "@/pages/admin/QboPage";
+import { QboTagsPage } from "@/pages/admin/QboTagsPage";
 import { AuditLogPage } from "@/pages/admin/AuditLogPage";
 import { BackupRestorePage } from "@/pages/admin/BackupRestorePage";
 // Reports
@@ -157,6 +158,11 @@ function AuthedRoutes() {
         <Route path="/admin/qbo">
           <ProtectedRoute allow={roleCanAdmin} fallback={<ForbiddenPage />}>
             <QboPage />
+          </ProtectedRoute>
+        </Route>
+        <Route path="/admin/qbo-tags">
+          <ProtectedRoute allow={roleCanAdmin} fallback={<ForbiddenPage />}>
+            <QboTagsPage />
           </ProtectedRoute>
         </Route>
         <Route path="/admin/audit">

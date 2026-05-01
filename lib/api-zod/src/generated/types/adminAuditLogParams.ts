@@ -5,9 +5,14 @@
  * Healthtrix Expense backend API
  * OpenAPI spec version: 0.1.0
  */
+import type { AdminAuditLogCategory } from "./adminAuditLogCategory";
 
 export type AdminAuditLogParams = {
   reportId?: string;
+  /**
+   * Filter content edits by category. `report` returns report/line-item/receipt edits; `qbo` returns QBO config/tag/mapping/posting events. Approval rows are included only when `category=report` or omitted.
+   */
+  category?: AdminAuditLogCategory;
   /**
    * @minimum 1
    * @maximum 500

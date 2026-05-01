@@ -6,20 +6,23 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { AuditEntryAction } from "./auditEntryAction";
+import type { AuditEntryCategory } from "./auditEntryCategory";
 import type { AuditEntryEntityType } from "./auditEntryEntityType";
 import type { AuditFieldDiff } from "./auditFieldDiff";
 import type { Role } from "./role";
 import type { UserRef } from "./userRef";
 
 /**
- * A field-level content edit on a report or one of its children (line item, receipt). Approval/status transitions live in `ApprovalAction`; merge them via `ChangeFeedItem`.
+ * A field-level content edit on a report or one of its children (line item, receipt) — or, when `category=qbo`, a change to an org-wide QBO config, tag, GL mapping, or posting event. Approval/status transitions live in `ApprovalAction`; merge them via `ChangeFeedItem`.
  */
 export interface AuditEntry {
   id: string;
-  reportId: string;
+  /** Null for QBO config/tag/mapping/posting events that are not tied to a single report. */
+  reportId: string | null;
   actor: UserRef;
   /** @minItems 1 */
   actorRoles: Role[];
+  category: AuditEntryCategory;
   entityType: AuditEntryEntityType;
   entityId: string;
   action: AuditEntryAction;

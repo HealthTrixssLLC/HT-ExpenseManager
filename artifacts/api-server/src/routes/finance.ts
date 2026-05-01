@@ -22,7 +22,7 @@ import {
   loadReportSummaries,
 } from "../lib/reports";
 import { applyTransition, type TransitionName } from "../services/workflow";
-import { buildGlPreview, postReportToQbo } from "../services/qbo";
+import { buildGlPreview, ensureConnectionRow, postReportToQbo } from "../services/qbo";
 
 const router: IRouter = Router();
 
@@ -82,7 +82,66 @@ async function transitionRoute(
 router.post(
   "/reports/:id/finance-approve",
   requireRole(...FINANCE_ROLES),
-  (req, res) => transitionRoute(req, res, "financeApprove"),
+  async (req, res): Promise<void> => {
+    const id = pathId(req, "id");
+    const parsed = ApprovalActionBody.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      sendProblem(res, 400, "Invalid Body", parsed.error.message);
+      return;
+    }
+    const orgId = req.auth!.user.orgId;
+    const report = await fetchReportOrThrow(id, orgId);
+
+    // 1) Apply the financeApprove transition.
+    const result = await applyTransition({
+      report,
+      actor: { id: req.auth!.user.id, roles: req.auth!.user.roles },
+      transition: "financeApprove",
+      comment: parsed.data.comment ?? null,
+    });
+
+    // 2) If the org has opted into autoPostOnApproval, immediately
+    //    chain through post-to-qbo + ready-for-payroll. Failures here
+    //    don't roll back the financeApprove — the report just stays
+    //    in "Finance Approved" so finance can retry the post manually
+    //    from the queue. We still return the (possibly advanced) report
+    //    so the UI reflects the new status.
+    let final = result.report;
+    const conn = await ensureConnectionRow(orgId);
+    if (conn.autoPostOnApproval) {
+      try {
+        const post = await postReportToQbo(final);
+        if (post.status !== "error") {
+          const posted = await applyTransition({
+            report: final,
+            actor: { id: req.auth!.user.id, roles: req.auth!.user.roles },
+            transition: "postQbo",
+            comment: "Auto-posted via Posting Preferences (autoPostOnApproval).",
+            metadata: JSON.stringify({
+              journalId: post.journalId,
+              autoPosted: true,
+            }),
+          });
+          final = posted.report;
+          const advanced = await applyTransition({
+            report: final,
+            actor: { id: req.auth!.user.id, roles: req.auth!.user.roles },
+            transition: "readyForPayroll",
+            comment: null,
+          });
+          final = advanced.report;
+        }
+        // status === "error" → just leave the report at Finance Approved;
+        // postReportToQbo already wrote the posting_event + Sync Error
+        // line items, and finance can retry from the queue.
+      } catch (err) {
+        // Don't surface as a 500 — finance approval already succeeded.
+        console.warn("autoPostOnApproval chain failed", err);
+      }
+    }
+
+    res.json(ExpenseReportResponse.parse(await loadFullReport(final)));
+  },
 );
 router.post(
   "/reports/:id/finance-reject",
@@ -122,7 +181,7 @@ router.post(
       return;
     }
     const post = await postReportToQbo(report);
-    if (post.status === "posted") {
+    if (post.status !== "error") {
       const result = await applyTransition({
         report,
         actor: { id: req.auth!.user.id, roles: req.auth!.user.roles },
@@ -180,8 +239,11 @@ router.post(
       );
       return;
     }
-    const post = await postReportToQbo(report, { forceSuccess: true });
-    if (post.status !== "posted") {
+    const post = await postReportToQbo(report, {
+      forceSuccess: true,
+      retry: true,
+    });
+    if (post.status === "error") {
       sendProblem(res, 502, "QBO Error", post.errorMessage);
       return;
     }

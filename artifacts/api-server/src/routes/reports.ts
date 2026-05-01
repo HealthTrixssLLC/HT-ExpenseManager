@@ -15,6 +15,7 @@ import {
   ListReceiptsResponse,
   ListReportsResponse,
   RegisterReceiptBody,
+  SetReportTagsBody,
   UpdateLineItemBody,
   UpdateReceiptBody,
   UpdateReportBody,
@@ -24,6 +25,7 @@ import { sendError, sendProblem } from "../lib/problem";
 import { requireAuth } from "../middlewares/session";
 import {
   canEditReport,
+  canEditReportTags,
   canView,
   FINANCE_VISIBLE_STATUSES,
   fetchReportOrThrow,
@@ -42,6 +44,7 @@ import {
   type ChangeFeedItemDto,
 } from "../lib/serializers";
 import { applyTransition } from "../services/workflow";
+import { listTags, listTagsForReport, setReportTags } from "../services/qbo";
 import {
   diffFields,
   recordAudit,
@@ -232,6 +235,82 @@ router.get("/reports/:id", async (req, res): Promise<void> => {
       return;
     }
     res.json(ExpenseReportResponse.parse(await loadFullReport(report)));
+  } catch (err) {
+    handle(res, err);
+  }
+});
+
+// QBO tags applied to this report. Anyone who can see the report can read
+// the tags; updating them requires edit rights (same gate as PATCH /reports/:id).
+// Non-admin tag catalog. Used by the Report Tag Picker (employee + finance
+// views) so non-admins don't have to call the admin-only listing endpoint.
+// Returns the same shape as the admin endpoint, filtered to active tags only
+// — admins manage the inactive ones via the Tags admin page.
+router.get("/qbo-tags", async (req, res): Promise<void> => {
+  try {
+    const orgId = req.auth!.user.orgId;
+    const rows = await listTags(orgId);
+    res.json(
+      rows
+        .filter((r) => r.active)
+        .map((r) => ({
+          id: r.id,
+          name: r.name,
+          color: r.color,
+          active: r.active,
+        })),
+    );
+  } catch (err) {
+    handle(res, err);
+  }
+});
+
+router.get("/reports/:id/tags", async (req, res): Promise<void> => {
+  try {
+    const id = pathId(req, "id");
+    const report = await fetchReportOrThrow(id, req.auth!.user.orgId);
+    if (!(await canView(report, req.auth!.user))) {
+      sendProblem(res, 403, "Forbidden");
+      return;
+    }
+    const tags = await listTagsForReport(report.id);
+    res.json(tags);
+  } catch (err) {
+    handle(res, err);
+  }
+});
+
+router.put("/reports/:id/tags", async (req, res): Promise<void> => {
+  try {
+    const id = pathId(req, "id");
+    const parsed = SetReportTagsBody.safeParse(req.body);
+    if (!parsed.success) {
+      sendProblem(res, 400, "Invalid Body", parsed.error.message);
+      return;
+    }
+    const report = await fetchReportOrThrow(id, req.auth!.user.orgId);
+    const auth = await canEditReportTags(report, req.auth!.user);
+    if (!auth.ok) {
+      sendProblem(res, auth.status, auth.title, auth.detail);
+      return;
+    }
+    try {
+      await setReportTags({
+        orgId: report.orgId,
+        reportId: report.id,
+        tagIds: parsed.data.tagIds,
+      });
+    } catch (err) {
+      sendProblem(
+        res,
+        400,
+        "Invalid Tags",
+        err instanceof Error ? err.message : String(err),
+      );
+      return;
+    }
+    const tags = await listTagsForReport(report.id);
+    res.json(tags);
   } catch (err) {
     handle(res, err);
   }

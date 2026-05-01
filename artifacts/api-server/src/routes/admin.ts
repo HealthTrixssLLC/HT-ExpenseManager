@@ -8,10 +8,14 @@ import { and, desc, eq, isNull, or } from "drizzle-orm";
 import {
   AdminCreateUserBody as CreateUserBody,
   AdminCreateDelegationBody as CreateDelegationBody,
+  AdminCreateQboTagBody as CreateQboTagBody,
   AdminGetQboConnectionResponse,
   AdminListGlMappingsResponse,
   AdminListUsersResponse,
+  AdminSaveQboCredentialsBody as SaveQboCredentialsBody,
+  AdminSaveQboPostingPreferencesBody as SaveQboPostingPreferencesBody,
   AdminUpdateGlMappingBody as UpdateGlMappingBody,
+  AdminUpdateQboTagBody as UpdateQboTagBody,
   AdminPatchPolicyRuleBody as PatchPolicyRuleBody,
   AdminUpdateUserBody as UpdateUserBody,
 } from "@workspace/api-zod";
@@ -42,9 +46,24 @@ import {
 } from "../lib/serializers";
 import {
   connectQboStub,
+  createTag,
+  deleteTag,
+  disconnectQboReal,
   disconnectQboStub,
   ensureConnectionRow,
+  getConnectionHealth,
+  hasRealCredentials,
+  listChartOfAccounts,
+  listPostingHistory,
+  listTags,
+  recordQboAudit,
+  refreshOrgTokensIfNeeded,
+  savePostingPreferences,
+  saveQboCredentials,
+  startQboOauth,
+  updateTag,
 } from "../services/qbo";
+import { resolveQboRedirectUri } from "../services/qboRedirect";
 import multer from "multer";
 import {
   applyRestore,
@@ -254,10 +273,25 @@ router.patch(
       return;
     }
     const orgId = req.auth!.user.orgId;
+    // Snapshot the row BEFORE the update so we can write a real before/after
+    // fieldDiff into the QBO audit log. GL-mapping changes feed straight into
+    // posted JournalEntry account refs, so reviewers explicitly need to see
+    // who switched what mapping and when under the QBO audit category.
+    const [before] = await db
+      .select()
+      .from(glMappingsTable)
+      .where(and(eq(glMappingsTable.id, id), eq(glMappingsTable.orgId, orgId)))
+      .limit(1);
+    if (!before) {
+      sendProblem(res, 404, "Not Found");
+      return;
+    }
     const updates: Partial<typeof glMappingsTable.$inferInsert> = {};
     if (parsed.data.qboAccount !== undefined) updates.qboAccount = parsed.data.qboAccount;
     if (parsed.data.qboAccountId !== undefined)
       updates.qboAccountId = parsed.data.qboAccountId;
+    if (parsed.data.qboAccountType !== undefined)
+      updates.qboAccountType = parsed.data.qboAccountType;
     if (parsed.data.active !== undefined) updates.active = parsed.data.active;
     const [updated] = await db
       .update(glMappingsTable)
@@ -267,6 +301,28 @@ router.patch(
     if (!updated) {
       sendProblem(res, 404, "Not Found");
       return;
+    }
+    const fieldDiffs: Array<{ field: string; before: unknown; after: unknown }> = [];
+    const tracked: ReadonlyArray<keyof typeof glMappingsTable.$inferSelect> = [
+      "qboAccount",
+      "qboAccountId",
+      "qboAccountType",
+      "active",
+    ];
+    for (const k of tracked) {
+      if (before[k] !== updated[k]) {
+        fieldDiffs.push({ field: String(k), before: before[k], after: updated[k] });
+      }
+    }
+    if (fieldDiffs.length > 0) {
+      await recordQboAudit({
+        orgId,
+        actor: req.auth!.user,
+        entityType: "qbo_mapping",
+        entityId: updated.id,
+        action: "updated",
+        fieldDiffs,
+      });
     }
     res.json(toGlMappingDto(updated));
   },
@@ -337,9 +393,12 @@ router.patch(
   },
 );
 
-// Canonical QuickBooks-stub admin endpoints. Connect/disconnect are POSTs (not
-// a single PUT with an action discriminator) so each operation has a stable
-// URL the UI can hit, and so the mocked OAuth dance reads like a real one.
+// QuickBooks Online admin endpoints. The connection has two modes:
+//   - "stub": demo connection with no real Intuit credentials. connect-stub
+//     simulates the OAuth dance for screenshots/demos.
+//   - "real": org has stored encrypted Intuit Client ID/Secret. The OAuth
+//     start/callback routes exchange a real authorization code into tokens,
+//     and posting routes call the live Accounting API.
 router.get(
   "/admin/qbo-connection",
   requireRole(...ADMIN_ROLES),
@@ -354,7 +413,22 @@ router.post(
   "/admin/qbo-connection/connect-stub",
   requireRole(...ADMIN_ROLES),
   async (req, res): Promise<void> => {
-    const conn = await connectQboStub(req.auth!.user.orgId);
+    const orgId = req.auth!.user.orgId;
+    const before = await ensureConnectionRow(orgId);
+    const conn = await connectQboStub(orgId);
+    await recordQboAudit({
+      orgId,
+      actor: req.auth!.user,
+      entityType: "qbo_config",
+      entityId: conn.id,
+      action: "updated",
+      fieldDiffs: [
+        { field: "mode", before: before.mode, after: conn.mode },
+        { field: "status", before: before.status, after: conn.status },
+        { field: "realmId", before: before.realmId, after: conn.realmId },
+        { field: "companyName", before: before.companyName, after: conn.companyName },
+      ],
+    });
     res.json(toQboConnectionDto(conn));
   },
 );
@@ -363,8 +437,377 @@ router.post(
   "/admin/qbo-connection/disconnect",
   requireRole(...ADMIN_ROLES),
   async (req, res): Promise<void> => {
-    const conn = await disconnectQboStub(req.auth!.user.orgId);
+    const orgId = req.auth!.user.orgId;
+    const before = await ensureConnectionRow(orgId);
+    // Real-mode disconnect revokes the refresh token before clearing tokens
+    // AND encrypted Client ID / Client Secret from the row. Stub-mode just
+    // resets the row.
+    const wasReal = hasRealCredentials(before);
+    const conn = wasReal
+      ? await disconnectQboReal({ orgId })
+      : await disconnectQboStub(orgId);
+    const fieldDiffs: Array<{ field: string; before: unknown; after: unknown }> =
+      [
+        { field: "status", before: before.status, after: conn.status },
+        { field: "mode", before: before.mode, after: conn.mode },
+      ];
+    if (wasReal) {
+      // Surface in the audit log that the encrypted credentials were wiped.
+      // We never log plaintext — only the boolean before/after state.
+      fieldDiffs.push(
+        {
+          field: "hasClientId",
+          before: Boolean(before.clientIdEncrypted),
+          after: false,
+        },
+        {
+          field: "hasClientSecret",
+          before: Boolean(before.clientSecretEncrypted),
+          after: false,
+        },
+        {
+          field: "hasAccessToken",
+          before: Boolean(before.accessTokenEncrypted),
+          after: false,
+        },
+        {
+          field: "hasRefreshToken",
+          before: Boolean(before.refreshTokenEncrypted),
+          after: false,
+        },
+      );
+    }
+    await recordQboAudit({
+      orgId,
+      actor: req.auth!.user,
+      entityType: "qbo_config",
+      entityId: conn.id,
+      action: "updated",
+      fieldDiffs,
+    });
     res.json(toQboConnectionDto(conn));
+  },
+);
+
+// PUT /admin/qbo-connection/credentials — store the encrypted Client ID and
+// Client Secret plus environment. Pass `null` for either field to clear it.
+// The plaintext is never echoed back; the response uses `hasClientId` /
+// `clientIdMasked`.
+router.put(
+  "/admin/qbo-connection/credentials",
+  requireRole(...ADMIN_ROLES),
+  async (req, res): Promise<void> => {
+    const parsed = SaveQboCredentialsBody.safeParse(req.body);
+    if (!parsed.success) {
+      sendProblem(res, 400, "Invalid Body", parsed.error.message);
+      return;
+    }
+    const orgId = req.auth!.user.orgId;
+    const before = await ensureConnectionRow(orgId);
+    let conn;
+    try {
+      conn = await saveQboCredentials({
+        orgId,
+        environment: parsed.data.environment,
+        ...(parsed.data.clientId !== undefined
+          ? { clientId: parsed.data.clientId }
+          : {}),
+        ...(parsed.data.clientSecret !== undefined
+          ? { clientSecret: parsed.data.clientSecret }
+          : {}),
+      });
+    } catch (err) {
+      sendProblem(
+        res,
+        400,
+        "Cannot Save Credentials",
+        err instanceof Error ? err.message : String(err),
+      );
+      return;
+    }
+    await recordQboAudit({
+      orgId,
+      actor: req.auth!.user,
+      entityType: "qbo_config",
+      entityId: conn.id,
+      action: "updated",
+      fieldDiffs: [
+        { field: "environment", before: before.environment, after: conn.environment },
+        {
+          field: "hasClientId",
+          before: hasRealCredentials(before),
+          after: hasRealCredentials(conn),
+        },
+      ],
+    });
+    res.json(toQboConnectionDto(conn));
+  },
+);
+
+// PATCH /admin/qbo-connection/posting-preferences — auto-post-on-approval flag,
+// memo template, default payable account.
+router.patch(
+  "/admin/qbo-connection/posting-preferences",
+  requireRole(...ADMIN_ROLES),
+  async (req, res): Promise<void> => {
+    const parsed = SaveQboPostingPreferencesBody.safeParse(req.body);
+    if (!parsed.success) {
+      sendProblem(res, 400, "Invalid Body", parsed.error.message);
+      return;
+    }
+    const orgId = req.auth!.user.orgId;
+    const before = await ensureConnectionRow(orgId);
+    const conn = await savePostingPreferences({
+      orgId,
+      ...(parsed.data.autoPostOnApproval !== undefined
+        ? { autoPostOnApproval: parsed.data.autoPostOnApproval }
+        : {}),
+      ...(parsed.data.defaultMemoTemplate !== undefined
+        ? { defaultMemoTemplate: parsed.data.defaultMemoTemplate }
+        : {}),
+      ...(parsed.data.defaultPayableAccountId !== undefined
+        ? { defaultPayableAccountId: parsed.data.defaultPayableAccountId }
+        : {}),
+      ...(parsed.data.defaultPayableAccountName !== undefined
+        ? { defaultPayableAccountName: parsed.data.defaultPayableAccountName }
+        : {}),
+    });
+    await recordQboAudit({
+      orgId,
+      actor: req.auth!.user,
+      entityType: "qbo_config",
+      entityId: conn.id,
+      action: "updated",
+      fieldDiffs: [
+        {
+          field: "autoPostOnApproval",
+          before: before.autoPostOnApproval,
+          after: conn.autoPostOnApproval,
+        },
+        {
+          field: "defaultPayableAccountId",
+          before: before.defaultPayableAccountId,
+          after: conn.defaultPayableAccountId,
+        },
+      ],
+    });
+    res.json(toQboConnectionDto(conn));
+  },
+);
+
+// POST /admin/qbo-connection/oauth/start — return the Intuit authorization URL
+// the browser should be redirected to.
+router.post(
+  "/admin/qbo-connection/oauth/start",
+  requireRole(...ADMIN_ROLES),
+  async (req, res): Promise<void> => {
+    const orgId = req.auth!.user.orgId;
+    const redirectUri = resolveQboRedirectUri(req);
+    try {
+      const result = await startQboOauth({
+        orgId,
+        userId: req.auth!.user.id,
+        redirectUri,
+      });
+      res.json({ url: result.url });
+    } catch (err) {
+      sendProblem(
+        res,
+        400,
+        "OAuth Start Failed",
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  },
+);
+
+// (The OAuth callback /admin/qbo-connection/oauth/callback is registered by
+// routes/qboOauth.ts because it is hit by Intuit's browser redirect and
+// cannot satisfy requireAuth. Authentication there flows through the
+// one-time `state` token instead.)
+
+// POST /admin/qbo-connection/refresh-token — manual token refresh button.
+router.post(
+  "/admin/qbo-connection/refresh-token",
+  requireRole(...ADMIN_ROLES),
+  async (req, res): Promise<void> => {
+    const orgId = req.auth!.user.orgId;
+    const conn = await refreshOrgTokensIfNeeded({ orgId, force: true });
+    await recordQboAudit({
+      orgId,
+      actor: req.auth!.user,
+      entityType: "qbo_config",
+      entityId: conn.id,
+      action: "updated",
+      fieldDiffs: [
+        {
+          field: "manualTokenRefresh",
+          before: null,
+          after: conn.lastTokenRefreshAt?.toISOString() ?? null,
+        },
+      ],
+    });
+    res.json(toQboConnectionDto(conn));
+  },
+);
+
+// GET /admin/qbo-connection/health — detailed connection-health snapshot for
+// the admin Health card. Includes everything in the QboConnection summary
+// plus the most recent token-refresh attempts so admins can debug why a
+// connection is in `refresh_failed` / `reconnect_required` state without
+// digging through the audit log.
+router.get(
+  "/admin/qbo-connection/health",
+  requireRole(...ADMIN_ROLES),
+  async (req, res): Promise<void> => {
+    const orgId = req.auth!.user.orgId;
+    const health = await getConnectionHealth(orgId);
+    res.json(health);
+  },
+);
+
+// GET /admin/qbo-connection/posting-history — recent posting events
+// (success + failure), most recent first.
+router.get(
+  "/admin/qbo-connection/posting-history",
+  requireRole(...ADMIN_ROLES),
+  async (req, res): Promise<void> => {
+    const orgId = req.auth!.user.orgId;
+    const limitParam = Number(req.query["limit"] ?? "25");
+    const limit = Number.isFinite(limitParam)
+      ? Math.min(Math.max(Math.trunc(limitParam), 1), 100)
+      : 25;
+    const items = await listPostingHistory({ orgId, limit });
+    res.json(items);
+  },
+);
+
+// GET /admin/qbo-connection/accounts — Chart of Accounts typeahead source.
+// Real-mode hits the cached Account list (refreshed from QBO when stale or
+// when ?refresh=true). Stub-mode returns an empty array.
+router.get(
+  "/admin/qbo-connection/accounts",
+  requireRole(...ADMIN_ROLES),
+  async (req, res): Promise<void> => {
+    const orgId = req.auth!.user.orgId;
+    const refresh = String(req.query["refresh"] ?? "false").toLowerCase() === "true";
+    const q = ((req.query["q"] as string | undefined) ?? "").toLowerCase().trim();
+    const accounts = await listChartOfAccounts({ orgId, forceRefresh: refresh });
+    const filtered = q
+      ? accounts.filter(
+          (a) =>
+            a.name.toLowerCase().includes(q) ||
+            a.fullyQualifiedName.toLowerCase().includes(q) ||
+            a.accountType.toLowerCase().includes(q),
+        )
+      : accounts;
+    res.json(filtered);
+  },
+);
+
+// ---------------------------------------------------------------------------
+// QBO Tags
+// ---------------------------------------------------------------------------
+router.get(
+  "/admin/qbo-tags",
+  requireRole(...ADMIN_ROLES),
+  async (req, res): Promise<void> => {
+    const orgId = req.auth!.user.orgId;
+    const rows = await listTags(orgId);
+    res.json(
+      rows.map((r) => ({ id: r.id, name: r.name, color: r.color, active: r.active })),
+    );
+  },
+);
+
+router.post(
+  "/admin/qbo-tags",
+  requireRole(...ADMIN_ROLES),
+  async (req, res): Promise<void> => {
+    const parsed = CreateQboTagBody.safeParse(req.body);
+    if (!parsed.success) {
+      sendProblem(res, 400, "Invalid Body", parsed.error.message);
+      return;
+    }
+    const orgId = req.auth!.user.orgId;
+    const row = await createTag({
+      orgId,
+      name: parsed.data.name,
+      color: parsed.data.color ?? null,
+    });
+    await recordQboAudit({
+      orgId,
+      actor: req.auth!.user,
+      entityType: "qbo_tag",
+      entityId: row.id,
+      action: "created",
+      fieldDiffs: [
+        { field: "name", before: null, after: row.name },
+        { field: "color", before: null, after: row.color },
+      ],
+    });
+    res.status(201).json({ id: row.id, name: row.name, color: row.color, active: row.active });
+  },
+);
+
+router.patch(
+  "/admin/qbo-tags/:id",
+  requireRole(...ADMIN_ROLES),
+  async (req, res): Promise<void> => {
+    const id = pathId(req, "id");
+    const parsed = UpdateQboTagBody.safeParse(req.body);
+    if (!parsed.success) {
+      sendProblem(res, 400, "Invalid Body", parsed.error.message);
+      return;
+    }
+    const orgId = req.auth!.user.orgId;
+    const row = await updateTag({
+      orgId,
+      id,
+      ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
+      ...(parsed.data.color !== undefined ? { color: parsed.data.color } : {}),
+      ...(parsed.data.active !== undefined ? { active: parsed.data.active } : {}),
+    });
+    if (!row) {
+      sendProblem(res, 404, "Not Found");
+      return;
+    }
+    await recordQboAudit({
+      orgId,
+      actor: req.auth!.user,
+      entityType: "qbo_tag",
+      entityId: row.id,
+      action: "updated",
+      fieldDiffs: Object.entries(parsed.data).map(([k, v]) => ({
+        field: k,
+        before: null,
+        after: v ?? null,
+      })),
+    });
+    res.json({ id: row.id, name: row.name, color: row.color, active: row.active });
+  },
+);
+
+router.delete(
+  "/admin/qbo-tags/:id",
+  requireRole(...ADMIN_ROLES),
+  async (req, res): Promise<void> => {
+    const id = pathId(req, "id");
+    const orgId = req.auth!.user.orgId;
+    const row = await deleteTag({ orgId, id });
+    if (!row) {
+      sendProblem(res, 404, "Not Found");
+      return;
+    }
+    await recordQboAudit({
+      orgId,
+      actor: req.auth!.user,
+      entityType: "qbo_tag",
+      entityId: row.id,
+      action: "deleted",
+      fieldDiffs: [{ field: "name", before: row.name, after: null }],
+    });
+    res.status(204).end();
   },
 );
 
@@ -378,6 +821,11 @@ router.get(
   async (req: Request, res: Response): Promise<void> => {
     const orgId = req.auth!.user.orgId;
     const reportIdParam = (req.query["reportId"] as string | undefined) ?? null;
+    const categoryParamRaw = (req.query["category"] as string | undefined) ?? null;
+    const categoryParam =
+      categoryParamRaw === "report" || categoryParamRaw === "qbo"
+        ? categoryParamRaw
+        : null;
     const limitParam = Number(req.query["limit"] ?? "100");
     const limit = Number.isFinite(limitParam)
       ? Math.min(Math.max(Math.trunc(limitParam), 1), 500)
@@ -390,27 +838,36 @@ router.get(
           eq(approvalActionsTable.reportId, reportIdParam),
         )
       : eq(expenseReportsTable.orgId, orgId);
-    const auditWhere = reportIdParam
-      ? and(
-          eq(auditEntriesTable.orgId, orgId),
-          eq(auditEntriesTable.reportId, reportIdParam),
-        )
-      : eq(auditEntriesTable.orgId, orgId);
+    const auditConditions = [eq(auditEntriesTable.orgId, orgId)];
+    if (reportIdParam) {
+      auditConditions.push(eq(auditEntriesTable.reportId, reportIdParam));
+    }
+    if (categoryParam) {
+      auditConditions.push(eq(auditEntriesTable.category, categoryParam));
+    }
+    const auditWhere =
+      auditConditions.length === 1 ? auditConditions[0] : and(...auditConditions);
+    // Approvals are workflow transitions on reports, so they only make sense
+    // when the user is looking at "report" history. Skip them when scoped to
+    // QBO config / tag / mapping / posting events.
+    const skipApprovals = categoryParam === "qbo";
     // Pull `limit` rows from each table separately; we'll merge in JS and
     // truncate. Asking for `limit` from each side guarantees we never miss
     // a row that would have placed in the top `limit` of the merged feed.
     const [approvalRows, auditRows] = await Promise.all([
-      db
-        .select()
-        .from(approvalActionsTable)
-        .innerJoin(
-          expenseReportsTable,
-          eq(approvalActionsTable.reportId, expenseReportsTable.id),
-        )
-        .innerJoin(usersTable, eq(approvalActionsTable.actorId, usersTable.id))
-        .where(approvalWhere)
-        .orderBy(desc(approvalActionsTable.createdAt))
-        .limit(limit),
+      skipApprovals
+        ? Promise.resolve([])
+        : db
+            .select()
+            .from(approvalActionsTable)
+            .innerJoin(
+              expenseReportsTable,
+              eq(approvalActionsTable.reportId, expenseReportsTable.id),
+            )
+            .innerJoin(usersTable, eq(approvalActionsTable.actorId, usersTable.id))
+            .where(approvalWhere)
+            .orderBy(desc(approvalActionsTable.createdAt))
+            .limit(limit),
       db
         .select()
         .from(auditEntriesTable)

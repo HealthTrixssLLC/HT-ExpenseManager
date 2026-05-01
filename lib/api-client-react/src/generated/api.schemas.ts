@@ -228,6 +228,8 @@ export interface GlMapping {
   qboAccount: string;
   /** @nullable */
   qboAccountId?: string | null;
+  /** @nullable */
+  qboAccountType?: string | null;
   active: boolean;
 }
 
@@ -235,6 +237,8 @@ export interface UpdateGlMappingBody {
   qboAccount?: string;
   /** @nullable */
   qboAccountId?: string | null;
+  /** @nullable */
+  qboAccountType?: string | null;
   active?: boolean;
 }
 
@@ -247,8 +251,41 @@ export const QboConnectionStatus = {
   error: "error",
 } as const;
 
+/**
+ * "stub" = simulated demo connection. "real" = the org has stored Intuit Client credentials (live posting requires status=connected).
+ */
+export type QboConnectionMode =
+  (typeof QboConnectionMode)[keyof typeof QboConnectionMode];
+
+export const QboConnectionMode = {
+  stub: "stub",
+  real: "real",
+} as const;
+
+export type QboConnectionEnvironment =
+  (typeof QboConnectionEnvironment)[keyof typeof QboConnectionEnvironment];
+
+export const QboConnectionEnvironment = {
+  sandbox: "sandbox",
+  production: "production",
+} as const;
+
+export type QboConnectionConnectionHealth =
+  (typeof QboConnectionConnectionHealth)[keyof typeof QboConnectionConnectionHealth];
+
+export const QboConnectionConnectionHealth = {
+  healthy: "healthy",
+  refresh_failed: "refresh_failed",
+  reconnect_required: "reconnect_required",
+  disconnected: "disconnected",
+} as const;
+
 export interface QboConnection {
   status: QboConnectionStatus;
+  /** "stub" = simulated demo connection. "real" = the org has stored Intuit Client credentials (live posting requires status=connected). */
+  mode: QboConnectionMode;
+  environment: QboConnectionEnvironment;
+  connectionHealth: QboConnectionConnectionHealth;
   /** @nullable */
   realmId?: string | null;
   /** @nullable */
@@ -259,6 +296,29 @@ export interface QboConnection {
   lastSyncAt?: string | null;
   /** @nullable */
   lastSyncError?: string | null;
+  hasClientId: boolean;
+  hasClientSecret: boolean;
+  /** @nullable */
+  clientIdMasked?: string | null;
+  /** @nullable */
+  tokenExpiresAt?: string | null;
+  /** @nullable */
+  refreshTokenExpiresAt?: string | null;
+  /** @nullable */
+  lastTokenRefreshAt?: string | null;
+  /** @nullable */
+  lastTokenRefreshError?: string | null;
+  /** @nullable */
+  lastSuccessfulPostAt?: string | null;
+  /** @nullable */
+  lastFailedPostAt?: string | null;
+  autoPostOnApproval: boolean;
+  /** @nullable */
+  defaultMemoTemplate?: string | null;
+  /** @nullable */
+  defaultPayableAccountId?: string | null;
+  /** @nullable */
+  defaultPayableAccountName?: string | null;
 }
 
 export type UpdateQboConnectionBodyAction =
@@ -271,6 +331,205 @@ export const UpdateQboConnectionBodyAction = {
 
 export interface UpdateQboConnectionBody {
   action: UpdateQboConnectionBodyAction;
+}
+
+export type SaveQboCredentialsBodyEnvironment =
+  (typeof SaveQboCredentialsBodyEnvironment)[keyof typeof SaveQboCredentialsBodyEnvironment];
+
+export const SaveQboCredentialsBodyEnvironment = {
+  sandbox: "sandbox",
+  production: "production",
+} as const;
+
+/**
+ * Store the org's Intuit Client ID + Client Secret encrypted at rest. Pass `null` for either field to clear it. The plaintext is never echoed back; only `hasClientId`/`clientIdMasked` etc are returned.
+ */
+export interface SaveQboCredentialsBody {
+  environment: SaveQboCredentialsBodyEnvironment;
+  /**
+   * Plaintext Client ID (or null to clear).
+   * @nullable
+   */
+  clientId?: string | null;
+  /**
+   * Plaintext Client Secret (or null to clear).
+   * @nullable
+   */
+  clientSecret?: string | null;
+}
+
+export interface QboPostingPreferencesBody {
+  autoPostOnApproval?: boolean;
+  /** @nullable */
+  defaultMemoTemplate?: string | null;
+  /** @nullable */
+  defaultPayableAccountId?: string | null;
+  /** @nullable */
+  defaultPayableAccountName?: string | null;
+}
+
+export interface QboOauthStartResponse {
+  url: string;
+}
+
+/**
+ * "posted" = first successful post, "retried" = succeeded after a previous Sync Error on the same report, "error" = the post failed.
+ */
+export type QboPostingHistoryItemStatus =
+  (typeof QboPostingHistoryItemStatus)[keyof typeof QboPostingHistoryItemStatus];
+
+export const QboPostingHistoryItemStatus = {
+  posted: "posted",
+  retried: "retried",
+  error: "error",
+} as const;
+
+export type QboPostingHistoryItemEnvironment =
+  (typeof QboPostingHistoryItemEnvironment)[keyof typeof QboPostingHistoryItemEnvironment];
+
+export const QboPostingHistoryItemEnvironment = {
+  sandbox: "sandbox",
+  production: "production",
+} as const;
+
+export interface QboPostingHistoryItem {
+  id: string;
+  reportId: string;
+  reportDisplayCode: string;
+  /** "posted" = first successful post, "retried" = succeeded after a previous Sync Error on the same report, "error" = the post failed. */
+  status: QboPostingHistoryItemStatus;
+  journalId: string;
+  /** @nullable */
+  qboJournalId?: string | null;
+  environment: QboPostingHistoryItemEnvironment;
+  /** @nullable */
+  realmId?: string | null;
+  attachableCount: number;
+  tagsSent: string[];
+  /** @nullable */
+  errorMessage?: string | null;
+  createdAt: string;
+}
+
+export interface QboTokenRefreshLogItem {
+  id: string;
+  success: boolean;
+  /** @nullable */
+  errorMessage?: string | null;
+  /** @nullable */
+  expiresInSeconds?: number | null;
+  createdAt: string;
+}
+
+export type QboConnectionHealthMode =
+  (typeof QboConnectionHealthMode)[keyof typeof QboConnectionHealthMode];
+
+export const QboConnectionHealthMode = {
+  stub: "stub",
+  real: "real",
+} as const;
+
+export type QboConnectionHealthStatus =
+  (typeof QboConnectionHealthStatus)[keyof typeof QboConnectionHealthStatus];
+
+export const QboConnectionHealthStatus = {
+  connected: "connected",
+  disconnected: "disconnected",
+  error: "error",
+} as const;
+
+export type QboConnectionHealthHealth =
+  (typeof QboConnectionHealthHealth)[keyof typeof QboConnectionHealthHealth];
+
+export const QboConnectionHealthHealth = {
+  healthy: "healthy",
+  refresh_failed: "refresh_failed",
+  reconnect_required: "reconnect_required",
+  disconnected: "disconnected",
+} as const;
+
+export type QboConnectionHealthEnvironment =
+  (typeof QboConnectionHealthEnvironment)[keyof typeof QboConnectionHealthEnvironment];
+
+export const QboConnectionHealthEnvironment = {
+  sandbox: "sandbox",
+  production: "production",
+} as const;
+
+/**
+ * Detailed connection health snapshot used by the admin Health card. Includes everything the QboConnection summary exposes plus the most recent token-refresh attempts.
+ */
+export interface QboConnectionHealth {
+  mode: QboConnectionHealthMode;
+  status: QboConnectionHealthStatus;
+  health: QboConnectionHealthHealth;
+  environment: QboConnectionHealthEnvironment;
+  /** @nullable */
+  realmId?: string | null;
+  /** @nullable */
+  companyName?: string | null;
+  hasCredentials: boolean;
+  /** @nullable */
+  tokenExpiresAt?: string | null;
+  /** @nullable */
+  refreshTokenExpiresAt?: string | null;
+  /** @nullable */
+  lastTokenRefreshAt?: string | null;
+  /** @nullable */
+  lastTokenRefreshError?: string | null;
+  /** @nullable */
+  lastSuccessfulPostAt?: string | null;
+  /** @nullable */
+  lastFailedPostAt?: string | null;
+  recentRefreshAttempts: QboTokenRefreshLogItem[];
+}
+
+/**
+ * An entry from the org's QBO Chart of Accounts (cached).
+ */
+export interface QboAccount {
+  id: string;
+  name: string;
+  fullyQualifiedName: string;
+  accountType: string;
+  /** @nullable */
+  accountSubType?: string | null;
+  /** @nullable */
+  classification?: string | null;
+  active: boolean;
+}
+
+export interface QboTag {
+  id: string;
+  name: string;
+  /** @nullable */
+  color?: string | null;
+  active: boolean;
+}
+
+export interface CreateQboTagBody {
+  /**
+   * @minLength 1
+   * @maxLength 64
+   */
+  name: string;
+  /** @nullable */
+  color?: string | null;
+}
+
+export interface UpdateQboTagBody {
+  /**
+   * @minLength 1
+   * @maxLength 64
+   */
+  name?: string;
+  /** @nullable */
+  color?: string | null;
+  active?: boolean;
+}
+
+export interface SetReportTagsBody {
+  tagIds: string[];
 }
 
 export interface UserRef {
@@ -363,6 +622,8 @@ export interface ExpenseReport {
   receipts: Receipt[];
   /** True when at least one field-level content edit has been recorded *after* the most recent approval action on this report (or after creation when no approvals exist yet, except for the initial draft state). Surfaces an "Edited since last approval" banner on the manager / finance review pages so reviewers can see a re-edit happened without forcing a status auto-reset. */
   editedSinceLastApproval: boolean;
+  /** QBO tags currently applied to this report. Sent on the next JournalEntry post. */
+  tags: QboTag[];
 }
 
 export interface CreateReportBody {
@@ -484,6 +745,14 @@ export interface AuditFieldDiff {
   after: unknown;
 }
 
+export type AuditEntryCategory =
+  (typeof AuditEntryCategory)[keyof typeof AuditEntryCategory];
+
+export const AuditEntryCategory = {
+  report: "report",
+  qbo: "qbo",
+} as const;
+
 export type AuditEntryEntityType =
   (typeof AuditEntryEntityType)[keyof typeof AuditEntryEntityType];
 
@@ -491,6 +760,10 @@ export const AuditEntryEntityType = {
   report: "report",
   line_item: "line_item",
   receipt: "receipt",
+  qbo_config: "qbo_config",
+  qbo_tag: "qbo_tag",
+  qbo_mapping: "qbo_mapping",
+  qbo_posting: "qbo_posting",
 } as const;
 
 export type AuditEntryAction =
@@ -503,14 +776,16 @@ export const AuditEntryAction = {
 } as const;
 
 /**
- * A field-level content edit on a report or one of its children (line item, receipt). Approval/status transitions live in `ApprovalAction`; merge them via `ChangeFeedItem`.
+ * A field-level content edit on a report or one of its children (line item, receipt) — or, when `category=qbo`, a change to an org-wide QBO config, tag, GL mapping, or posting event. Approval/status transitions live in `ApprovalAction`; merge them via `ChangeFeedItem`.
  */
 export interface AuditEntry {
   id: string;
-  reportId: string;
+  /** Null for QBO config/tag/mapping/posting events that are not tied to a single report. */
+  reportId: string | null;
   actor: UserRef;
   /** @minItems 1 */
   actorRoles: Role[];
+  category: AuditEntryCategory;
   entityType: AuditEntryEntityType;
   entityId: string;
   action: AuditEntryAction;
@@ -538,6 +813,11 @@ export interface ChangeFeedItem {
 
 export interface GlPreviewLine {
   account: string;
+  /**
+   * Durable QBO Chart-of-Accounts Id, when the GL mapping has been linked to a real account. Posting payloads prefer this over the name because Intuit matches AccountRef by `value` (Id).
+   * @nullable
+   */
+  accountId?: string | null;
   category: string;
   amount: string;
 }
@@ -645,6 +925,19 @@ export interface ReconcileBatchBody {
   entries: ReconcileBatchEntry[];
 }
 
+export type AdminListQboPostingHistoryParams = {
+  /**
+   * @minimum 1
+   * @maximum 100
+   */
+  limit?: number;
+};
+
+export type AdminListQboAccountsParams = {
+  refresh?: boolean;
+  q?: string;
+};
+
 export type AdminListDelegationsParams = {
   activeOnly?: boolean;
 };
@@ -652,11 +945,23 @@ export type AdminListDelegationsParams = {
 export type AdminAuditLogParams = {
   reportId?: string;
   /**
+   * Filter content edits by category. `report` returns report/line-item/receipt edits; `qbo` returns QBO config/tag/mapping/posting events. Approval rows are included only when `category=report` or omitted.
+   */
+  category?: AdminAuditLogCategory;
+  /**
    * @minimum 1
    * @maximum 500
    */
   limit?: number;
 };
+
+export type AdminAuditLogCategory =
+  (typeof AdminAuditLogCategory)[keyof typeof AdminAuditLogCategory];
+
+export const AdminAuditLogCategory = {
+  report: "report",
+  qbo: "qbo",
+} as const;
 
 export type ListReportsParams = {
   scope?: ListReportsScope;

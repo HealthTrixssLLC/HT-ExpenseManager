@@ -19,6 +19,8 @@ import type {
 import type {
   AdminAuditLogParams,
   AdminListDelegationsParams,
+  AdminListQboAccountsParams,
+  AdminListQboPostingHistoryParams,
   ApprovalActionBody,
   AuthSession,
   BootstrapBody,
@@ -28,6 +30,7 @@ import type {
   CreateDelegationBody,
   CreateLineItemBody,
   CreatePayrollBatchBody,
+  CreateQboTagBody,
   CreateReportBody,
   CreateUserBody,
   Department,
@@ -47,15 +50,24 @@ import type {
   PolicyRule,
   PostToQuickbooksResponse,
   Problem,
+  QboAccount,
   QboConnection,
+  QboConnectionHealth,
+  QboOauthStartResponse,
+  QboPostingHistoryItem,
+  QboPostingPreferencesBody,
+  QboTag,
   Receipt,
   ReceiptDownloadUrlResponse,
   ReconcileBatchBody,
   RegisterReceiptBody,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
+  SaveQboCredentialsBody,
+  SetReportTagsBody,
   UpdateGlMappingBody,
   UpdateLineItemBody,
+  UpdateQboTagBody,
   UpdateReceiptBody,
   UpdateReportBody,
   UpdateUserBody,
@@ -1821,7 +1833,7 @@ export const useAdminConnectQboStub = <
 };
 
 /**
- * @summary Disconnect the stubbed QuickBooks Online connection
+ * @summary Disconnect QuickBooks Online (stub or real-OAuth)
  */
 export const getAdminDisconnectQboUrl = () => {
   return `/api/admin/qbo-connection/disconnect`;
@@ -1879,7 +1891,7 @@ export type AdminDisconnectQboMutationResult = NonNullable<
 export type AdminDisconnectQboMutationError = ErrorType<unknown>;
 
 /**
- * @summary Disconnect the stubbed QuickBooks Online connection
+ * @summary Disconnect QuickBooks Online (stub or real-OAuth)
  */
 export const useAdminDisconnectQbo = <
   TError = ErrorType<unknown>,
@@ -1899,6 +1911,1224 @@ export const useAdminDisconnectQbo = <
   TContext
 > => {
   return useMutation(getAdminDisconnectQboMutationOptions(options));
+};
+
+/**
+ * @summary Save (encrypt) the org's Intuit Client ID + Secret + environment
+ */
+export const getAdminSaveQboCredentialsUrl = () => {
+  return `/api/admin/qbo-connection/credentials`;
+};
+
+export const adminSaveQboCredentials = async (
+  saveQboCredentialsBody: SaveQboCredentialsBody,
+  options?: RequestInit,
+): Promise<QboConnection> => {
+  return customFetch<QboConnection>(getAdminSaveQboCredentialsUrl(), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(saveQboCredentialsBody),
+  });
+};
+
+export const getAdminSaveQboCredentialsMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminSaveQboCredentials>>,
+    TError,
+    { data: BodyType<SaveQboCredentialsBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminSaveQboCredentials>>,
+  TError,
+  { data: BodyType<SaveQboCredentialsBody> },
+  TContext
+> => {
+  const mutationKey = ["adminSaveQboCredentials"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminSaveQboCredentials>>,
+    { data: BodyType<SaveQboCredentialsBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return adminSaveQboCredentials(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminSaveQboCredentialsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminSaveQboCredentials>>
+>;
+export type AdminSaveQboCredentialsMutationBody =
+  BodyType<SaveQboCredentialsBody>;
+export type AdminSaveQboCredentialsMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Save (encrypt) the org's Intuit Client ID + Secret + environment
+ */
+export const useAdminSaveQboCredentials = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminSaveQboCredentials>>,
+    TError,
+    { data: BodyType<SaveQboCredentialsBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminSaveQboCredentials>>,
+  TError,
+  { data: BodyType<SaveQboCredentialsBody> },
+  TContext
+> => {
+  return useMutation(getAdminSaveQboCredentialsMutationOptions(options));
+};
+
+/**
+ * @summary Update QBO posting defaults (auto-post, memo template, payable acct)
+ */
+export const getAdminSaveQboPostingPreferencesUrl = () => {
+  return `/api/admin/qbo-connection/posting-preferences`;
+};
+
+export const adminSaveQboPostingPreferences = async (
+  qboPostingPreferencesBody: QboPostingPreferencesBody,
+  options?: RequestInit,
+): Promise<QboConnection> => {
+  return customFetch<QboConnection>(getAdminSaveQboPostingPreferencesUrl(), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(qboPostingPreferencesBody),
+  });
+};
+
+export const getAdminSaveQboPostingPreferencesMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminSaveQboPostingPreferences>>,
+    TError,
+    { data: BodyType<QboPostingPreferencesBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminSaveQboPostingPreferences>>,
+  TError,
+  { data: BodyType<QboPostingPreferencesBody> },
+  TContext
+> => {
+  const mutationKey = ["adminSaveQboPostingPreferences"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminSaveQboPostingPreferences>>,
+    { data: BodyType<QboPostingPreferencesBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return adminSaveQboPostingPreferences(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminSaveQboPostingPreferencesMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminSaveQboPostingPreferences>>
+>;
+export type AdminSaveQboPostingPreferencesMutationBody =
+  BodyType<QboPostingPreferencesBody>;
+export type AdminSaveQboPostingPreferencesMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Update QBO posting defaults (auto-post, memo template, payable acct)
+ */
+export const useAdminSaveQboPostingPreferences = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminSaveQboPostingPreferences>>,
+    TError,
+    { data: BodyType<QboPostingPreferencesBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminSaveQboPostingPreferences>>,
+  TError,
+  { data: BodyType<QboPostingPreferencesBody> },
+  TContext
+> => {
+  return useMutation(getAdminSaveQboPostingPreferencesMutationOptions(options));
+};
+
+/**
+ * @summary Begin the Intuit OAuth flow (returns the authorization URL to open)
+ */
+export const getAdminStartQboOauthUrl = () => {
+  return `/api/admin/qbo-connection/oauth/start`;
+};
+
+export const adminStartQboOauth = async (
+  options?: RequestInit,
+): Promise<QboOauthStartResponse> => {
+  return customFetch<QboOauthStartResponse>(getAdminStartQboOauthUrl(), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getAdminStartQboOauthMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminStartQboOauth>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminStartQboOauth>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["adminStartQboOauth"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminStartQboOauth>>,
+    void
+  > = () => {
+    return adminStartQboOauth(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminStartQboOauthMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminStartQboOauth>>
+>;
+
+export type AdminStartQboOauthMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Begin the Intuit OAuth flow (returns the authorization URL to open)
+ */
+export const useAdminStartQboOauth = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminStartQboOauth>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminStartQboOauth>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getAdminStartQboOauthMutationOptions(options));
+};
+
+/**
+ * @summary Force a token refresh against Intuit
+ */
+export const getAdminRefreshQboTokenUrl = () => {
+  return `/api/admin/qbo-connection/refresh-token`;
+};
+
+export const adminRefreshQboToken = async (
+  options?: RequestInit,
+): Promise<QboConnection> => {
+  return customFetch<QboConnection>(getAdminRefreshQboTokenUrl(), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getAdminRefreshQboTokenMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminRefreshQboToken>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminRefreshQboToken>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["adminRefreshQboToken"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminRefreshQboToken>>,
+    void
+  > = () => {
+    return adminRefreshQboToken(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminRefreshQboTokenMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminRefreshQboToken>>
+>;
+
+export type AdminRefreshQboTokenMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Force a token refresh against Intuit
+ */
+export const useAdminRefreshQboToken = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminRefreshQboToken>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminRefreshQboToken>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getAdminRefreshQboTokenMutationOptions(options));
+};
+
+/**
+ * @summary Detailed connection health for the org (status, mode, environment,
+token expiry timestamps, last refresh outcome, last successful /
+failed post, and the last few token-refresh log entries).
+
+ */
+export const getAdminGetQboConnectionHealthUrl = () => {
+  return `/api/admin/qbo-connection/health`;
+};
+
+export const adminGetQboConnectionHealth = async (
+  options?: RequestInit,
+): Promise<QboConnectionHealth> => {
+  return customFetch<QboConnectionHealth>(getAdminGetQboConnectionHealthUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getAdminGetQboConnectionHealthQueryKey = () => {
+  return [`/api/admin/qbo-connection/health`] as const;
+};
+
+export const getAdminGetQboConnectionHealthQueryOptions = <
+  TData = Awaited<ReturnType<typeof adminGetQboConnectionHealth>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof adminGetQboConnectionHealth>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getAdminGetQboConnectionHealthQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof adminGetQboConnectionHealth>>
+  > = ({ signal }) =>
+    adminGetQboConnectionHealth({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof adminGetQboConnectionHealth>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type AdminGetQboConnectionHealthQueryResult = NonNullable<
+  Awaited<ReturnType<typeof adminGetQboConnectionHealth>>
+>;
+export type AdminGetQboConnectionHealthQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Detailed connection health for the org (status, mode, environment,
+token expiry timestamps, last refresh outcome, last successful /
+failed post, and the last few token-refresh log entries).
+
+ */
+
+export function useAdminGetQboConnectionHealth<
+  TData = Awaited<ReturnType<typeof adminGetQboConnectionHealth>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof adminGetQboConnectionHealth>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getAdminGetQboConnectionHealthQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Recent QBO posting events (success + failure)
+ */
+export const getAdminListQboPostingHistoryUrl = (
+  params?: AdminListQboPostingHistoryParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/admin/qbo-connection/posting-history?${stringifiedParams}`
+    : `/api/admin/qbo-connection/posting-history`;
+};
+
+export const adminListQboPostingHistory = async (
+  params?: AdminListQboPostingHistoryParams,
+  options?: RequestInit,
+): Promise<QboPostingHistoryItem[]> => {
+  return customFetch<QboPostingHistoryItem[]>(
+    getAdminListQboPostingHistoryUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getAdminListQboPostingHistoryQueryKey = (
+  params?: AdminListQboPostingHistoryParams,
+) => {
+  return [
+    `/api/admin/qbo-connection/posting-history`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getAdminListQboPostingHistoryQueryOptions = <
+  TData = Awaited<ReturnType<typeof adminListQboPostingHistory>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: AdminListQboPostingHistoryParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof adminListQboPostingHistory>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getAdminListQboPostingHistoryQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof adminListQboPostingHistory>>
+  > = ({ signal }) =>
+    adminListQboPostingHistory(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof adminListQboPostingHistory>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type AdminListQboPostingHistoryQueryResult = NonNullable<
+  Awaited<ReturnType<typeof adminListQboPostingHistory>>
+>;
+export type AdminListQboPostingHistoryQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Recent QBO posting events (success + failure)
+ */
+
+export function useAdminListQboPostingHistory<
+  TData = Awaited<ReturnType<typeof adminListQboPostingHistory>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: AdminListQboPostingHistoryParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof adminListQboPostingHistory>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getAdminListQboPostingHistoryQueryOptions(
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary List the org's QBO Chart of Accounts (cached, real-only)
+ */
+export const getAdminListQboAccountsUrl = (
+  params?: AdminListQboAccountsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/admin/qbo-connection/accounts?${stringifiedParams}`
+    : `/api/admin/qbo-connection/accounts`;
+};
+
+export const adminListQboAccounts = async (
+  params?: AdminListQboAccountsParams,
+  options?: RequestInit,
+): Promise<QboAccount[]> => {
+  return customFetch<QboAccount[]>(getAdminListQboAccountsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getAdminListQboAccountsQueryKey = (
+  params?: AdminListQboAccountsParams,
+) => {
+  return [
+    `/api/admin/qbo-connection/accounts`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getAdminListQboAccountsQueryOptions = <
+  TData = Awaited<ReturnType<typeof adminListQboAccounts>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: AdminListQboAccountsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof adminListQboAccounts>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getAdminListQboAccountsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof adminListQboAccounts>>
+  > = ({ signal }) =>
+    adminListQboAccounts(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof adminListQboAccounts>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type AdminListQboAccountsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof adminListQboAccounts>>
+>;
+export type AdminListQboAccountsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List the org's QBO Chart of Accounts (cached, real-only)
+ */
+
+export function useAdminListQboAccounts<
+  TData = Awaited<ReturnType<typeof adminListQboAccounts>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: AdminListQboAccountsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof adminListQboAccounts>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getAdminListQboAccountsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary List org-wide QBO tags
+ */
+export const getAdminListQboTagsUrl = () => {
+  return `/api/admin/qbo-tags`;
+};
+
+export const adminListQboTags = async (
+  options?: RequestInit,
+): Promise<QboTag[]> => {
+  return customFetch<QboTag[]>(getAdminListQboTagsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getAdminListQboTagsQueryKey = () => {
+  return [`/api/admin/qbo-tags`] as const;
+};
+
+export const getAdminListQboTagsQueryOptions = <
+  TData = Awaited<ReturnType<typeof adminListQboTags>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof adminListQboTags>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getAdminListQboTagsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof adminListQboTags>>
+  > = ({ signal }) => adminListQboTags({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof adminListQboTags>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type AdminListQboTagsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof adminListQboTags>>
+>;
+export type AdminListQboTagsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List org-wide QBO tags
+ */
+
+export function useAdminListQboTags<
+  TData = Awaited<ReturnType<typeof adminListQboTags>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof adminListQboTags>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getAdminListQboTagsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Create a new QBO tag
+ */
+export const getAdminCreateQboTagUrl = () => {
+  return `/api/admin/qbo-tags`;
+};
+
+export const adminCreateQboTag = async (
+  createQboTagBody: CreateQboTagBody,
+  options?: RequestInit,
+): Promise<QboTag> => {
+  return customFetch<QboTag>(getAdminCreateQboTagUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createQboTagBody),
+  });
+};
+
+export const getAdminCreateQboTagMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminCreateQboTag>>,
+    TError,
+    { data: BodyType<CreateQboTagBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminCreateQboTag>>,
+  TError,
+  { data: BodyType<CreateQboTagBody> },
+  TContext
+> => {
+  const mutationKey = ["adminCreateQboTag"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminCreateQboTag>>,
+    { data: BodyType<CreateQboTagBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return adminCreateQboTag(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminCreateQboTagMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminCreateQboTag>>
+>;
+export type AdminCreateQboTagMutationBody = BodyType<CreateQboTagBody>;
+export type AdminCreateQboTagMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Create a new QBO tag
+ */
+export const useAdminCreateQboTag = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminCreateQboTag>>,
+    TError,
+    { data: BodyType<CreateQboTagBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminCreateQboTag>>,
+  TError,
+  { data: BodyType<CreateQboTagBody> },
+  TContext
+> => {
+  return useMutation(getAdminCreateQboTagMutationOptions(options));
+};
+
+/**
+ * @summary Update a QBO tag
+ */
+export const getAdminUpdateQboTagUrl = (id: string) => {
+  return `/api/admin/qbo-tags/${id}`;
+};
+
+export const adminUpdateQboTag = async (
+  id: string,
+  updateQboTagBody: UpdateQboTagBody,
+  options?: RequestInit,
+): Promise<QboTag> => {
+  return customFetch<QboTag>(getAdminUpdateQboTagUrl(id), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateQboTagBody),
+  });
+};
+
+export const getAdminUpdateQboTagMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminUpdateQboTag>>,
+    TError,
+    { id: string; data: BodyType<UpdateQboTagBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminUpdateQboTag>>,
+  TError,
+  { id: string; data: BodyType<UpdateQboTagBody> },
+  TContext
+> => {
+  const mutationKey = ["adminUpdateQboTag"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminUpdateQboTag>>,
+    { id: string; data: BodyType<UpdateQboTagBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return adminUpdateQboTag(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminUpdateQboTagMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminUpdateQboTag>>
+>;
+export type AdminUpdateQboTagMutationBody = BodyType<UpdateQboTagBody>;
+export type AdminUpdateQboTagMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Update a QBO tag
+ */
+export const useAdminUpdateQboTag = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminUpdateQboTag>>,
+    TError,
+    { id: string; data: BodyType<UpdateQboTagBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminUpdateQboTag>>,
+  TError,
+  { id: string; data: BodyType<UpdateQboTagBody> },
+  TContext
+> => {
+  return useMutation(getAdminUpdateQboTagMutationOptions(options));
+};
+
+/**
+ * @summary Delete a QBO tag
+ */
+export const getAdminDeleteQboTagUrl = (id: string) => {
+  return `/api/admin/qbo-tags/${id}`;
+};
+
+export const adminDeleteQboTag = async (
+  id: string,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getAdminDeleteQboTagUrl(id), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getAdminDeleteQboTagMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminDeleteQboTag>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminDeleteQboTag>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["adminDeleteQboTag"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminDeleteQboTag>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return adminDeleteQboTag(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminDeleteQboTagMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminDeleteQboTag>>
+>;
+
+export type AdminDeleteQboTagMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Delete a QBO tag
+ */
+export const useAdminDeleteQboTag = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminDeleteQboTag>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminDeleteQboTag>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getAdminDeleteQboTagMutationOptions(options));
+};
+
+/**
+ * Non-admin endpoint that returns active org-wide QBO tags so the
+Report Tag Picker on report-detail pages can show the catalog to
+employees and finance users without granting them admin scope.
+Inactive tags are filtered out — admins manage those via
+`GET /admin/qbo-tags`.
+
+ * @summary List active QBO tags (catalog) for the report tag picker
+ */
+export const getListActiveQboTagsUrl = () => {
+  return `/api/qbo-tags`;
+};
+
+export const listActiveQboTags = async (
+  options?: RequestInit,
+): Promise<QboTag[]> => {
+  return customFetch<QboTag[]>(getListActiveQboTagsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListActiveQboTagsQueryKey = () => {
+  return [`/api/qbo-tags`] as const;
+};
+
+export const getListActiveQboTagsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listActiveQboTags>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listActiveQboTags>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListActiveQboTagsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listActiveQboTags>>
+  > = ({ signal }) => listActiveQboTags({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listActiveQboTags>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListActiveQboTagsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listActiveQboTags>>
+>;
+export type ListActiveQboTagsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List active QBO tags (catalog) for the report tag picker
+ */
+
+export function useListActiveQboTags<
+  TData = Awaited<ReturnType<typeof listActiveQboTags>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listActiveQboTags>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListActiveQboTagsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary List the QBO tags applied to a report
+ */
+export const getListReportTagsUrl = (id: string) => {
+  return `/api/reports/${id}/tags`;
+};
+
+export const listReportTags = async (
+  id: string,
+  options?: RequestInit,
+): Promise<QboTag[]> => {
+  return customFetch<QboTag[]>(getListReportTagsUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListReportTagsQueryKey = (id: string) => {
+  return [`/api/reports/${id}/tags`] as const;
+};
+
+export const getListReportTagsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listReportTags>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listReportTags>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListReportTagsQueryKey(id);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listReportTags>>> = ({
+    signal,
+  }) => listReportTags(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listReportTags>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListReportTagsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listReportTags>>
+>;
+export type ListReportTagsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List the QBO tags applied to a report
+ */
+
+export function useListReportTags<
+  TData = Awaited<ReturnType<typeof listReportTags>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listReportTags>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListReportTagsQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Replace the set of QBO tags applied to a report
+ */
+export const getSetReportTagsUrl = (id: string) => {
+  return `/api/reports/${id}/tags`;
+};
+
+export const setReportTags = async (
+  id: string,
+  setReportTagsBody: SetReportTagsBody,
+  options?: RequestInit,
+): Promise<QboTag[]> => {
+  return customFetch<QboTag[]>(getSetReportTagsUrl(id), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(setReportTagsBody),
+  });
+};
+
+export const getSetReportTagsMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof setReportTags>>,
+    TError,
+    { id: string; data: BodyType<SetReportTagsBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof setReportTags>>,
+  TError,
+  { id: string; data: BodyType<SetReportTagsBody> },
+  TContext
+> => {
+  const mutationKey = ["setReportTags"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof setReportTags>>,
+    { id: string; data: BodyType<SetReportTagsBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return setReportTags(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SetReportTagsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof setReportTags>>
+>;
+export type SetReportTagsMutationBody = BodyType<SetReportTagsBody>;
+export type SetReportTagsMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Replace the set of QBO tags applied to a report
+ */
+export const useSetReportTags = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof setReportTags>>,
+    TError,
+    { id: string; data: BodyType<SetReportTagsBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof setReportTags>>,
+  TError,
+  { id: string; data: BodyType<SetReportTagsBody> },
+  TContext
+> => {
+  return useMutation(getSetReportTagsMutationOptions(options));
 };
 
 /**

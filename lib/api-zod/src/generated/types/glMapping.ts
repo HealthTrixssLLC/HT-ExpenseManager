@@ -12,5 +12,7 @@ export interface GlMapping {
   qboAccount: string;
   /** @nullable */
   qboAccountId?: string | null;
+  /** @nullable */
+  qboAccountType?: string | null;
   active: boolean;
 }

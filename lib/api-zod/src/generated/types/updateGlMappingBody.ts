@@ -10,5 +10,7 @@ export interface UpdateGlMappingBody {
   qboAccount?: string;
   /** @nullable */
   qboAccountId?: string | null;
+  /** @nullable */
+  qboAccountType?: string | null;
   active?: boolean;
 }

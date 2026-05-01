@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { LineItem } from "./lineItem";
+import type { QboTag } from "./qboTag";
 import type { Receipt } from "./receipt";
 import type { UserRef } from "./userRef";
 import type { WorkflowStatus } from "./workflowStatus";
@@ -35,4 +36,6 @@ export interface ExpenseReport {
   receipts: Receipt[];
   /** True when at least one field-level content edit has been recorded *after* the most recent approval action on this report (or after creation when no approvals exist yet, except for the initial draft state). Surfaces an "Edited since last approval" banner on the manager / finance review pages so reviewers can see a re-edit happened without forcing a status auto-reset. */
   editedSinceLastApproval: boolean;
+  /** QBO tags currently applied to this report. Sent on the next JournalEntry post. */
+  tags: QboTag[];
 }

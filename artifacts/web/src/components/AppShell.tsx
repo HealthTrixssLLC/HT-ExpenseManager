@@ -15,6 +15,7 @@ import {
   ScrollIcon,
   UserCircle,
   DatabaseBackup,
+  Tag,
 } from "lucide-react";
 import { DesktopTopbar } from "@/components/brand/BrandHeader";
 import { SidebarNav, type NavSection } from "@/components/brand/SidebarNav";
@@ -109,6 +110,11 @@ function buildSections(roles: Role[]): NavSection[] {
           label: "QuickBooks",
           icon: <Settings size={16} />,
           href: "/admin/qbo",
+        },
+        {
+          label: "QBO tags",
+          icon: <Tag size={16} />,
+          href: "/admin/qbo-tags",
         },
         { label: "Audit log", icon: <ScrollText size={16} />, href: "/admin/audit" },
         ...(roleCanSysAdmin(roles)

@@ -97,6 +97,13 @@ export type ExpenseReportSummaryDto = {
   updatedAt: string;
 };
 
+export type QboTagDto = {
+  id: string;
+  name: string;
+  color: string | null;
+  active: boolean;
+};
+
 export type ExpenseReportDto = ExpenseReportSummaryDto & {
   description: string;
   departmentId: string | null;
@@ -106,13 +113,15 @@ export type ExpenseReportDto = ExpenseReportSummaryDto & {
   lineItems: LineItemDto[];
   receipts: ReceiptDto[];
   editedSinceLastApproval: boolean;
+  tags: QboTagDto[];
 };
 
 export type AuditEntryDto = {
   id: string;
-  reportId: string;
+  reportId: string | null;
   actor: UserRefDto;
   actorRoles: Role[];
+  category: "report" | "qbo";
   entityType: AuditEntityType;
   entityId: string;
   action: AuditAction;
@@ -195,9 +204,10 @@ export function toReceiptDto(receipt: Receipt): ReceiptDto {
 export function toAuditEntryDto(entry: AuditEntry, actor: UserRefDto): AuditEntryDto {
   return {
     id: entry.id,
-    reportId: entry.reportId,
+    reportId: entry.reportId ?? null,
     actor,
     actorRoles: entry.actorRoles,
+    category: entry.category,
     entityType: entry.entityType,
     entityId: entry.entityId,
     action: entry.action,
@@ -292,6 +302,7 @@ export function toGlMappingDto(mapping: GlMapping): {
   code: string;
   qboAccount: string;
   qboAccountId: string | null;
+  qboAccountType: string | null;
   active: boolean;
 } {
   return {
@@ -299,6 +310,7 @@ export function toGlMappingDto(mapping: GlMapping): {
     code: mapping.code,
     qboAccount: mapping.qboAccount,
     qboAccountId: mapping.qboAccountId,
+    qboAccountType: mapping.qboAccountType ?? null,
     active: mapping.active,
   };
 }
@@ -319,19 +331,57 @@ export function toPolicyRuleDto(rule: PolicyRule): {
 
 export function toQboConnectionDto(conn: QboConnection): {
   status: QboConnection["status"];
+  mode: QboConnection["mode"];
+  environment: QboConnection["environment"];
+  connectionHealth: QboConnection["connectionHealth"];
   realmId: string | null;
   companyName: string | null;
   connectedAt: string | null;
   lastSyncAt: string | null;
   lastSyncError: string | null;
+  hasClientId: boolean;
+  hasClientSecret: boolean;
+  clientIdMasked: string | null;
+  tokenExpiresAt: string | null;
+  refreshTokenExpiresAt: string | null;
+  lastTokenRefreshAt: string | null;
+  lastTokenRefreshError: string | null;
+  lastSuccessfulPostAt: string | null;
+  lastFailedPostAt: string | null;
+  autoPostOnApproval: boolean;
+  defaultMemoTemplate: string | null;
+  defaultPayableAccountId: string | null;
+  defaultPayableAccountName: string | null;
 } {
+  // We never echo decrypted credentials. clientIdMasked is computed from the
+  // ciphertext length so the UI can show "Configured (•••)" without
+  // decrypting the value.
+  const masked = conn.clientIdEncrypted
+    ? `••• (${conn.clientIdEncrypted.length} bytes encrypted)`
+    : null;
   return {
     status: conn.status,
+    mode: conn.mode,
+    environment: conn.environment,
+    connectionHealth: conn.connectionHealth,
     realmId: conn.realmId ?? null,
     companyName: conn.companyName ?? null,
     connectedAt: conn.connectedAt?.toISOString() ?? null,
     lastSyncAt: conn.lastSyncAt?.toISOString() ?? null,
     lastSyncError: conn.lastSyncError ?? null,
+    hasClientId: Boolean(conn.clientIdEncrypted),
+    hasClientSecret: Boolean(conn.clientSecretEncrypted),
+    clientIdMasked: masked,
+    tokenExpiresAt: conn.tokenExpiresAt?.toISOString() ?? null,
+    refreshTokenExpiresAt: conn.refreshTokenExpiresAt?.toISOString() ?? null,
+    lastTokenRefreshAt: conn.lastTokenRefreshAt?.toISOString() ?? null,
+    lastTokenRefreshError: conn.lastTokenRefreshError ?? null,
+    lastSuccessfulPostAt: conn.lastSuccessfulPostAt?.toISOString() ?? null,
+    lastFailedPostAt: conn.lastFailedPostAt?.toISOString() ?? null,
+    autoPostOnApproval: conn.autoPostOnApproval,
+    defaultMemoTemplate: conn.defaultMemoTemplate ?? null,
+    defaultPayableAccountId: conn.defaultPayableAccountId ?? null,
+    defaultPayableAccountName: conn.defaultPayableAccountName ?? null,
   };
 }
 

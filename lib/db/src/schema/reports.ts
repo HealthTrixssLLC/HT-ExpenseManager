@@ -179,7 +179,15 @@ export const auditEntityTypeEnum = pgEnum("audit_entity_type", [
   "report",
   "line_item",
   "receipt",
+  "qbo_config",
+  "qbo_tag",
+  "qbo_mapping",
+  "qbo_posting",
 ]);
+
+export const AUDIT_CATEGORY_VALUES = ["report", "qbo"] as const;
+export type AuditCategory = (typeof AUDIT_CATEGORY_VALUES)[number];
+export const auditCategoryEnum = pgEnum("audit_category", AUDIT_CATEGORY_VALUES);
 
 export const auditActionEnum = pgEnum("audit_action", [
   "created",
@@ -194,13 +202,15 @@ export const auditEntriesTable = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => orgsTable.id, { onDelete: "cascade" }),
-    reportId: uuid("report_id")
-      .notNull()
-      .references(() => expenseReportsTable.id, { onDelete: "cascade" }),
+    // Nullable: QBO config events are org-scoped, not tied to a single report.
+    reportId: uuid("report_id").references(() => expenseReportsTable.id, {
+      onDelete: "cascade",
+    }),
     actorId: uuid("actor_id")
       .notNull()
       .references(() => usersTable.id, { onDelete: "restrict" }),
     actorRoles: roleEnum("actor_roles").array().notNull(),
+    category: auditCategoryEnum("category").notNull().default("report"),
     entityType: auditEntityTypeEnum("entity_type").notNull(),
     // entity_id is the id of the report, line item, or receipt the change
     // was applied to. For "report" rows this equals reportId; we still store

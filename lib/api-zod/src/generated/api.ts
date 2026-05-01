@@ -339,6 +339,7 @@ export const AdminListGlMappingsResponseItem = zod.object({
   code: zod.string(),
   qboAccount: zod.string(),
   qboAccountId: zod.string().nullish(),
+  qboAccountType: zod.string().nullish(),
   active: zod.boolean(),
 });
 export const AdminListGlMappingsResponse = zod.array(
@@ -355,6 +356,7 @@ export const AdminUpdateGlMappingParams = zod.object({
 export const AdminUpdateGlMappingBody = zod.object({
   qboAccount: zod.string().optional(),
   qboAccountId: zod.string().nullish(),
+  qboAccountType: zod.string().nullish(),
   active: zod.boolean().optional(),
 });
 
@@ -363,6 +365,7 @@ export const AdminUpdateGlMappingResponse = zod.object({
   code: zod.string(),
   qboAccount: zod.string(),
   qboAccountId: zod.string().nullish(),
+  qboAccountType: zod.string().nullish(),
   active: zod.boolean(),
 });
 
@@ -405,11 +408,36 @@ export const AdminPatchPolicyRuleResponse = zod.object({
  */
 export const AdminGetQboConnectionResponse = zod.object({
   status: zod.enum(["connected", "disconnected", "error"]),
+  mode: zod
+    .enum(["stub", "real"])
+    .describe(
+      '\"stub\" = simulated demo connection. \"real\" = the org has stored Intuit Client credentials (live posting requires status=connected).',
+    ),
+  environment: zod.enum(["sandbox", "production"]),
+  connectionHealth: zod.enum([
+    "healthy",
+    "refresh_failed",
+    "reconnect_required",
+    "disconnected",
+  ]),
   realmId: zod.string().nullish(),
   companyName: zod.string().nullish(),
   connectedAt: zod.coerce.date().nullish(),
   lastSyncAt: zod.coerce.date().nullish(),
   lastSyncError: zod.string().nullish(),
+  hasClientId: zod.boolean(),
+  hasClientSecret: zod.boolean(),
+  clientIdMasked: zod.string().nullish(),
+  tokenExpiresAt: zod.coerce.date().nullish(),
+  refreshTokenExpiresAt: zod.coerce.date().nullish(),
+  lastTokenRefreshAt: zod.coerce.date().nullish(),
+  lastTokenRefreshError: zod.string().nullish(),
+  lastSuccessfulPostAt: zod.coerce.date().nullish(),
+  lastFailedPostAt: zod.coerce.date().nullish(),
+  autoPostOnApproval: zod.boolean(),
+  defaultMemoTemplate: zod.string().nullish(),
+  defaultPayableAccountId: zod.string().nullish(),
+  defaultPayableAccountName: zod.string().nullish(),
 });
 
 /**
@@ -420,24 +448,421 @@ connected company name.
  */
 export const AdminConnectQboStubResponse = zod.object({
   status: zod.enum(["connected", "disconnected", "error"]),
+  mode: zod
+    .enum(["stub", "real"])
+    .describe(
+      '\"stub\" = simulated demo connection. \"real\" = the org has stored Intuit Client credentials (live posting requires status=connected).',
+    ),
+  environment: zod.enum(["sandbox", "production"]),
+  connectionHealth: zod.enum([
+    "healthy",
+    "refresh_failed",
+    "reconnect_required",
+    "disconnected",
+  ]),
   realmId: zod.string().nullish(),
   companyName: zod.string().nullish(),
   connectedAt: zod.coerce.date().nullish(),
   lastSyncAt: zod.coerce.date().nullish(),
   lastSyncError: zod.string().nullish(),
+  hasClientId: zod.boolean(),
+  hasClientSecret: zod.boolean(),
+  clientIdMasked: zod.string().nullish(),
+  tokenExpiresAt: zod.coerce.date().nullish(),
+  refreshTokenExpiresAt: zod.coerce.date().nullish(),
+  lastTokenRefreshAt: zod.coerce.date().nullish(),
+  lastTokenRefreshError: zod.string().nullish(),
+  lastSuccessfulPostAt: zod.coerce.date().nullish(),
+  lastFailedPostAt: zod.coerce.date().nullish(),
+  autoPostOnApproval: zod.boolean(),
+  defaultMemoTemplate: zod.string().nullish(),
+  defaultPayableAccountId: zod.string().nullish(),
+  defaultPayableAccountName: zod.string().nullish(),
 });
 
 /**
- * @summary Disconnect the stubbed QuickBooks Online connection
+ * @summary Disconnect QuickBooks Online (stub or real-OAuth)
  */
 export const AdminDisconnectQboResponse = zod.object({
   status: zod.enum(["connected", "disconnected", "error"]),
+  mode: zod
+    .enum(["stub", "real"])
+    .describe(
+      '\"stub\" = simulated demo connection. \"real\" = the org has stored Intuit Client credentials (live posting requires status=connected).',
+    ),
+  environment: zod.enum(["sandbox", "production"]),
+  connectionHealth: zod.enum([
+    "healthy",
+    "refresh_failed",
+    "reconnect_required",
+    "disconnected",
+  ]),
   realmId: zod.string().nullish(),
   companyName: zod.string().nullish(),
   connectedAt: zod.coerce.date().nullish(),
   lastSyncAt: zod.coerce.date().nullish(),
   lastSyncError: zod.string().nullish(),
+  hasClientId: zod.boolean(),
+  hasClientSecret: zod.boolean(),
+  clientIdMasked: zod.string().nullish(),
+  tokenExpiresAt: zod.coerce.date().nullish(),
+  refreshTokenExpiresAt: zod.coerce.date().nullish(),
+  lastTokenRefreshAt: zod.coerce.date().nullish(),
+  lastTokenRefreshError: zod.string().nullish(),
+  lastSuccessfulPostAt: zod.coerce.date().nullish(),
+  lastFailedPostAt: zod.coerce.date().nullish(),
+  autoPostOnApproval: zod.boolean(),
+  defaultMemoTemplate: zod.string().nullish(),
+  defaultPayableAccountId: zod.string().nullish(),
+  defaultPayableAccountName: zod.string().nullish(),
 });
+
+/**
+ * @summary Save (encrypt) the org's Intuit Client ID + Secret + environment
+ */
+export const AdminSaveQboCredentialsBody = zod
+  .object({
+    environment: zod.enum(["sandbox", "production"]),
+    clientId: zod
+      .string()
+      .nullish()
+      .describe("Plaintext Client ID (or null to clear)."),
+    clientSecret: zod
+      .string()
+      .nullish()
+      .describe("Plaintext Client Secret (or null to clear)."),
+  })
+  .describe(
+    "Store the org's Intuit Client ID + Client Secret encrypted at rest. Pass `null` for either field to clear it. The plaintext is never echoed back; only `hasClientId`\/`clientIdMasked` etc are returned.",
+  );
+
+export const AdminSaveQboCredentialsResponse = zod.object({
+  status: zod.enum(["connected", "disconnected", "error"]),
+  mode: zod
+    .enum(["stub", "real"])
+    .describe(
+      '\"stub\" = simulated demo connection. \"real\" = the org has stored Intuit Client credentials (live posting requires status=connected).',
+    ),
+  environment: zod.enum(["sandbox", "production"]),
+  connectionHealth: zod.enum([
+    "healthy",
+    "refresh_failed",
+    "reconnect_required",
+    "disconnected",
+  ]),
+  realmId: zod.string().nullish(),
+  companyName: zod.string().nullish(),
+  connectedAt: zod.coerce.date().nullish(),
+  lastSyncAt: zod.coerce.date().nullish(),
+  lastSyncError: zod.string().nullish(),
+  hasClientId: zod.boolean(),
+  hasClientSecret: zod.boolean(),
+  clientIdMasked: zod.string().nullish(),
+  tokenExpiresAt: zod.coerce.date().nullish(),
+  refreshTokenExpiresAt: zod.coerce.date().nullish(),
+  lastTokenRefreshAt: zod.coerce.date().nullish(),
+  lastTokenRefreshError: zod.string().nullish(),
+  lastSuccessfulPostAt: zod.coerce.date().nullish(),
+  lastFailedPostAt: zod.coerce.date().nullish(),
+  autoPostOnApproval: zod.boolean(),
+  defaultMemoTemplate: zod.string().nullish(),
+  defaultPayableAccountId: zod.string().nullish(),
+  defaultPayableAccountName: zod.string().nullish(),
+});
+
+/**
+ * @summary Update QBO posting defaults (auto-post, memo template, payable acct)
+ */
+export const AdminSaveQboPostingPreferencesBody = zod.object({
+  autoPostOnApproval: zod.boolean().optional(),
+  defaultMemoTemplate: zod.string().nullish(),
+  defaultPayableAccountId: zod.string().nullish(),
+  defaultPayableAccountName: zod.string().nullish(),
+});
+
+export const AdminSaveQboPostingPreferencesResponse = zod.object({
+  status: zod.enum(["connected", "disconnected", "error"]),
+  mode: zod
+    .enum(["stub", "real"])
+    .describe(
+      '\"stub\" = simulated demo connection. \"real\" = the org has stored Intuit Client credentials (live posting requires status=connected).',
+    ),
+  environment: zod.enum(["sandbox", "production"]),
+  connectionHealth: zod.enum([
+    "healthy",
+    "refresh_failed",
+    "reconnect_required",
+    "disconnected",
+  ]),
+  realmId: zod.string().nullish(),
+  companyName: zod.string().nullish(),
+  connectedAt: zod.coerce.date().nullish(),
+  lastSyncAt: zod.coerce.date().nullish(),
+  lastSyncError: zod.string().nullish(),
+  hasClientId: zod.boolean(),
+  hasClientSecret: zod.boolean(),
+  clientIdMasked: zod.string().nullish(),
+  tokenExpiresAt: zod.coerce.date().nullish(),
+  refreshTokenExpiresAt: zod.coerce.date().nullish(),
+  lastTokenRefreshAt: zod.coerce.date().nullish(),
+  lastTokenRefreshError: zod.string().nullish(),
+  lastSuccessfulPostAt: zod.coerce.date().nullish(),
+  lastFailedPostAt: zod.coerce.date().nullish(),
+  autoPostOnApproval: zod.boolean(),
+  defaultMemoTemplate: zod.string().nullish(),
+  defaultPayableAccountId: zod.string().nullish(),
+  defaultPayableAccountName: zod.string().nullish(),
+});
+
+/**
+ * @summary Begin the Intuit OAuth flow (returns the authorization URL to open)
+ */
+export const AdminStartQboOauthResponse = zod.object({
+  url: zod.string().url(),
+});
+
+/**
+ * @summary Force a token refresh against Intuit
+ */
+export const AdminRefreshQboTokenResponse = zod.object({
+  status: zod.enum(["connected", "disconnected", "error"]),
+  mode: zod
+    .enum(["stub", "real"])
+    .describe(
+      '\"stub\" = simulated demo connection. \"real\" = the org has stored Intuit Client credentials (live posting requires status=connected).',
+    ),
+  environment: zod.enum(["sandbox", "production"]),
+  connectionHealth: zod.enum([
+    "healthy",
+    "refresh_failed",
+    "reconnect_required",
+    "disconnected",
+  ]),
+  realmId: zod.string().nullish(),
+  companyName: zod.string().nullish(),
+  connectedAt: zod.coerce.date().nullish(),
+  lastSyncAt: zod.coerce.date().nullish(),
+  lastSyncError: zod.string().nullish(),
+  hasClientId: zod.boolean(),
+  hasClientSecret: zod.boolean(),
+  clientIdMasked: zod.string().nullish(),
+  tokenExpiresAt: zod.coerce.date().nullish(),
+  refreshTokenExpiresAt: zod.coerce.date().nullish(),
+  lastTokenRefreshAt: zod.coerce.date().nullish(),
+  lastTokenRefreshError: zod.string().nullish(),
+  lastSuccessfulPostAt: zod.coerce.date().nullish(),
+  lastFailedPostAt: zod.coerce.date().nullish(),
+  autoPostOnApproval: zod.boolean(),
+  defaultMemoTemplate: zod.string().nullish(),
+  defaultPayableAccountId: zod.string().nullish(),
+  defaultPayableAccountName: zod.string().nullish(),
+});
+
+/**
+ * @summary Detailed connection health for the org (status, mode, environment,
+token expiry timestamps, last refresh outcome, last successful /
+failed post, and the last few token-refresh log entries).
+
+ */
+export const AdminGetQboConnectionHealthResponse = zod
+  .object({
+    mode: zod.enum(["stub", "real"]),
+    status: zod.enum(["connected", "disconnected", "error"]),
+    health: zod.enum([
+      "healthy",
+      "refresh_failed",
+      "reconnect_required",
+      "disconnected",
+    ]),
+    environment: zod.enum(["sandbox", "production"]),
+    realmId: zod.string().nullish(),
+    companyName: zod.string().nullish(),
+    hasCredentials: zod.boolean(),
+    tokenExpiresAt: zod.coerce.date().nullish(),
+    refreshTokenExpiresAt: zod.coerce.date().nullish(),
+    lastTokenRefreshAt: zod.coerce.date().nullish(),
+    lastTokenRefreshError: zod.string().nullish(),
+    lastSuccessfulPostAt: zod.coerce.date().nullish(),
+    lastFailedPostAt: zod.coerce.date().nullish(),
+    recentRefreshAttempts: zod.array(
+      zod.object({
+        id: zod.string().uuid(),
+        success: zod.boolean(),
+        errorMessage: zod.string().nullish(),
+        expiresInSeconds: zod.number().nullish(),
+        createdAt: zod.coerce.date(),
+      }),
+    ),
+  })
+  .describe(
+    "Detailed connection health snapshot used by the admin Health card. Includes everything the QboConnection summary exposes plus the most recent token-refresh attempts.",
+  );
+
+/**
+ * @summary Recent QBO posting events (success + failure)
+ */
+export const adminListQboPostingHistoryQueryLimitDefault = 25;
+export const adminListQboPostingHistoryQueryLimitMax = 100;
+
+export const AdminListQboPostingHistoryQueryParams = zod.object({
+  limit: zod.coerce
+    .number()
+    .min(1)
+    .max(adminListQboPostingHistoryQueryLimitMax)
+    .default(adminListQboPostingHistoryQueryLimitDefault),
+});
+
+export const AdminListQboPostingHistoryResponseItem = zod.object({
+  id: zod.string().uuid(),
+  reportId: zod.string().uuid(),
+  reportDisplayCode: zod.string(),
+  status: zod
+    .enum(["posted", "retried", "error"])
+    .describe(
+      '\"posted\" = first successful post, \"retried\" = succeeded after a previous Sync Error on the same report, \"error\" = the post failed.',
+    ),
+  journalId: zod.string(),
+  qboJournalId: zod.string().nullish(),
+  environment: zod.enum(["sandbox", "production"]),
+  realmId: zod.string().nullish(),
+  attachableCount: zod.number(),
+  tagsSent: zod.array(zod.string()),
+  errorMessage: zod.string().nullish(),
+  createdAt: zod.coerce.date(),
+});
+export const AdminListQboPostingHistoryResponse = zod.array(
+  AdminListQboPostingHistoryResponseItem,
+);
+
+/**
+ * @summary List the org's QBO Chart of Accounts (cached, real-only)
+ */
+export const adminListQboAccountsQueryRefreshDefault = false;
+
+export const AdminListQboAccountsQueryParams = zod.object({
+  refresh: zod.coerce
+    .boolean()
+    .default(adminListQboAccountsQueryRefreshDefault),
+  q: zod.coerce.string().optional(),
+});
+
+export const AdminListQboAccountsResponseItem = zod
+  .object({
+    id: zod.string(),
+    name: zod.string(),
+    fullyQualifiedName: zod.string(),
+    accountType: zod.string(),
+    accountSubType: zod.string().nullish(),
+    classification: zod.string().nullish(),
+    active: zod.boolean(),
+  })
+  .describe("An entry from the org's QBO Chart of Accounts (cached).");
+export const AdminListQboAccountsResponse = zod.array(
+  AdminListQboAccountsResponseItem,
+);
+
+/**
+ * @summary List org-wide QBO tags
+ */
+export const AdminListQboTagsResponseItem = zod.object({
+  id: zod.string().uuid(),
+  name: zod.string(),
+  color: zod.string().nullish(),
+  active: zod.boolean(),
+});
+export const AdminListQboTagsResponse = zod.array(AdminListQboTagsResponseItem);
+
+/**
+ * @summary Create a new QBO tag
+ */
+export const adminCreateQboTagBodyNameMax = 64;
+
+export const AdminCreateQboTagBody = zod.object({
+  name: zod.string().min(1).max(adminCreateQboTagBodyNameMax),
+  color: zod.string().nullish(),
+});
+
+/**
+ * @summary Update a QBO tag
+ */
+export const AdminUpdateQboTagParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+export const adminUpdateQboTagBodyNameMax = 64;
+
+export const AdminUpdateQboTagBody = zod.object({
+  name: zod.string().min(1).max(adminUpdateQboTagBodyNameMax).optional(),
+  color: zod.string().nullish(),
+  active: zod.boolean().optional(),
+});
+
+export const AdminUpdateQboTagResponse = zod.object({
+  id: zod.string().uuid(),
+  name: zod.string(),
+  color: zod.string().nullish(),
+  active: zod.boolean(),
+});
+
+/**
+ * @summary Delete a QBO tag
+ */
+export const AdminDeleteQboTagParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+/**
+ * Non-admin endpoint that returns active org-wide QBO tags so the
+Report Tag Picker on report-detail pages can show the catalog to
+employees and finance users without granting them admin scope.
+Inactive tags are filtered out — admins manage those via
+`GET /admin/qbo-tags`.
+
+ * @summary List active QBO tags (catalog) for the report tag picker
+ */
+export const ListActiveQboTagsResponseItem = zod.object({
+  id: zod.string().uuid(),
+  name: zod.string(),
+  color: zod.string().nullish(),
+  active: zod.boolean(),
+});
+export const ListActiveQboTagsResponse = zod.array(
+  ListActiveQboTagsResponseItem,
+);
+
+/**
+ * @summary List the QBO tags applied to a report
+ */
+export const ListReportTagsParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+export const ListReportTagsResponseItem = zod.object({
+  id: zod.string().uuid(),
+  name: zod.string(),
+  color: zod.string().nullish(),
+  active: zod.boolean(),
+});
+export const ListReportTagsResponse = zod.array(ListReportTagsResponseItem);
+
+/**
+ * @summary Replace the set of QBO tags applied to a report
+ */
+export const SetReportTagsParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+export const SetReportTagsBody = zod.object({
+  tagIds: zod.array(zod.string().uuid()),
+});
+
+export const SetReportTagsResponseItem = zod.object({
+  id: zod.string().uuid(),
+  name: zod.string(),
+  color: zod.string().nullish(),
+  active: zod.boolean(),
+});
+export const SetReportTagsResponse = zod.array(SetReportTagsResponseItem);
 
 /**
  * @summary List manager delegations for the org (active or all)
@@ -493,12 +918,20 @@ export const adminAuditLogQueryLimitMax = 500;
 
 export const AdminAuditLogQueryParams = zod.object({
   reportId: zod.coerce.string().uuid().optional(),
+  category: zod
+    .enum(["report", "qbo"])
+    .optional()
+    .describe(
+      "Filter content edits by category. `report` returns report\/line-item\/receipt edits; `qbo` returns QBO config\/tag\/mapping\/posting events. Approval rows are included only when `category=report` or omitted.",
+    ),
   limit: zod.coerce
     .number()
     .min(1)
     .max(adminAuditLogQueryLimitMax)
     .default(adminAuditLogQueryLimitDefault),
 });
+
+export const adminAuditLogResponseContentOneCategoryDefault = `report`;
 
 export const AdminAuditLogResponseItem = zod
   .object({
@@ -580,7 +1013,13 @@ export const AdminAuditLogResponseItem = zod
         zod
           .object({
             id: zod.string().uuid(),
-            reportId: zod.string().uuid(),
+            reportId: zod
+              .string()
+              .uuid()
+              .nullable()
+              .describe(
+                "Null for QBO config\/tag\/mapping\/posting events that are not tied to a single report.",
+              ),
             actor: zod.object({
               id: zod.string().uuid(),
               fullName: zod.string(),
@@ -607,7 +1046,18 @@ export const AdminAuditLogResponseItem = zod
                 ]),
               )
               .min(1),
-            entityType: zod.enum(["report", "line_item", "receipt"]),
+            category: zod
+              .enum(["report", "qbo"])
+              .default(adminAuditLogResponseContentOneCategoryDefault),
+            entityType: zod.enum([
+              "report",
+              "line_item",
+              "receipt",
+              "qbo_config",
+              "qbo_tag",
+              "qbo_mapping",
+              "qbo_posting",
+            ]),
             entityId: zod.string().uuid(),
             action: zod.enum(["created", "updated", "deleted"]),
             fieldDiffs: zod.array(
@@ -624,7 +1074,7 @@ export const AdminAuditLogResponseItem = zod
             createdAt: zod.coerce.date(),
           })
           .describe(
-            "A field-level content edit on a report or one of its children (line item, receipt). Approval\/status transitions live in `ApprovalAction`; merge them via `ChangeFeedItem`.",
+            "A field-level content edit on a report or one of its children (line item, receipt) — or, when `category=qbo`, a change to an org-wide QBO config, tag, GL mapping, or posting event. Approval\/status transitions live in `ApprovalAction`; merge them via `ChangeFeedItem`.",
           ),
         zod.null(),
       ])
@@ -790,6 +1240,18 @@ export const GetReportResponse = zod.object({
     .describe(
       'True when at least one field-level content edit has been recorded \*after\* the most recent approval action on this report (or after creation when no approvals exist yet, except for the initial draft state). Surfaces an \"Edited since last approval\" banner on the manager \/ finance review pages so reviewers can see a re-edit happened without forcing a status auto-reset.',
     ),
+  tags: zod
+    .array(
+      zod.object({
+        id: zod.string().uuid(),
+        name: zod.string(),
+        color: zod.string().nullish(),
+        active: zod.boolean(),
+      }),
+    )
+    .describe(
+      "QBO tags currently applied to this report. Sent on the next JournalEntry post.",
+    ),
 });
 
 /**
@@ -886,6 +1348,18 @@ export const UpdateReportResponse = zod.object({
     .describe(
       'True when at least one field-level content edit has been recorded \*after\* the most recent approval action on this report (or after creation when no approvals exist yet, except for the initial draft state). Surfaces an \"Edited since last approval\" banner on the manager \/ finance review pages so reviewers can see a re-edit happened without forcing a status auto-reset.',
     ),
+  tags: zod
+    .array(
+      zod.object({
+        id: zod.string().uuid(),
+        name: zod.string(),
+        color: zod.string().nullish(),
+        active: zod.boolean(),
+      }),
+    )
+    .describe(
+      "QBO tags currently applied to this report. Sent on the next JournalEntry post.",
+    ),
 });
 
 /**
@@ -980,6 +1454,18 @@ export const SubmitReportResponse = zod.object({
     .describe(
       'True when at least one field-level content edit has been recorded \*after\* the most recent approval action on this report (or after creation when no approvals exist yet, except for the initial draft state). Surfaces an \"Edited since last approval\" banner on the manager \/ finance review pages so reviewers can see a re-edit happened without forcing a status auto-reset.',
     ),
+  tags: zod
+    .array(
+      zod.object({
+        id: zod.string().uuid(),
+        name: zod.string(),
+        color: zod.string().nullish(),
+        active: zod.boolean(),
+      }),
+    )
+    .describe(
+      "QBO tags currently applied to this report. Sent on the next JournalEntry post.",
+    ),
 });
 
 /**
@@ -1066,6 +1552,18 @@ export const RecallReportResponse = zod.object({
     .boolean()
     .describe(
       'True when at least one field-level content edit has been recorded \*after\* the most recent approval action on this report (or after creation when no approvals exist yet, except for the initial draft state). Surfaces an \"Edited since last approval\" banner on the manager \/ finance review pages so reviewers can see a re-edit happened without forcing a status auto-reset.',
+    ),
+  tags: zod
+    .array(
+      zod.object({
+        id: zod.string().uuid(),
+        name: zod.string(),
+        color: zod.string().nullish(),
+        active: zod.boolean(),
+      }),
+    )
+    .describe(
+      "QBO tags currently applied to this report. Sent on the next JournalEntry post.",
     ),
 });
 
@@ -1159,6 +1657,18 @@ export const VoidReportResponse = zod.object({
     .describe(
       'True when at least one field-level content edit has been recorded \*after\* the most recent approval action on this report (or after creation when no approvals exist yet, except for the initial draft state). Surfaces an \"Edited since last approval\" banner on the manager \/ finance review pages so reviewers can see a re-edit happened without forcing a status auto-reset.',
     ),
+  tags: zod
+    .array(
+      zod.object({
+        id: zod.string().uuid(),
+        name: zod.string(),
+        color: zod.string().nullish(),
+        active: zod.boolean(),
+      }),
+    )
+    .describe(
+      "QBO tags currently applied to this report. Sent on the next JournalEntry post.",
+    ),
 });
 
 /**
@@ -1168,6 +1678,8 @@ export const VoidReportResponse = zod.object({
 export const GetReportTimelineParams = zod.object({
   id: zod.coerce.string().uuid(),
 });
+
+export const getReportTimelineResponseContentOneCategoryDefault = `report`;
 
 export const GetReportTimelineResponseItem = zod
   .object({
@@ -1249,7 +1761,13 @@ export const GetReportTimelineResponseItem = zod
         zod
           .object({
             id: zod.string().uuid(),
-            reportId: zod.string().uuid(),
+            reportId: zod
+              .string()
+              .uuid()
+              .nullable()
+              .describe(
+                "Null for QBO config\/tag\/mapping\/posting events that are not tied to a single report.",
+              ),
             actor: zod.object({
               id: zod.string().uuid(),
               fullName: zod.string(),
@@ -1276,7 +1794,18 @@ export const GetReportTimelineResponseItem = zod
                 ]),
               )
               .min(1),
-            entityType: zod.enum(["report", "line_item", "receipt"]),
+            category: zod
+              .enum(["report", "qbo"])
+              .default(getReportTimelineResponseContentOneCategoryDefault),
+            entityType: zod.enum([
+              "report",
+              "line_item",
+              "receipt",
+              "qbo_config",
+              "qbo_tag",
+              "qbo_mapping",
+              "qbo_posting",
+            ]),
             entityId: zod.string().uuid(),
             action: zod.enum(["created", "updated", "deleted"]),
             fieldDiffs: zod.array(
@@ -1293,7 +1822,7 @@ export const GetReportTimelineResponseItem = zod
             createdAt: zod.coerce.date(),
           })
           .describe(
-            "A field-level content edit on a report or one of its children (line item, receipt). Approval\/status transitions live in `ApprovalAction`; merge them via `ChangeFeedItem`.",
+            "A field-level content edit on a report or one of its children (line item, receipt) — or, when `category=qbo`, a change to an org-wide QBO config, tag, GL mapping, or posting event. Approval\/status transitions live in `ApprovalAction`; merge them via `ChangeFeedItem`.",
           ),
         zod.null(),
       ])
@@ -1622,6 +2151,18 @@ export const ManagerApproveResponse = zod.object({
     .describe(
       'True when at least one field-level content edit has been recorded \*after\* the most recent approval action on this report (or after creation when no approvals exist yet, except for the initial draft state). Surfaces an \"Edited since last approval\" banner on the manager \/ finance review pages so reviewers can see a re-edit happened without forcing a status auto-reset.',
     ),
+  tags: zod
+    .array(
+      zod.object({
+        id: zod.string().uuid(),
+        name: zod.string(),
+        color: zod.string().nullish(),
+        active: zod.boolean(),
+      }),
+    )
+    .describe(
+      "QBO tags currently applied to this report. Sent on the next JournalEntry post.",
+    ),
 });
 
 export const ManagerRequestChangesParams = zod.object({
@@ -1710,6 +2251,18 @@ export const ManagerRequestChangesResponse = zod.object({
     .describe(
       'True when at least one field-level content edit has been recorded \*after\* the most recent approval action on this report (or after creation when no approvals exist yet, except for the initial draft state). Surfaces an \"Edited since last approval\" banner on the manager \/ finance review pages so reviewers can see a re-edit happened without forcing a status auto-reset.',
     ),
+  tags: zod
+    .array(
+      zod.object({
+        id: zod.string().uuid(),
+        name: zod.string(),
+        color: zod.string().nullish(),
+        active: zod.boolean(),
+      }),
+    )
+    .describe(
+      "QBO tags currently applied to this report. Sent on the next JournalEntry post.",
+    ),
 });
 
 export const ManagerRejectParams = zod.object({
@@ -1797,6 +2350,18 @@ export const ManagerRejectResponse = zod.object({
     .boolean()
     .describe(
       'True when at least one field-level content edit has been recorded \*after\* the most recent approval action on this report (or after creation when no approvals exist yet, except for the initial draft state). Surfaces an \"Edited since last approval\" banner on the manager \/ finance review pages so reviewers can see a re-edit happened without forcing a status auto-reset.',
+    ),
+  tags: zod
+    .array(
+      zod.object({
+        id: zod.string().uuid(),
+        name: zod.string(),
+        color: zod.string().nullish(),
+        active: zod.boolean(),
+      }),
+    )
+    .describe(
+      "QBO tags currently applied to this report. Sent on the next JournalEntry post.",
     ),
 });
 
@@ -1938,6 +2503,18 @@ export const FinanceApproveResponse = zod.object({
     .describe(
       'True when at least one field-level content edit has been recorded \*after\* the most recent approval action on this report (or after creation when no approvals exist yet, except for the initial draft state). Surfaces an \"Edited since last approval\" banner on the manager \/ finance review pages so reviewers can see a re-edit happened without forcing a status auto-reset.',
     ),
+  tags: zod
+    .array(
+      zod.object({
+        id: zod.string().uuid(),
+        name: zod.string(),
+        color: zod.string().nullish(),
+        active: zod.boolean(),
+      }),
+    )
+    .describe(
+      "QBO tags currently applied to this report. Sent on the next JournalEntry post.",
+    ),
 });
 
 export const FinanceRejectParams = zod.object({
@@ -2026,6 +2603,18 @@ export const FinanceRejectResponse = zod.object({
     .describe(
       'True when at least one field-level content edit has been recorded \*after\* the most recent approval action on this report (or after creation when no approvals exist yet, except for the initial draft state). Surfaces an \"Edited since last approval\" banner on the manager \/ finance review pages so reviewers can see a re-edit happened without forcing a status auto-reset.',
     ),
+  tags: zod
+    .array(
+      zod.object({
+        id: zod.string().uuid(),
+        name: zod.string(),
+        color: zod.string().nullish(),
+        active: zod.boolean(),
+      }),
+    )
+    .describe(
+      "QBO tags currently applied to this report. Sent on the next JournalEntry post.",
+    ),
 });
 
 /**
@@ -2043,6 +2632,12 @@ export const GetGlPreviewResponse = zod.object({
   debits: zod.array(
     zod.object({
       account: zod.string(),
+      accountId: zod
+        .string()
+        .nullish()
+        .describe(
+          "Durable QBO Chart-of-Accounts Id, when the GL mapping has been linked to a real account. Posting payloads prefer this over the name because Intuit matches AccountRef by `value` (Id).",
+        ),
       category: zod.string(),
       amount: zod.string(),
     }),
@@ -2050,6 +2645,12 @@ export const GetGlPreviewResponse = zod.object({
   credits: zod.array(
     zod.object({
       account: zod.string(),
+      accountId: zod
+        .string()
+        .nullish()
+        .describe(
+          "Durable QBO Chart-of-Accounts Id, when the GL mapping has been linked to a real account. Posting payloads prefer this over the name because Intuit matches AccountRef by `value` (Id).",
+        ),
       category: zod.string(),
       amount: zod.string(),
     }),
@@ -2149,6 +2750,18 @@ export const PostToQuickbooksResponse = zod.object({
       .describe(
         'True when at least one field-level content edit has been recorded \*after\* the most recent approval action on this report (or after creation when no approvals exist yet, except for the initial draft state). Surfaces an \"Edited since last approval\" banner on the manager \/ finance review pages so reviewers can see a re-edit happened without forcing a status auto-reset.',
       ),
+    tags: zod
+      .array(
+        zod.object({
+          id: zod.string().uuid(),
+          name: zod.string(),
+          color: zod.string().nullish(),
+          active: zod.boolean(),
+        }),
+      )
+      .describe(
+        "QBO tags currently applied to this report. Sent on the next JournalEntry post.",
+      ),
   }),
   journalId: zod.string().nullish(),
   status: zod.enum(["posted", "error"]),
@@ -2240,6 +2853,18 @@ export const RetryQuickbooksPostResponse = zod.object({
       .boolean()
       .describe(
         'True when at least one field-level content edit has been recorded \*after\* the most recent approval action on this report (or after creation when no approvals exist yet, except for the initial draft state). Surfaces an \"Edited since last approval\" banner on the manager \/ finance review pages so reviewers can see a re-edit happened without forcing a status auto-reset.',
+      ),
+    tags: zod
+      .array(
+        zod.object({
+          id: zod.string().uuid(),
+          name: zod.string(),
+          color: zod.string().nullish(),
+          active: zod.boolean(),
+        }),
+      )
+      .describe(
+        "QBO tags currently applied to this report. Sent on the next JournalEntry post.",
       ),
   }),
   journalId: zod.string().nullish(),

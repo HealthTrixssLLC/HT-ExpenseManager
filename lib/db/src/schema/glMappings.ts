@@ -20,6 +20,7 @@ export const glMappingsTable = pgTable(
     // QuickBooks-side account name.
     qboAccount: text("qbo_account").notNull(),
     qboAccountId: text("qbo_account_id"),
+    qboAccountType: text("qbo_account_type"),
     active: boolean("active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
