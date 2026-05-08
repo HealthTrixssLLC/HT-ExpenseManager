@@ -15,6 +15,7 @@ export interface QboConnection {
   /** "stub" = simulated demo connection. "real" = the org has stored Intuit Client credentials (live posting requires status=connected). */
   mode: QboConnectionMode;
   environment: QboConnectionEnvironment;
+  encryptionKeyConfigured: boolean;
   connectionHealth: QboConnectionConnectionHealth;
   /** @nullable */
   realmId?: string | null;

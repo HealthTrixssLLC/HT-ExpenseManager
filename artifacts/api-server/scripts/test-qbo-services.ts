@@ -52,6 +52,7 @@ const {
   runTokenRefreshSweep,
   getConnectionHealth,
   postReportToQbo,
+  runQboPreflight,
 } = qboMod;
 
 const encMod = await import("../src/lib/encryption.js");
@@ -400,6 +401,94 @@ await test("saveQboCredentials with null clears tokens AND resets mode/status to
   assert.equal(cleared.mode, "stub");
   assert.equal(cleared.status, "disconnected");
   assert.equal(cleared.connectionHealth, "disconnected");
+});
+
+await test("runQboPreflight reports missing credentials as warn", async () => {
+  const { orgId } = await makeOrg("preflightEmpty");
+  const result = await runQboPreflight({
+    orgId,
+    resolvedRedirectUri: "https://example.com/cb",
+    fetchFn: (async () => new Response("", { status: 200 })) as typeof fetch,
+  });
+  assert.equal(result.encryptionKeyConfigured, true);
+  assert.equal(result.resolvedRedirectUri, "https://example.com/cb");
+  const stored = result.checks.find((c) => c.id === "stored_credentials");
+  assert.ok(stored, "stored_credentials check missing");
+  assert.equal(stored.status, "warn");
+  const redirect = result.checks.find((c) => c.id === "redirect_uri");
+  assert.ok(redirect && redirect.detail?.includes("https://example.com/cb"));
+});
+
+await test("runQboPreflight flags undecryptable credentials as fail", async () => {
+  const { orgId } = await makeOrg("preflightBadCipher");
+  await ensureConnectionRow(orgId);
+  await db
+    .update(qboConnectionTable)
+    .set({
+      mode: "real",
+      clientIdEncrypted: "not-a-real-ciphertext",
+      clientSecretEncrypted: "also-not-a-ciphertext",
+    })
+    .where(eq(qboConnectionTable.orgId, orgId));
+  const result = await runQboPreflight({
+    orgId,
+    resolvedRedirectUri: "https://example.com/cb",
+    fetchFn: (async () => new Response("", { status: 200 })) as typeof fetch,
+  });
+  const stored = result.checks.find((c) => c.id === "stored_credentials");
+  assert.equal(stored?.status, "fail");
+  assert.ok(stored?.detail?.toLowerCase().includes("decrypt"));
+});
+
+await test("runQboPreflight distinguishes invalid_client vs invalid_grant", async () => {
+  const { orgId } = await makeOrg("preflightProbeBad");
+  await saveQboCredentials({
+    orgId,
+    clientId: "BAD-CLIENT",
+    clientSecret: "BAD-SECRET",
+    environment: "sandbox",
+  });
+  const badClientFetch: typeof fetch = (async (_url, init) => {
+    if (init?.method === "POST") {
+      return new Response(JSON.stringify({ error: "invalid_client" }), {
+        status: 401,
+      });
+    }
+    return new Response("", { status: 200 });
+  }) as typeof fetch;
+  const badResult = await runQboPreflight({
+    orgId,
+    resolvedRedirectUri: "https://example.com/cb",
+    fetchFn: badClientFetch,
+  });
+  const badProbe = badResult.checks.find((c) => c.id === "client_id_recognized");
+  assert.equal(badProbe?.status, "fail");
+  assert.ok(badProbe?.detail?.toLowerCase().includes("invalid_client"));
+
+  const { orgId: orgId2 } = await makeOrg("preflightProbeOk");
+  await saveQboCredentials({
+    orgId: orgId2,
+    clientId: "GOOD-CLIENT",
+    clientSecret: "GOOD-SECRET",
+    environment: "sandbox",
+  });
+  const goodClientFetch: typeof fetch = (async (_url, init) => {
+    if (init?.method === "POST") {
+      return new Response(JSON.stringify({ error: "invalid_grant" }), {
+        status: 400,
+      });
+    }
+    return new Response("", { status: 200 });
+  }) as typeof fetch;
+  const goodResult = await runQboPreflight({
+    orgId: orgId2,
+    resolvedRedirectUri: "https://example.com/cb",
+    fetchFn: goodClientFetch,
+  });
+  const goodProbe = goodResult.checks.find(
+    (c) => c.id === "client_id_recognized",
+  );
+  assert.equal(goodProbe?.status, "pass");
 });
 
 await test("getConnectionHealth surfaces lastTokenRefreshError on refresh_failed", async () => {

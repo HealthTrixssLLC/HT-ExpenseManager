@@ -285,6 +285,7 @@ export interface QboConnection {
   /** "stub" = simulated demo connection. "real" = the org has stored Intuit Client credentials (live posting requires status=connected). */
   mode: QboConnectionMode;
   environment: QboConnectionEnvironment;
+  encryptionKeyConfigured: boolean;
   connectionHealth: QboConnectionConnectionHealth;
   /** @nullable */
   realmId?: string | null;
@@ -319,6 +320,50 @@ export interface QboConnection {
   defaultPayableAccountId?: string | null;
   /** @nullable */
   defaultPayableAccountName?: string | null;
+}
+
+export type QboPreflightCheckStatus =
+  (typeof QboPreflightCheckStatus)[keyof typeof QboPreflightCheckStatus];
+
+export const QboPreflightCheckStatus = {
+  pass: "pass",
+  warn: "warn",
+  fail: "fail",
+} as const;
+
+/**
+ * A single line in the preflight checklist.
+ */
+export interface QboPreflightCheck {
+  /** Stable identifier for the check (e.g. encryption_key). */
+  id: string;
+  /** Human-readable label rendered in the UI. */
+  label: string;
+  status: QboPreflightCheckStatus;
+  /**
+   * Optional explanatory text shown below the row.
+   * @nullable
+   */
+  detail?: string | null;
+}
+
+export type QboPreflightResultEnvironment =
+  (typeof QboPreflightResultEnvironment)[keyof typeof QboPreflightResultEnvironment];
+
+export const QboPreflightResultEnvironment = {
+  sandbox: "sandbox",
+  production: "production",
+} as const;
+
+/**
+ * Result of a dry-run preflight against the org's saved QBO setup. Used by the Configuration card "Test configuration" button.
+ */
+export interface QboPreflightResult {
+  encryptionKeyConfigured: boolean;
+  /** The exact OAuth redirect URI the server will send to Intuit. Must be registered verbatim in the Intuit developer portal. */
+  resolvedRedirectUri: string;
+  environment: QboPreflightResultEnvironment;
+  checks: QboPreflightCheck[];
 }
 
 export type UpdateQboConnectionBodyAction =

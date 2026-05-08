@@ -56,6 +56,7 @@ import type {
   QboOauthStartResponse,
   QboPostingHistoryItem,
   QboPostingPreferencesBody,
+  QboPreflightResult,
   QboTag,
   Receipt,
   ReceiptDownloadUrlResponse,
@@ -2166,6 +2167,97 @@ export const useAdminStartQboOauth = <
   TContext
 > => {
   return useMutation(getAdminStartQboOauthMutationOptions(options));
+};
+
+/**
+ * @summary Run a dry-run validation of the org's QBO setup BEFORE the OAuth
+handshake. Surfaces a checklist of pass/warn/fail items so the
+admin can self-diagnose configuration issues (missing encryption
+key, undecryptable stored credentials, unreachable Intuit
+environment, unrecognized Client ID, etc.).
+
+ */
+export const getAdminPreflightQboConnectionUrl = () => {
+  return `/api/admin/qbo-connection/preflight`;
+};
+
+export const adminPreflightQboConnection = async (
+  options?: RequestInit,
+): Promise<QboPreflightResult> => {
+  return customFetch<QboPreflightResult>(getAdminPreflightQboConnectionUrl(), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getAdminPreflightQboConnectionMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminPreflightQboConnection>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminPreflightQboConnection>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["adminPreflightQboConnection"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminPreflightQboConnection>>,
+    void
+  > = () => {
+    return adminPreflightQboConnection(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminPreflightQboConnectionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminPreflightQboConnection>>
+>;
+
+export type AdminPreflightQboConnectionMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Run a dry-run validation of the org's QBO setup BEFORE the OAuth
+handshake. Surfaces a checklist of pass/warn/fail items so the
+admin can self-diagnose configuration issues (missing encryption
+key, undecryptable stored credentials, unreachable Intuit
+environment, unrecognized Client ID, etc.).
+
+ */
+export const useAdminPreflightQboConnection = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminPreflightQboConnection>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminPreflightQboConnection>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getAdminPreflightQboConnectionMutationOptions(options));
 };
 
 /**

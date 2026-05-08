@@ -58,6 +58,7 @@ import {
   listTags,
   recordQboAudit,
   refreshOrgTokensIfNeeded,
+  runQboPreflight,
   savePostingPreferences,
   saveQboCredentials,
   startQboOauth,
@@ -622,6 +623,20 @@ router.post(
         err instanceof Error ? err.message : String(err),
       );
     }
+  },
+);
+
+// POST /admin/qbo-connection/preflight — dry-run validation (encryption key,
+// decryptable creds, environment reachability, redirect URI, optional Client
+// ID probe). Read-only; safe to retry.
+router.post(
+  "/admin/qbo-connection/preflight",
+  requireRole(...ADMIN_ROLES),
+  async (req, res): Promise<void> => {
+    const orgId = req.auth!.user.orgId;
+    const redirectUri = resolveQboRedirectUri(req);
+    const result = await runQboPreflight({ orgId, resolvedRedirectUri: redirectUri });
+    res.json(result);
   },
 );
 

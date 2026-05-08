@@ -414,6 +414,7 @@ export const AdminGetQboConnectionResponse = zod.object({
       '\"stub\" = simulated demo connection. \"real\" = the org has stored Intuit Client credentials (live posting requires status=connected).',
     ),
   environment: zod.enum(["sandbox", "production"]),
+  encryptionKeyConfigured: zod.boolean(),
   connectionHealth: zod.enum([
     "healthy",
     "refresh_failed",
@@ -454,6 +455,7 @@ export const AdminConnectQboStubResponse = zod.object({
       '\"stub\" = simulated demo connection. \"real\" = the org has stored Intuit Client credentials (live posting requires status=connected).',
     ),
   environment: zod.enum(["sandbox", "production"]),
+  encryptionKeyConfigured: zod.boolean(),
   connectionHealth: zod.enum([
     "healthy",
     "refresh_failed",
@@ -491,6 +493,7 @@ export const AdminDisconnectQboResponse = zod.object({
       '\"stub\" = simulated demo connection. \"real\" = the org has stored Intuit Client credentials (live posting requires status=connected).',
     ),
   environment: zod.enum(["sandbox", "production"]),
+  encryptionKeyConfigured: zod.boolean(),
   connectionHealth: zod.enum([
     "healthy",
     "refresh_failed",
@@ -544,6 +547,7 @@ export const AdminSaveQboCredentialsResponse = zod.object({
       '\"stub\" = simulated demo connection. \"real\" = the org has stored Intuit Client credentials (live posting requires status=connected).',
     ),
   environment: zod.enum(["sandbox", "production"]),
+  encryptionKeyConfigured: zod.boolean(),
   connectionHealth: zod.enum([
     "healthy",
     "refresh_failed",
@@ -588,6 +592,7 @@ export const AdminSaveQboPostingPreferencesResponse = zod.object({
       '\"stub\" = simulated demo connection. \"real\" = the org has stored Intuit Client credentials (live posting requires status=connected).',
     ),
   environment: zod.enum(["sandbox", "production"]),
+  encryptionKeyConfigured: zod.boolean(),
   connectionHealth: zod.enum([
     "healthy",
     "refresh_failed",
@@ -622,6 +627,45 @@ export const AdminStartQboOauthResponse = zod.object({
 });
 
 /**
+ * @summary Run a dry-run validation of the org's QBO setup BEFORE the OAuth
+handshake. Surfaces a checklist of pass/warn/fail items so the
+admin can self-diagnose configuration issues (missing encryption
+key, undecryptable stored credentials, unreachable Intuit
+environment, unrecognized Client ID, etc.).
+
+ */
+export const AdminPreflightQboConnectionResponse = zod
+  .object({
+    encryptionKeyConfigured: zod.boolean(),
+    resolvedRedirectUri: zod
+      .string()
+      .describe(
+        "The exact OAuth redirect URI the server will send to Intuit. Must be registered verbatim in the Intuit developer portal.",
+      ),
+    environment: zod.enum(["sandbox", "production"]),
+    checks: zod.array(
+      zod
+        .object({
+          id: zod
+            .string()
+            .describe("Stable identifier for the check (e.g. encryption_key)."),
+          label: zod
+            .string()
+            .describe("Human-readable label rendered in the UI."),
+          status: zod.enum(["pass", "warn", "fail"]),
+          detail: zod
+            .string()
+            .nullish()
+            .describe("Optional explanatory text shown below the row."),
+        })
+        .describe("A single line in the preflight checklist."),
+    ),
+  })
+  .describe(
+    'Result of a dry-run preflight against the org\'s saved QBO setup. Used by the Configuration card \"Test configuration\" button.',
+  );
+
+/**
  * @summary Force a token refresh against Intuit
  */
 export const AdminRefreshQboTokenResponse = zod.object({
@@ -632,6 +676,7 @@ export const AdminRefreshQboTokenResponse = zod.object({
       '\"stub\" = simulated demo connection. \"real\" = the org has stored Intuit Client credentials (live posting requires status=connected).',
     ),
   environment: zod.enum(["sandbox", "production"]),
+  encryptionKeyConfigured: zod.boolean(),
   connectionHealth: zod.enum([
     "healthy",
     "refresh_failed",

@@ -31,10 +31,20 @@ router.get(
     const state = (req.query["state"] as string | undefined) ?? "";
     const realmId = (req.query["realmId"] as string | undefined) ?? "";
     const errorParam = (req.query["error"] as string | undefined) ?? "";
+    const errorDescription =
+      (req.query["error_description"] as string | undefined) ?? "";
 
     if (errorParam) {
+      // Surface Intuit's underlying error so the admin sees actionable text
+      // (e.g. "invalid_client: Client authentication failed") instead of the
+      // generic "connection failed" fallback. Include realmId when present
+      // so the admin can confirm which company they tried to authorize.
+      const parts = [errorParam];
+      if (errorDescription) parts.push(errorDescription);
+      if (realmId) parts.push(`realmId=${realmId}`);
+      const message = parts.join(": ").replace(/^([^:]+): \1: /, "$1: ");
       res.redirect(
-        `${ADMIN_QBO_PATH}?qboStatus=error&qboMessage=${encodeURIComponent(errorParam)}`,
+        `${ADMIN_QBO_PATH}?qboStatus=error&qboMessage=${encodeURIComponent(message)}`,
       );
       return;
     }

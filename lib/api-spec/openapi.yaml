@@ -436,6 +436,23 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/QboOauthStartResponse" }
 
+  /admin/qbo-connection/preflight:
+    post:
+      operationId: adminPreflightQboConnection
+      tags: [admin]
+      summary: |
+        Run a dry-run validation of the org's QBO setup BEFORE the OAuth
+        handshake. Surfaces a checklist of pass/warn/fail items so the
+        admin can self-diagnose configuration issues (missing encryption
+        key, undecryptable stored credentials, unreachable Intuit
+        environment, unrecognized Client ID, etc.).
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QboPreflightResult" }
+
   /admin/qbo-connection/refresh-token:
     post:
       operationId: adminRefreshQboToken
@@ -1635,6 +1652,10 @@ components:
         environment:
           type: string
           enum: [sandbox, production]
+        # True iff QBO_CREDENTIAL_ENCRYPTION_KEY is set on the server. When
+        # false, the admin UI surfaces a prominent banner: credentials
+        # cannot be saved until the env var is configured.
+        encryptionKeyConfigured: { type: boolean }
         connectionHealth:
           type: string
           enum: [healthy, refresh_failed, reconnect_required, disconnected]
@@ -1664,10 +1685,55 @@ components:
         - status
         - mode
         - environment
+        - encryptionKeyConfigured
         - connectionHealth
         - hasClientId
         - hasClientSecret
         - autoPostOnApproval
+
+    QboPreflightCheckStatus:
+      type: string
+      enum: [pass, warn, fail]
+
+    QboPreflightCheck:
+      type: object
+      description: A single line in the preflight checklist.
+      properties:
+        id:
+          type: string
+          description: Stable identifier for the check (e.g. encryption_key).
+        label:
+          type: string
+          description: Human-readable label rendered in the UI.
+        status: { $ref: "#/components/schemas/QboPreflightCheckStatus" }
+        detail:
+          type: ["string", "null"]
+          description: Optional explanatory text shown below the row.
+      required: [id, label, status]
+
+    QboPreflightResult:
+      type: object
+      description: >-
+        Result of a dry-run preflight against the org's saved QBO setup.
+        Used by the Configuration card "Test configuration" button.
+      properties:
+        encryptionKeyConfigured: { type: boolean }
+        resolvedRedirectUri:
+          type: string
+          description: >-
+            The exact OAuth redirect URI the server will send to Intuit.
+            Must be registered verbatim in the Intuit developer portal.
+        environment:
+          type: string
+          enum: [sandbox, production]
+        checks:
+          type: array
+          items: { $ref: "#/components/schemas/QboPreflightCheck" }
+      required:
+        - encryptionKeyConfigured
+        - resolvedRedirectUri
+        - environment
+        - checks
 
     UpdateQboConnectionBody:
       type: object

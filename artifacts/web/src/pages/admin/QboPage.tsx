@@ -8,6 +8,7 @@ import {
   getAdminGetQboConnectionHealthQueryKey,
   useAdminConnectQboStub,
   useAdminDisconnectQbo,
+  useAdminPreflightQboConnection,
   useAdminSaveQboCredentials,
   useAdminSaveQboPostingPreferences,
   useAdminStartQboOauth,
@@ -15,6 +16,7 @@ import {
   useAdminListQboPostingHistory,
   getAdminListQboPostingHistoryQueryKey,
   type QboConnection,
+  type QboPreflightResult,
 } from "@workspace/api-client-react";
 import { HtCard, HtCardHeader } from "@/components/brand/Card";
 import { HelpLink } from "@/components/help/HelpLink";
@@ -40,13 +42,16 @@ import {
 } from "@/components/ui/table";
 import {
   AlertCircle,
+  AlertTriangle,
   CheckCircle2,
+  Copy,
   ExternalLink,
   Link2,
   RefreshCcw,
   RotateCcw,
   ShieldCheck,
   Unlink,
+  XCircle,
   Zap,
 } from "lucide-react";
 import { formatDateTime } from "@/lib/format";
@@ -215,11 +220,14 @@ function CredentialsCard({
   );
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
-  const [showCallback, setShowCallback] = useState(false);
+  const [savedAt, setSavedAt] = useState<Date | null>(null);
+  const [copyState, setCopyState] = useState<"idle" | "copied">("idle");
+  const [preflight, setPreflight] = useState<QboPreflightResult | null>(null);
 
   useEffect(() => setEnvironment(conn.environment), [conn.environment]);
 
   const save = useAdminSaveQboCredentials();
+  const runPreflight = useAdminPreflightQboConnection();
 
   const handleSave = () => {
     save.mutate(
@@ -234,10 +242,28 @@ function CredentialsCard({
         onSuccess: () => {
           setClientId("");
           setClientSecret("");
+          setSavedAt(new Date());
+          setPreflight(null);
           onSaved();
         },
       },
     );
+  };
+
+  const handleCopyRedirect = async () => {
+    try {
+      await navigator.clipboard.writeText(displayedRedirectUri);
+      setCopyState("copied");
+      setTimeout(() => setCopyState("idle"), 1500);
+    } catch {
+      /* clipboard blocked — admin can still triple-click to select */
+    }
+  };
+
+  const handlePreflight = () => {
+    runPreflight.mutate(undefined, {
+      onSuccess: (result) => setPreflight(result),
+    });
   };
 
   const handleClear = () => {
@@ -250,11 +276,21 @@ function CredentialsCard({
     }
     save.mutate(
       { data: { environment, clientId: null, clientSecret: null } },
-      { onSuccess: () => onSaved() },
+      {
+        onSuccess: () => {
+          setSavedAt(new Date());
+          setPreflight(null);
+          onSaved();
+        },
+      },
     );
   };
 
   const redirectUri = computeRedirectUri();
+  // Prefer the server-resolved value once a preflight has been run — this
+  // accounts for proxy / Host-header edge cases where the URI the API will
+  // actually send to Intuit can differ from what the browser computes.
+  const displayedRedirectUri = preflight?.resolvedRedirectUri ?? redirectUri;
 
   return (
     <HtCard data-testid="card-qbo-credentials">
@@ -263,6 +299,25 @@ function CredentialsCard({
         right={<HelpLink topicId="admin-qbo-config" />}
       />
       <div className="space-y-5 p-6">
+        {!conn.encryptionKeyConfigured ? (
+          <div
+            className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800"
+            data-testid="banner-missing-encryption-key"
+          >
+            <div className="flex items-start gap-2">
+              <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <p className="font-medium">Encryption key is not configured</p>
+                <p className="mt-1 text-xs">
+                  Set <code className="rounded bg-red-100 px-1">QBO_CREDENTIAL_ENCRYPTION_KEY</code>{" "}
+                  on the API server before saving Intuit credentials. Without it,
+                  Client ID/Secret cannot be stored or decrypted.
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         <p className="text-sm text-[var(--ht-ink-3)]">
           Provide your Intuit Developer app credentials. They are encrypted at
           rest and never echoed back. Real-mode posting requires both Client ID
@@ -326,24 +381,31 @@ function CredentialsCard({
         </div>
 
         <div className="rounded-md bg-[var(--ht-bg-2)] p-3 text-xs text-[var(--ht-ink-3)]">
-          <button
-            type="button"
-            className="font-medium text-[var(--ht-ink-2)] underline"
-            onClick={() => setShowCallback((s) => !s)}
-          >
-            {showCallback ? "Hide" : "Show"} the OAuth redirect URI to register
-            on Intuit
-          </button>
-          {showCallback ? (
-            <div className="mt-2 space-y-2">
-              <p>
-                On developer.intuit.com → Keys & OAuth → Redirect URIs, add:
-              </p>
-              <code className="block break-all rounded bg-white p-2 font-mono text-[11px] text-[var(--ht-ink)]">
-                {redirectUri}
-              </code>
-            </div>
-          ) : null}
+          <p className="mb-2 font-medium text-[var(--ht-ink-2)]">
+            OAuth redirect URI to register on Intuit
+          </p>
+          <p>
+            On developer.intuit.com → Keys & OAuth → Redirect URIs, add this
+            exact value (must match character-for-character):
+          </p>
+          <div className="mt-2 flex items-stretch gap-2">
+            <code
+              className="flex-1 break-all rounded bg-white p-2 font-mono text-[11px] text-[var(--ht-ink)]"
+              data-testid="text-redirect-uri"
+            >
+              {displayedRedirectUri}
+            </code>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleCopyRedirect}
+              data-testid="btn-copy-redirect-uri"
+            >
+              <Copy className="mr-1 h-3 w-3" />
+              {copyState === "copied" ? "Copied!" : "Copy"}
+            </Button>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -351,11 +413,21 @@ function CredentialsCard({
             onClick={handleSave}
             disabled={
               save.isPending ||
+              !conn.encryptionKeyConfigured ||
               (!clientId && !clientSecret && environment === conn.environment)
             }
             data-testid="btn-save-credentials"
           >
             {save.isPending ? "Saving…" : "Save credentials"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handlePreflight}
+            disabled={runPreflight.isPending}
+            data-testid="btn-test-configuration"
+          >
+            {runPreflight.isPending ? "Testing…" : "Test configuration"}
           </Button>
           {(conn.hasClientId || conn.hasClientSecret) && (
             <Button
@@ -367,9 +439,62 @@ function CredentialsCard({
               Clear stored credentials
             </Button>
           )}
+          {savedAt ? (
+            <span
+              className="text-xs text-green-700"
+              data-testid="text-saved-at"
+            >
+              Saved at {formatDateTime(savedAt.toISOString())}
+            </span>
+          ) : null}
         </div>
+
+        {preflight ? (
+          <PreflightChecklist result={preflight} />
+        ) : null}
       </div>
     </HtCard>
+  );
+}
+
+// Renders the preflight result: a checklist of pass/warn/fail rows with
+// optional detail text. Used by CredentialsCard's "Test configuration".
+function PreflightChecklist({ result }: { result: QboPreflightResult }) {
+  const iconFor = (status: "pass" | "warn" | "fail") => {
+    if (status === "pass")
+      return <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-600" />;
+    if (status === "warn")
+      return (
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+      );
+    return <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />;
+  };
+  return (
+    <div
+      className="rounded-md border border-[var(--ht-border)] bg-white p-3"
+      data-testid="preflight-checklist"
+    >
+      <p className="mb-2 text-xs font-semibold text-[var(--ht-ink-2)]">
+        Configuration test results ({result.environment})
+      </p>
+      <ul className="space-y-2 text-sm">
+        {result.checks.map((c) => (
+          <li
+            key={c.id}
+            className="flex items-start gap-2"
+            data-testid={`preflight-check-${c.id}`}
+          >
+            {iconFor(c.status)}
+            <div className="space-y-0.5">
+              <p className="text-[var(--ht-ink)]">{c.label}</p>
+              {c.detail ? (
+                <p className="text-xs text-[var(--ht-ink-3)]">{c.detail}</p>
+              ) : null}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

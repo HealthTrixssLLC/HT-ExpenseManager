@@ -54,6 +54,7 @@ import {
   createIntuitAccountingClient,
   describeIntuitError,
   exchangeCodeForTokens,
+  INTUIT_DISCOVERY,
   IntuitApiError,
   refreshAccessToken,
   revokeToken,
@@ -379,6 +380,205 @@ export async function savePostingPreferences(
     .where(eq(qboConnectionTable.orgId, args.orgId))
     .returning();
   return updated;
+}
+
+// ---------------------------------------------------------------------------
+// Preflight: dry-run validation of the org's QBO setup before OAuth.
+// ---------------------------------------------------------------------------
+
+export type QboPreflightCheckStatus = "pass" | "warn" | "fail";
+
+export type QboPreflightCheck = {
+  id: string;
+  label: string;
+  status: QboPreflightCheckStatus;
+  detail?: string | null;
+};
+
+export type QboPreflightResult = {
+  encryptionKeyConfigured: boolean;
+  resolvedRedirectUri: string;
+  environment: QboEnvironment;
+  checks: QboPreflightCheck[];
+};
+
+/**
+ * Run a non-destructive validation of an org's QBO configuration. Designed
+ * to be safe to call from the admin UI's "Test configuration" button — does
+ * NOT mutate any DB row, does NOT trigger an OAuth handshake, and only
+ * makes outbound HTTP calls to Intuit's well-known discovery / token
+ * endpoints (with a deliberately invalid grant for the Client ID probe).
+ */
+export async function runQboPreflight(args: {
+  orgId: string;
+  resolvedRedirectUri: string;
+  fetchFn?: typeof fetch;
+}): Promise<QboPreflightResult> {
+  const fetchImpl = args.fetchFn ?? fetch;
+  const conn = await ensureConnectionRow(args.orgId);
+  const checks: QboPreflightCheck[] = [];
+  const keyConfigured = encryptionAvailable();
+
+  checks.push({
+    id: "encryption_key",
+    label: "Encryption key (QBO_CREDENTIAL_ENCRYPTION_KEY) is configured",
+    status: keyConfigured ? "pass" : "fail",
+    detail: keyConfigured
+      ? null
+      : "Set QBO_CREDENTIAL_ENCRYPTION_KEY on the server before saving credentials.",
+  });
+
+  // Decryption probe: try to round-trip the stored Client ID/Secret through
+  // the encryption module. This catches the "key was rotated since save"
+  // case where the row is non-empty but the ciphertext can no longer be
+  // decoded with the current key.
+  let decryptedClientId: string | null = null;
+  if (!conn.clientIdEncrypted && !conn.clientSecretEncrypted) {
+    checks.push({
+      id: "stored_credentials",
+      label: "Stored Client ID and Client Secret are decryptable",
+      status: "warn",
+      detail:
+        "No credentials stored yet. Save your Intuit Client ID and Client Secret above first.",
+    });
+  } else if (!keyConfigured) {
+    checks.push({
+      id: "stored_credentials",
+      label: "Stored Client ID and Client Secret are decryptable",
+      status: "fail",
+      detail:
+        "Cannot decrypt without QBO_CREDENTIAL_ENCRYPTION_KEY. Set the env var, then re-save credentials.",
+    });
+  } else {
+    try {
+      decryptedClientId = decryptString(conn.clientIdEncrypted!);
+      if (conn.clientSecretEncrypted) decryptString(conn.clientSecretEncrypted);
+      checks.push({
+        id: "stored_credentials",
+        label: "Stored Client ID and Client Secret are decryptable",
+        status: "pass",
+        detail: null,
+      });
+    } catch (err) {
+      decryptedClientId = null;
+      checks.push({
+        id: "stored_credentials",
+        label: "Stored Client ID and Client Secret are decryptable",
+        status: "fail",
+        detail:
+          "Stored credentials cannot be decrypted with the current QBO_CREDENTIAL_ENCRYPTION_KEY. Re-save Client ID/Secret to fix.",
+      });
+    }
+  }
+
+  // Best-effort reachability ping for the Intuit environment endpoints. We
+  // hit the token endpoint with HEAD so we don't need a real grant — any
+  // non-network response (including 4xx) means Intuit is reachable.
+  const env = INTUIT_DISCOVERY[conn.environment];
+  try {
+    const res = await fetchImpl(env.tokenEndpoint, { method: "HEAD" });
+    checks.push({
+      id: "environment_reachable",
+      label: `Intuit ${conn.environment} environment is reachable`,
+      status: "pass",
+      detail: `${env.tokenEndpoint} responded with HTTP ${res.status}.`,
+    });
+  } catch (err) {
+    checks.push({
+      id: "environment_reachable",
+      label: `Intuit ${conn.environment} environment is reachable`,
+      status: "fail",
+      detail: `Could not reach ${env.tokenEndpoint}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    });
+  }
+
+  // Redirect URI surfacing — always reported as "pass" because it is the
+  // value the server will actually send. The UI prompts the admin to
+  // confirm it is registered on Intuit (we cannot verify that remotely).
+  checks.push({
+    id: "redirect_uri",
+    label: "OAuth redirect URI is resolved",
+    status: "pass",
+    detail: `Register this exact URI on developer.intuit.com → Keys & OAuth → Redirect URIs: ${args.resolvedRedirectUri}`,
+  });
+
+  // Optional Client ID probe. Intuit's token endpoint distinguishes:
+  //   invalid_client  → Client ID/Secret pair is not recognized
+  //   invalid_grant   → app is recognized but the grant is bad (expected!)
+  // We deliberately send a bogus authorization_code so a healthy app
+  // returns invalid_grant. Anything that returns invalid_client tells us
+  // the stored Client ID is wrong / typo'd / from a deleted Intuit app.
+  if (decryptedClientId && conn.clientSecretEncrypted && keyConfigured) {
+    let clientSecret = "";
+    try {
+      clientSecret = decryptString(conn.clientSecretEncrypted);
+    } catch {
+      /* already reported as fail above */
+    }
+    if (clientSecret) {
+      try {
+        const body = new URLSearchParams({
+          grant_type: "authorization_code",
+          code: "preflight-invalid-grant-probe",
+          redirect_uri: args.resolvedRedirectUri,
+        });
+        const res = await fetchImpl(env.tokenEndpoint, {
+          method: "POST",
+          headers: {
+            Authorization: `Basic ${Buffer.from(
+              `${decryptedClientId}:${clientSecret}`,
+            ).toString("base64")}`,
+            "Content-Type": "application/x-www-form-urlencoded",
+            Accept: "application/json",
+          },
+          body: body.toString(),
+        });
+        const text = await res.text().catch(() => "");
+        if (/invalid_client/i.test(text)) {
+          checks.push({
+            id: "client_id_recognized",
+            label: "Intuit recognizes the stored Client ID",
+            status: "fail",
+            detail:
+              "Intuit returned invalid_client. The stored Client ID/Secret pair is not registered with this app on developer.intuit.com (wrong environment? typo? app deleted?).",
+          });
+        } else if (/invalid_grant/i.test(text) || res.status === 400) {
+          checks.push({
+            id: "client_id_recognized",
+            label: "Intuit recognizes the stored Client ID",
+            status: "pass",
+            detail:
+              "Intuit accepted the Client ID (returned invalid_grant for the preflight probe, which is expected).",
+          });
+        } else {
+          checks.push({
+            id: "client_id_recognized",
+            label: "Intuit recognizes the stored Client ID",
+            status: "warn",
+            detail: `Intuit returned HTTP ${res.status} (no invalid_client / invalid_grant marker). Could not confirm Client ID.`,
+          });
+        }
+      } catch (err) {
+        checks.push({
+          id: "client_id_recognized",
+          label: "Intuit recognizes the stored Client ID",
+          status: "warn",
+          detail: `Could not probe Intuit: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        });
+      }
+    }
+  }
+
+  return {
+    encryptionKeyConfigured: keyConfigured,
+    resolvedRedirectUri: args.resolvedRedirectUri,
+    environment: conn.environment,
+    checks,
+  };
 }
 
 /** Build the Intuit authorization URL and persist a one-time state. */

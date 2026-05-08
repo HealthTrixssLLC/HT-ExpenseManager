@@ -18,6 +18,7 @@ import type {
   User,
   WorkflowStatus,
 } from "@workspace/db";
+import { encryptionAvailable } from "./encryption";
 
 export type UserRefDto = {
   id: string;
@@ -333,6 +334,7 @@ export function toQboConnectionDto(conn: QboConnection): {
   status: QboConnection["status"];
   mode: QboConnection["mode"];
   environment: QboConnection["environment"];
+  encryptionKeyConfigured: boolean;
   connectionHealth: QboConnection["connectionHealth"];
   realmId: string | null;
   companyName: string | null;
@@ -363,6 +365,7 @@ export function toQboConnectionDto(conn: QboConnection): {
     status: conn.status,
     mode: conn.mode,
     environment: conn.environment,
+    encryptionKeyConfigured: encryptionAvailable(),
     connectionHealth: conn.connectionHealth,
     realmId: conn.realmId ?? null,
     companyName: conn.companyName ?? null,
