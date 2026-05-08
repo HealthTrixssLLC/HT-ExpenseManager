@@ -30,6 +30,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   AlertCircle,
+  AlertTriangle,
+  CheckCircle2,
   Database,
   DatabaseBackup,
   FileSearch,
@@ -38,6 +40,18 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { getCsrfToken } from "@/lib/api";
+
+type SystemResetSummary = {
+  orgsReset: Array<{
+    orgId: string;
+    orgName: string;
+    rowsWiped: Record<string, number>;
+    rowsReseeded: Record<string, number>;
+  }>;
+  orgsFailed: Array<{ orgId: string; orgName: string; error: string }>;
+  receiptFilesDeleted: number;
+  receiptFileWarnings: string[];
+};
 
 type ManifestPreview = {
   backupSchemaVersion: number;
@@ -66,7 +80,7 @@ function apiUrl(path: string): string {
 }
 
 export function BackupRestorePage() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const qc = useQueryClient();
 
   // ---- export ----
@@ -226,6 +240,113 @@ export function BackupRestorePage() {
     } finally {
       setRestoring(false);
       setConfirmOpen(false);
+    }
+  };
+
+  // ---- system reset (Task #41) ----
+  // The reset has a hard prerequisite that the admin downloads a forced
+  // safety-net of the entire system before continuing. We track that as
+  // a one-time gate keyed by a timestamp so navigating away and back
+  // forces a fresh download (we never trust a stale safety-net).
+  const [systemBackupDownloadedAt, setSystemBackupDownloadedAt] = useState<
+    string | null
+  >(null);
+  const [systemBackupDownloading, setSystemBackupDownloading] = useState(false);
+  const [systemBackupError, setSystemBackupError] = useState<string | null>(
+    null,
+  );
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const [resetConfirmText, setResetConfirmText] = useState("");
+  const [resetting, setResetting] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [resetResult, setResetResult] = useState<SystemResetSummary | null>(
+    null,
+  );
+
+  const downloadSystemBackup = async () => {
+    setSystemBackupDownloading(true);
+    setSystemBackupError(null);
+    try {
+      // Always include receipt files in the safety-net so a worst-case
+      // restore is fully self-contained; this is the user's last
+      // chance to capture the blobs before they're deleted.
+      const url = new URL(
+        apiUrl("/api/admin/system-backup?includeReceiptFiles=1"),
+        window.location.origin,
+      );
+      const res = await fetch(url.toString(), {
+        method: "GET",
+        credentials: "same-origin",
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status}: ${text}`);
+      }
+      const blob = await res.blob();
+      const downloadUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const cd = res.headers.get("Content-Disposition") ?? "";
+      const filenameMatch = /filename="?([^";]+)"?/i.exec(cd);
+      a.href = downloadUrl;
+      a.download = filenameMatch
+        ? filenameMatch[1]
+        : `healthtrix-system-backup-${new Date().toISOString()}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(downloadUrl);
+      setSystemBackupDownloadedAt(new Date().toISOString());
+    } catch (err) {
+      setSystemBackupError((err as Error).message);
+    } finally {
+      setSystemBackupDownloading(false);
+    }
+  };
+
+  const performSystemReset = async () => {
+    setResetting(true);
+    setResetError(null);
+    setResetResult(null);
+    try {
+      const csrf = getCsrfToken();
+      const res = await fetch(apiUrl("/api/admin/system-reset"), {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          ...(csrf ? { "x-csrf-token": csrf } : {}),
+        },
+        body: JSON.stringify({ confirm: "RESET" }),
+      });
+      const text = await res.text();
+      if (!res.ok) {
+        let detail = text;
+        try {
+          const parsed = JSON.parse(text);
+          detail = parsed.detail ?? parsed.title ?? text;
+        } catch {
+          /* ignore */
+        }
+        throw new Error(detail || `HTTP ${res.status}`);
+      }
+      const summary = JSON.parse(text) as SystemResetSummary;
+      setResetResult(summary);
+      // Invalidate every cache; the rest of the app no longer reflects
+      // anything still in memory.
+      qc.invalidateQueries();
+      setResetDialogOpen(false);
+      // Wait briefly so the user sees the success summary, then force a
+      // re-login. The reset deletes every other user's session and
+      // wipes all user-scoped data — even the acting admin should
+      // re-authenticate so their session token is refreshed against the
+      // post-reset DB.
+      window.setTimeout(() => {
+        void logout();
+      }, 2500);
+    } catch (err) {
+      setResetError((err as Error).message);
+    } finally {
+      setResetting(false);
     }
   };
 
@@ -468,6 +589,191 @@ export function BackupRestorePage() {
           )}
         </div>
       </HtCard>
+
+      {/* System Reset (Task #41) — visually separated by a heading and a
+          red border on the card so it can never be confused with the
+          per-org Restore action above. */}
+      <HtCard style={{ borderColor: "rgb(252, 165, 165)" }}>
+        <div className="flex items-start gap-3 mb-4">
+          <AlertTriangle className="w-5 h-5 mt-0.5 text-red-600" />
+          <div>
+            <h2 className="text-lg font-semibold text-red-700">
+              Factory reset entire system
+            </h2>
+            <p className="text-sm text-[var(--ht-ink-3)]">
+              Wipes <strong>every org's</strong> operational data — expense
+              reports, line items, receipts (including uploaded files),
+              audit log, payroll batches, QuickBooks connections, GL
+              mappings, policy rules, departments, employee profiles, and
+              all users <em>except your own account</em>. After the wipe,
+              every org is re-seeded with the same factory defaults a
+              freshly-created org gets. The orgs themselves are kept so
+              external bookmarks keep resolving. <strong>This cannot
+              be undone.</strong>
+            </p>
+          </div>
+        </div>
+
+        <ol className="list-decimal list-inside text-sm space-y-2 mb-4 text-[var(--ht-ink-2)]">
+          <li>
+            Download a full-system safety-net backup (one zip per org plus
+            a top-level manifest).
+          </li>
+          <li>Type <code>RESET</code> in the confirmation dialog.</li>
+          <li>
+            You will be signed out automatically — sign back in to use
+            the freshly-reset system.
+          </li>
+        </ol>
+
+        <div className="space-y-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            <Button
+              variant="outline"
+              onClick={downloadSystemBackup}
+              disabled={systemBackupDownloading || resetting}
+              data-testid="btn-system-backup"
+            >
+              {systemBackupDownloading ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Preparing system backup...
+                </>
+              ) : (
+                <>
+                  <DatabaseBackup className="w-4 h-4 mr-2" />
+                  Download full-system backup
+                </>
+              )}
+            </Button>
+            {systemBackupDownloadedAt && !systemBackupError && (
+              <span
+                className="text-xs text-green-700 inline-flex items-center gap-1"
+                data-testid="text-system-backup-stamp"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                Downloaded at{" "}
+                {new Date(systemBackupDownloadedAt).toLocaleString()}
+              </span>
+            )}
+            {systemBackupError && (
+              <span
+                className="text-sm text-red-600"
+                data-testid="text-system-backup-error"
+              >
+                {systemBackupError}
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-3 flex-wrap">
+            <Button
+              variant="destructive"
+              onClick={() => {
+                setResetConfirmText("");
+                setResetError(null);
+                setResetDialogOpen(true);
+              }}
+              disabled={
+                !systemBackupDownloadedAt || systemBackupDownloading || resetting
+              }
+              data-testid="btn-system-reset-open"
+            >
+              {resetting ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Resetting...
+                </>
+              ) : (
+                <>Factory reset every org</>
+              )}
+            </Button>
+            {!systemBackupDownloadedAt && (
+              <span className="text-xs text-[var(--ht-ink-3)] italic">
+                Download the safety-net backup first to enable this button.
+              </span>
+            )}
+            {resetError && (
+              <span
+                className="text-sm text-red-600"
+                data-testid="text-system-reset-error"
+              >
+                {resetError}
+              </span>
+            )}
+          </div>
+
+          {resetResult && (
+            <div
+              className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-900"
+              data-testid="text-system-reset-summary"
+            >
+              <div className="font-medium mb-1">
+                System reset complete — {resetResult.orgsReset.length} org
+                {resetResult.orgsReset.length === 1 ? "" : "s"} reset,{" "}
+                {resetResult.orgsFailed.length} failed.
+              </div>
+              <div className="text-xs">
+                Receipt files deleted: {resetResult.receiptFilesDeleted}.{" "}
+                {resetResult.receiptFileWarnings.length > 0 &&
+                  `${resetResult.receiptFileWarnings.length} blob warning(s).`}
+              </div>
+              <div className="text-xs mt-2 italic">
+                You will be signed out shortly. Please sign in again.
+              </div>
+              {resetResult.orgsFailed.length > 0 && (
+                <ul className="list-disc list-inside text-xs mt-2 space-y-0.5 text-red-700">
+                  {resetResult.orgsFailed.map((o) => (
+                    <li key={o.orgId}>
+                      <strong>{o.orgName}:</strong> {o.error}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      </HtCard>
+
+      <AlertDialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
+        <AlertDialogContent data-testid="dialog-system-reset-confirm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm factory reset</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will <strong>permanently delete</strong> every org's
+              operational data and re-seed factory defaults. Your own
+              account ({user?.email ?? "your admin user"}) will be the
+              only user remaining in your org; every other user across
+              every org will be deleted.
+              <br />
+              <br />
+              Type <strong>RESET</strong> below to proceed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <Input
+            value={resetConfirmText}
+            onChange={(e) => setResetConfirmText(e.target.value)}
+            placeholder="RESET"
+            autoFocus
+            data-testid="input-system-reset-confirm"
+          />
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="btn-system-reset-cancel">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                if (resetConfirmText === "RESET") void performSystemReset();
+              }}
+              disabled={resetConfirmText !== "RESET" || resetting}
+              data-testid="btn-system-reset-confirm"
+            >
+              {resetting ? "Resetting..." : "Reset everything"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent data-testid="dialog-restore-confirm">

@@ -190,6 +190,26 @@ export class ObjectStorageService {
     };
   }
 
+  /**
+   * Hard-delete a single object by its canonical `/objects/<id>` path.
+   * Returns `true` when the blob was removed and `false` when the object
+   * did not exist in the first place — both cases are treated as "the
+   * blob is gone now" by the system-reset flow. Any other error
+   * propagates so callers can collect it as a warning.
+   */
+  async deleteObjectEntity(objectPath: string): Promise<boolean> {
+    try {
+      const file = await this.getObjectEntityFile(objectPath);
+      await file.delete({ ignoreNotFound: true });
+      return true;
+    } catch (err) {
+      if (err instanceof ObjectNotFoundError) {
+        return false;
+      }
+      throw err;
+    }
+  }
+
   async getObjectEntityFile(objectPath: string): Promise<File> {
     if (!objectPath.startsWith("/objects/")) {
       throw new ObjectNotFoundError();

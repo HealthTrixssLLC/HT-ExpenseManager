@@ -11,7 +11,8 @@
     "test:encryption": "tsx ./scripts/test-encryption.ts",
     "test:intuit": "tsx ./scripts/test-intuit-client.ts",
     "test:qbo-services": "tsx ./scripts/test-qbo-services.ts",
-    "test": "pnpm run test:encryption && pnpm run test:intuit && pnpm run test:qbo-services",
+    "test:system-reset": "tsx ./scripts/test-system-reset.ts",
+    "test": "pnpm run test:encryption && pnpm run test:intuit && pnpm run test:qbo-services && pnpm run test:system-reset",
     "seed": "pnpm --filter @workspace/scripts run seed",
     "smoke": "pnpm --filter @workspace/scripts run smoke"
   },

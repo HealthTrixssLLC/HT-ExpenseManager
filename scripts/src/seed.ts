@@ -24,6 +24,8 @@ import {
   approvalActionsTable,
   auditEntriesTable,
   departmentsTable,
+  defaultGlMappingsFor,
+  defaultPolicyRulesFor,
   employeeProfilesTable,
   expenseReportsTable,
   glMappingsTable,
@@ -44,21 +46,6 @@ import {
 } from "@workspace/db";
 
 const CRED_PASSWORD = "Healthtrix!2026";
-
-const QB_CATEGORIES = [
-  "Travel:Airfare",
-  "Travel:Lodging",
-  "Travel:Ground Transportation",
-  "Travel:Mileage",
-  "Meals & Entertainment",
-  "Office Supplies",
-  "Software Subscriptions",
-  "Continuing Education",
-  "Conferences & Trade Shows",
-  "Marketing & Advertising",
-  "Telecommunications",
-  "Professional Services",
-] as const;
 
 const DEPARTMENTS = [
   "Clinical Operations",
@@ -138,35 +125,10 @@ async function main(): Promise<void> {
   const deptByName = new Map(departments.map((d) => [d.name, d]));
 
   console.log("Creating GL mappings and policy rules…");
-  await db.insert(glMappingsTable).values(
-    QB_CATEGORIES.map((code) => ({
-      orgId: org.id,
-      code,
-      qboAccount: `QBO:${code}`,
-      qboAccountId: `acct-${code.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
-      active: true,
-    })),
-  );
-  await db.insert(policyRulesTable).values([
-    {
-      orgId: org.id,
-      name: "receipt_required_threshold",
-      value: { amount: 25 },
-      description: "Receipt required for any single expense ≥ $25.",
-    },
-    {
-      orgId: org.id,
-      name: "meal_per_diem_max",
-      value: { breakfast: 18, lunch: 22, dinner: 65 },
-      description: "Per-diem ceilings for meals.",
-    },
-    {
-      orgId: org.id,
-      name: "auto_post_after_finance_approval",
-      value: { enabled: false },
-      description: "When true, automatically post to QBO without manual click.",
-    },
-  ]);
+  // Both literals live in `@workspace/db/orgDefaults` so the system-reset
+  // service and this seed script always produce the same starting state.
+  await db.insert(glMappingsTable).values(defaultGlMappingsFor(org.id));
+  await db.insert(policyRulesTable).values(defaultPolicyRulesFor(org.id));
   // Mirror what `POST /admin/qbo-connection/connect-stub` would do for this
   // org: random realm id + the org's own company name. This avoids hardcoded
   // "STUB-REALM-1234567890" / "Healthtrix Sandbox Co." appearing in fixtures.

@@ -73,6 +73,10 @@ import {
   BackupVersionError,
   CURRENT_BACKUP_SCHEMA_VERSION,
 } from "../services/backup";
+import {
+  applySystemReset,
+  exportFullSystemBackup,
+} from "../services/systemReset";
 
 // App version surfaced in backup manifests. Sourced from the API server
 // package so a single bump there propagates everywhere we report a version.
@@ -1167,6 +1171,101 @@ router.post(
         return;
       }
       sendProblem(res, 500, "Restore Failed", (err as Error).message);
+    }
+  },
+);
+
+// ----------------------------------------------------------------------------
+// Full-system backup + factory reset (System Admin only) — Task #41
+// ----------------------------------------------------------------------------
+//
+// `GET  /admin/system-backup`  — streams a single ZIP holding one per-org
+//                                backup zip for every org in the system,
+//                                plus a top-level manifest. This is the
+//                                forced safety-net the Reset dialog
+//                                downloads before letting the admin
+//                                continue. We log who downloaded it and
+//                                when so the trail survives a wipe.
+// `POST /admin/system-reset`   — wipes every org's operational data and
+//                                re-seeds the factory defaults. Requires
+//                                a `confirm` body field equal to the
+//                                literal string "RESET" (mirrors the
+//                                restore endpoint's contract).
+
+router.get(
+  "/admin/system-backup",
+  requireRole(...SYSADMIN_ROLES),
+  async (req, res): Promise<void> => {
+    const includeReceiptFiles =
+      typeof req.query.includeReceiptFiles === "string" &&
+      ["1", "true", "yes"].includes(req.query.includeReceiptFiles);
+    try {
+      const result = await exportFullSystemBackup({
+        appVersion: APP_VERSION,
+        includeReceiptFiles,
+      });
+      const ts = result.manifest.createdAt.replace(/[:.]/g, "-");
+      // Best-effort observability: log who downloaded the safety-net so
+      // the trail is preserved even after the wipe blows away audit
+      // entries.
+      // eslint-disable-next-line no-console
+      console.info(
+        `[system-backup] downloaded by user=${req.auth!.user.id} email=${
+          req.auth!.user.email
+        } orgs=${result.manifest.orgCount} includeReceipts=${includeReceiptFiles} at=${result.manifest.createdAt}`,
+      );
+      res.setHeader("Content-Type", "application/zip");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="healthtrix-system-backup-${ts}.zip"`,
+      );
+      res.setHeader(
+        "X-System-Backup-Org-Count",
+        String(result.manifest.orgCount),
+      );
+      res.setHeader(
+        "X-System-Backup-Includes-Receipt-Files",
+        includeReceiptFiles ? "1" : "0",
+      );
+      res.status(200).end(result.zip);
+    } catch (err) {
+      sendProblem(res, 500, "System Backup Failed", (err as Error).message);
+    }
+  },
+);
+
+router.post(
+  "/admin/system-reset",
+  requireRole(...SYSADMIN_ROLES),
+  async (req, res): Promise<void> => {
+    const confirm =
+      typeof req.body?.confirm === "string" ? (req.body.confirm as string) : "";
+    if (confirm !== "RESET") {
+      sendProblem(
+        res,
+        400,
+        "Confirmation Required",
+        'Send a "confirm" field equal to the literal string "RESET".',
+      );
+      return;
+    }
+    try {
+      const summary = await applySystemReset({
+        actingUserId: req.auth!.user.id,
+      });
+      // eslint-disable-next-line no-console
+      console.info(
+        `[system-reset] executed by user=${req.auth!.user.id} email=${
+          req.auth!.user.email
+        } orgsReset=${summary.orgsReset.length} orgsFailed=${
+          summary.orgsFailed.length
+        } receiptFilesDeleted=${summary.receiptFilesDeleted} receiptWarnings=${
+          summary.receiptFileWarnings.length
+        }`,
+      );
+      res.json(summary);
+    } catch (err) {
+      sendProblem(res, 500, "System Reset Failed", (err as Error).message);
     }
   },
 );
