@@ -29,6 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { notifySuccess } from "@/lib/notify";
+import { SILENT_404_META } from "@/lib/queryClient";
 
 const MERCHANT_MAX = 80;
 const DESCRIPTION_MAX = 500;
@@ -50,7 +51,11 @@ export function EditLineItemDialog({
   const qc = useQueryClient();
   const updateLineItem = useUpdateLineItem();
   const { data: categories = [] } = useListCategories({
-    query: { queryKey: getListCategoriesQueryKey(), enabled: open },
+    query: {
+      queryKey: getListCategoriesQueryKey(),
+      enabled: open,
+      meta: SILENT_404_META,
+    },
   });
 
   const today = useMemo(() => new Date().toISOString().split("T")[0], []);

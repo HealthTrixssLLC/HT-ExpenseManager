@@ -93,6 +93,27 @@ app.use(csrfGuard);
 
 app.use("/api", router);
 
+// Catch-all for unmatched /api/* paths. Without this, Express's built-in
+// 404 returns plain HTML "Cannot GET …", which the SPA's `describeApiError`
+// can't parse and renders as a confusing red toast titled "HTTP 404 / Not
+// Found". Returning problem+json here makes any spurious 404 self-describing
+// (the toast will show the path that wasn't matched) and avoids the
+// content-type-mismatch surprise.
+app.use("/api", (req: Request, res: Response, next: NextFunction) => {
+  if (res.headersSent) {
+    next();
+    return;
+  }
+  req.log.warn(
+    { method: req.method, path: req.path },
+    "Unmatched /api route — returning problem+json 404",
+  );
+  sendError(
+    res,
+    new HttpError(404, "Not Found", `No handler for ${req.method} ${req.path}`),
+  );
+});
+
 // Final error handler — converts thrown HttpErrors into problem+json.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {

@@ -31,6 +31,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { notifySuccess } from "@/lib/notify";
+import { SILENT_404_META } from "@/lib/queryClient";
 
 type Props = {
   report: ExpenseReport;
@@ -48,7 +49,11 @@ export function EditReportHeaderDialog({ report, open, onOpenChange }: Props) {
   const qc = useQueryClient();
   const updateReport = useUpdateReport();
   const { data: departments = [] } = useListDepartments({
-    query: { queryKey: getListDepartmentsQueryKey(), enabled: open },
+    query: {
+      queryKey: getListDepartmentsQueryKey(),
+      enabled: open,
+      meta: SILENT_404_META,
+    },
   });
 
   const [title, setTitle] = useState(report.title);

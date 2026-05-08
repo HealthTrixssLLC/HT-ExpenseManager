@@ -4,6 +4,7 @@ import {
   getGetReceiptDownloadUrlQueryKey,
   type Receipt,
 } from "@workspace/api-client-react";
+import { SILENT_404_META } from "@/lib/queryClient";
 
 const IMAGE_TYPES = new Set([
   "image/png",
@@ -42,6 +43,7 @@ export function ReceiptThumb({
       queryKey: getGetReceiptDownloadUrlQueryKey(receipt.id),
       enabled: Boolean(isImage),
       staleTime: 4 * 60_000,
+      meta: SILENT_404_META,
     },
   });
   return (

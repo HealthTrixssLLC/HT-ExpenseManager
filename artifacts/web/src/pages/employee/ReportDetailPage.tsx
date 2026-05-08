@@ -20,6 +20,7 @@ import { formatMoney, formatDate } from "@/lib/format";
 import { notifySuccess } from "@/lib/notify";
 import { useAuth } from "@/lib/auth-context";
 import { canEditReportClient } from "@/lib/edit-permissions";
+import { SILENT_404_META } from "@/lib/queryClient";
 import { StatusPill } from "@/components/brand/StatusPill";
 import { StatusTracker } from "@/components/brand/StatusTracker";
 import { HtCard, HtCardHeader } from "@/components/brand/Card";
@@ -52,20 +53,40 @@ export function ReportDetailPage({ id }: { id: string }) {
   const [, setLocation] = useLocation();
   const { user, roles } = useAuth();
 
+  // Primary load: a 404 here is a real "report not found" and SHOULD surface
+  // (no SILENT_404_META). The page also has a loading state that masks it
+  // visually, but engineers still want the toast for diagnostics.
   const { data: report, isLoading: reportLoading } = useGetReport(id, {
-    query: { queryKey: getGetReportQueryKey(id), enabled: !!id }
+    query: { queryKey: getGetReportQueryKey(id), enabled: !!id },
   });
 
+  // Auxiliary panels: these are sub-resources that may legitimately return
+  // 404 in odd states (e.g. a report that was deleted between requests, a
+  // race with the server) without warranting a destructive toast — the page
+  // already shows an empty state, and the primary report load above will
+  // toast the user-meaningful 404 if there is one.
   const { data: lineItems = [] } = useListLineItems(id, {
-    query: { queryKey: getListLineItemsQueryKey(id), enabled: !!id }
+    query: {
+      queryKey: getListLineItemsQueryKey(id),
+      enabled: !!id,
+      meta: SILENT_404_META,
+    },
   });
 
   const { data: receipts = [] } = useListReceipts(id, {
-    query: { queryKey: getListReceiptsQueryKey(id), enabled: !!id }
+    query: {
+      queryKey: getListReceiptsQueryKey(id),
+      enabled: !!id,
+      meta: SILENT_404_META,
+    },
   });
 
   const { data: timeline = [] } = useGetReportTimeline(id, {
-    query: { queryKey: getGetReportTimelineQueryKey(id), enabled: !!id }
+    query: {
+      queryKey: getGetReportTimelineQueryKey(id),
+      enabled: !!id,
+      meta: SILENT_404_META,
+    },
   });
 
   const submitReport = useSubmitReport();

@@ -10,6 +10,7 @@ import {
 } from "@workspace/api-client-react";
 import { useAuth } from "@/lib/auth-context";
 import { roleCanEditReportTags } from "@/lib/types";
+import { SILENT_404_META } from "@/lib/queryClient";
 import { HtCard, HtCardHeader } from "@/components/brand/Card";
 import { HelpLink } from "@/components/help/HelpLink";
 import { Button } from "@/components/ui/button";
@@ -49,6 +50,7 @@ export function ReportTagPicker({ reportId }: { reportId: string }) {
       query: {
         queryKey: getListReportTagsQueryKey(reportId),
         enabled: !!reportId,
+        meta: SILENT_404_META,
       },
     },
   );
@@ -59,6 +61,7 @@ export function ReportTagPicker({ reportId }: { reportId: string }) {
     query: {
       queryKey: getListActiveQboTagsQueryKey(),
       enabled: canEdit && editing,
+      meta: SILENT_404_META,
     },
   });
 
