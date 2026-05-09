@@ -23,7 +23,9 @@ import {
   pool,
   approvalActionsTable,
   auditEntriesTable,
+  DEFAULT_DEPARTMENTS,
   departmentsTable,
+  defaultDepartmentsFor,
   defaultGlMappingsFor,
   defaultPolicyRulesFor,
   employeeProfilesTable,
@@ -47,14 +49,9 @@ import {
 
 const CRED_PASSWORD = "Healthtrix!2026";
 
-const DEPARTMENTS = [
-  "Clinical Operations",
-  "Revenue Cycle",
-  "IT & Security",
-  "Compliance",
-  "Sales",
-  "Executive",
-];
+// Use the same factory-default department list shared by `bootstrap` and
+// `system reset` so this seed leaves orgs in identical starting state.
+const DEPARTMENTS = DEFAULT_DEPARTMENTS;
 
 type UserSpec = {
   email: string;
@@ -120,7 +117,7 @@ async function main(): Promise<void> {
 
   const departments = await db
     .insert(departmentsTable)
-    .values(DEPARTMENTS.map((name) => ({ orgId: org.id, name })))
+    .values(defaultDepartmentsFor(org.id))
     .returning();
   const deptByName = new Map(departments.map((d) => [d.name, d]));
 

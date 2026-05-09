@@ -29,6 +29,7 @@ import {
   approvalActionsTable,
   auditEntriesTable,
   db,
+  defaultDepartmentsFor,
   defaultGlMappingsFor,
   defaultPolicyRulesFor,
   departmentsTable,
@@ -467,8 +468,12 @@ async function wipeAndReseedOneOrg(args: {
     }
 
     // 4. Re-seed factory defaults.
+    const departmentRows = defaultDepartmentsFor(org.id);
     const glRows = defaultGlMappingsFor(org.id);
     const policyRows = defaultPolicyRulesFor(org.id);
+    if (departmentRows.length > 0) {
+      await tx.insert(departmentsTable).values(departmentRows);
+    }
     if (glRows.length > 0) {
       await tx.insert(glMappingsTable).values(glRows);
     }
@@ -476,6 +481,7 @@ async function wipeAndReseedOneOrg(args: {
       await tx.insert(policyRulesTable).values(policyRows);
     }
     const rowsReseeded: Record<string, number> = {
+      departments: departmentRows.length,
       glMappings: glRows.length,
       policyRules: policyRows.length,
     };

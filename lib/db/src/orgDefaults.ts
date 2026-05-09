@@ -15,8 +15,31 @@
  * (the only workspace package both callers already depend on) so the shared
  * defaults import cleanly without a new package.
  */
+import type { InsertDepartment } from "./schema/departments";
 import type { InsertGlMapping } from "./schema/glMappings";
 import type { InsertPolicyRule } from "./schema/policyRules";
+
+/**
+ * Baseline departments every org starts with. Without at least one
+ * department, employees cannot create a report (the Department field on
+ * the Create Report form is required and is bound to the org's department
+ * list). Seeding a sensible set up front avoids a dead-end empty picker
+ * for any freshly bootstrapped org.
+ */
+export const DEFAULT_DEPARTMENTS = [
+  "Clinical Operations",
+  "Revenue Cycle",
+  "IT & Security",
+  "Compliance",
+  "Sales",
+  "Executive",
+] as const;
+
+export type DefaultDepartment = (typeof DEFAULT_DEPARTMENTS)[number];
+
+export function defaultDepartmentsFor(orgId: string): InsertDepartment[] {
+  return DEFAULT_DEPARTMENTS.map((name) => ({ orgId, name }));
+}
 
 /**
  * The 12 employee-facing expense categories every org starts with. The

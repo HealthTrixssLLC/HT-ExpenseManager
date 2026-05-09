@@ -25,7 +25,7 @@ import { assertSameOrgRefs } from "../lib/orgRefs";
 import { sendProblem } from "../lib/problem";
 import { requireAuth, requireRole } from "../middlewares/session";
 import { toUserDto } from "../lib/serializers";
-import { departmentsTable } from "@workspace/db";
+import { departmentsTable, defaultDepartmentsFor } from "@workspace/db";
 
 const ADMIN_ROLES = ["Accounting Admin", "System Admin"];
 
@@ -106,6 +106,16 @@ router.post("/auth/bootstrap", async (req, res): Promise<void> => {
       .insert(orgsTable)
       .values({ name: parsed.data.orgName })
       .returning();
+    // Seed the org's factory-default departments so an employee opening
+    // "Create Expense Report" right after bootstrap actually has options
+    // in the required Department picker. GL mappings + policy rules are
+    // *not* seeded here on purpose — the bootstrap admin still walks
+    // through the Admin → Departments & GL setup flow for those, but a
+    // dead-end empty department list would block everyone before they
+    // ever get there.
+    await tx
+      .insert(departmentsTable)
+      .values(defaultDepartmentsFor(org.id));
     const [user] = await tx
       .insert(usersTable)
       .values({

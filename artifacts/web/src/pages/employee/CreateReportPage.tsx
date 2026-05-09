@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -18,8 +18,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useDirtyGuard, confirmLeaveIfDirty } from "@/hooks/useDirtyGuard";
 import { notifySuccess } from "@/lib/notify";
+import { useAuth } from "@/lib/auth-context";
+import { roleCanAdmin } from "@/lib/types";
 
 const TITLE_MAX = 80;
 const DESCRIPTION_MAX = 500;
@@ -34,6 +42,8 @@ type FormErrors = {
 export function CreateReportPage() {
   const [, setLocation] = useLocation();
   const qc = useQueryClient();
+  const { user, roles } = useAuth();
+  const isAdmin = roleCanAdmin(roles);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -42,9 +52,30 @@ export function CreateReportPage() {
   const [departmentId, setDepartmentId] = useState("");
   const [touched, setTouched] = useState<Record<string, boolean>>({});
 
-  const { data: departments = [] } = useListDepartments({
+  const departmentsQuery = useListDepartments({
     query: { queryKey: getListDepartmentsQueryKey() }
   });
+  const departments = useMemo(
+    () => departmentsQuery.data ?? [],
+    [departmentsQuery.data],
+  );
+  const isDepartmentsLoading = departmentsQuery.isLoading;
+  const isDepartmentsError = departmentsQuery.isError;
+  const isDepartmentsEmpty =
+    !isDepartmentsLoading && !isDepartmentsError && departments.length === 0;
+
+  // Preselect the user's own department once the lookup resolves and it
+  // contains the user's profile department. Only fires while the user
+  // hasn't already touched the picker, so we never override a manual
+  // choice or fight a re-render.
+  useEffect(() => {
+    if (departmentId) return;
+    if (touched.departmentId) return;
+    if (!user?.departmentId) return;
+    if (departments.some((d) => d.id === user.departmentId)) {
+      setDepartmentId(user.departmentId);
+    }
+  }, [departments, departmentId, touched.departmentId, user?.departmentId]);
 
   const createReport = useCreateReport();
 
@@ -97,7 +128,46 @@ export function CreateReportPage() {
     });
   };
 
-  const showError = (k: keyof FormErrors) => touched[k] && errors[k];
+  const departmentBlocked =
+    isDepartmentsLoading || isDepartmentsEmpty || isDepartmentsError;
+
+  const showError = (k: keyof FormErrors) => {
+    if (!touched[k] || !errors[k]) return false;
+    // Suppress only the departmentId required-field error while the
+    // lookup is in a non-happy state — those are surfaced by the
+    // dedicated loading / empty / error inline messages below the
+    // Select. Other fields (title, period, etc.) are unrelated and
+    // must keep showing their own validation errors.
+    if (k === "departmentId" && departmentBlocked) return false;
+    return true;
+  };
+
+  const submitDisabled = createReport.isPending || departmentBlocked;
+  const submitDisabledReason = isDepartmentsLoading
+    ? "Departments are still loading."
+    : isDepartmentsError
+      ? "Departments couldn't be loaded. Retry the lookup to continue."
+      : isDepartmentsEmpty
+        ? "Your organization has no departments set up yet, so this required field can't be filled."
+        : null;
+
+  const placeholder = isDepartmentsLoading
+    ? "Loading departments…"
+    : isDepartmentsError
+      ? "Couldn't load departments"
+      : isDepartmentsEmpty
+        ? "No departments available"
+        : "Select Department";
+
+  const submitButton = (
+    <Button
+      type="submit"
+      disabled={submitDisabled}
+      data-testid="button-create-report"
+    >
+      {createReport.isPending ? "Creating..." : "Create Report"}
+    </Button>
+  );
 
   return (
     <div className="space-y-6 max-w-2xl" data-testid="page-createreport">
@@ -181,14 +251,16 @@ export function CreateReportPage() {
               <Select
                 value={departmentId}
                 onValueChange={(v) => { setDepartmentId(v); setTouched((t) => ({ ...t, departmentId: true })); }}
+                disabled={departmentBlocked}
               >
                 <SelectTrigger
                   id="department"
+                  data-testid="select-department"
                   aria-invalid={!!showError("departmentId")}
                   className={showError("departmentId") ? "border-red-500 focus-visible:ring-red-500" : ""}
                   onBlur={() => setTouched((t) => ({ ...t, departmentId: true }))}
                 >
-                  <SelectValue placeholder="Select Department" />
+                  <SelectValue placeholder={placeholder} />
                 </SelectTrigger>
                 <SelectContent>
                   {departments.map((dept) => (
@@ -198,6 +270,65 @@ export function CreateReportPage() {
                   ))}
                 </SelectContent>
               </Select>
+
+              {isDepartmentsLoading && (
+                <div
+                  className="text-xs text-[var(--ht-ink-3)]"
+                  data-testid="text-departments-loading"
+                >
+                  Loading departments…
+                </div>
+              )}
+
+              {isDepartmentsError && (
+                <div
+                  className="flex items-center justify-between gap-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700"
+                  data-testid="alert-departments-error"
+                >
+                  <span>
+                    Couldn't load departments. Check your connection and try again.
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      qc.invalidateQueries({ queryKey: getListDepartmentsQueryKey() });
+                    }}
+                    data-testid="button-retry-departments"
+                  >
+                    Retry
+                  </Button>
+                </div>
+              )}
+
+              {isDepartmentsEmpty && (
+                <div
+                  className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+                  data-testid="alert-departments-empty"
+                >
+                  No departments are set up yet for your organization.{" "}
+                  {isAdmin ? (
+                    <>
+                      Add one in{" "}
+                      <a
+                        href="/admin/gl"
+                        className="underline font-medium"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          if (confirmLeaveIfDirty(isDirty)) setLocation("/admin/gl");
+                        }}
+                      >
+                        Admin → Departments &amp; GL
+                      </a>{" "}
+                      and then return to create a report.
+                    </>
+                  ) : (
+                    <>Ask an administrator to add departments before creating a report.</>
+                  )}
+                </div>
+              )}
+
               {showError("departmentId") && (
                 <div className="text-xs text-red-600">{errors.departmentId}</div>
               )}
@@ -208,13 +339,18 @@ export function CreateReportPage() {
             <Button variant="outline" type="button" onClick={handleCancel}>
               Cancel
             </Button>
-            <Button
-              type="submit"
-              disabled={createReport.isPending}
-              data-testid="button-create-report"
-            >
-              {createReport.isPending ? "Creating..." : "Create Report"}
-            </Button>
+            {submitDisabledReason ? (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span tabIndex={0}>{submitButton}</span>
+                  </TooltipTrigger>
+                  <TooltipContent>{submitDisabledReason}</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            ) : (
+              submitButton
+            )}
           </div>
         </form>
       </HtCard>
