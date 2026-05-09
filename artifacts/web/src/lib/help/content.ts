@@ -1087,6 +1087,32 @@ export const HELP_TOPICS: HelpTopic[] = [
         text:
           "Every save, environment change, and disconnect writes a 'qbo_config' entry to the Audit Log with diffed fields. Secret values themselves never appear in the audit — only that they changed.",
       },
+      {
+        type: "h",
+        text: "Production redirect URI (QBO_OAUTH_REDIRECT_URI)",
+      },
+      {
+        type: "p",
+        text:
+          "In a production deployment, the OAuth redirect URI sent to Intuit is NOT auto-derived from the request — it must be set explicitly via the QBO_OAUTH_REDIRECT_URI environment variable. This guarantees the value matches your Intuit app's keys tab byte-for-byte; without it, Intuit rejects the connect flow with 'The redirect_uri query parameter value is invalid'.",
+      },
+      {
+        type: "ol",
+        items: [
+          "On developer.intuit.com, open your app and go to Keys & OAuth.",
+          "Pick the Production keys tab if your org's QBO environment is Production, or the Development keys tab for Sandbox. Intuit checks redirect URIs separately per tab.",
+          "Copy the exact URL shown in the 'OAuth redirect URI to register on Intuit' box on this page (it ends in /api/admin/qbo-connection/oauth/callback) into Intuit's Redirect URIs list and save.",
+          "On Replit, open your deployment's Secrets and add QBO_OAUTH_REDIRECT_URI with that same exact URL. Redeploy.",
+          "Click 'Test configuration' on this page — the 'OAuth redirect URI is resolved' row should pass and show the same string. If it fails, the deployment is missing the env var or the URI doesn't look like a valid public https host.",
+        ],
+      },
+      {
+        type: "callout",
+        tone: "warning",
+        title: "Sandbox vs Production tabs on Intuit",
+        text:
+          "The Sandbox tab and Production tab on developer.intuit.com each have their own redirect URI list. If you flip the Environment selector above from Sandbox to Production, you must also register the URI on the matching tab — registering it on the wrong tab will still produce the 'invalid redirect_uri' error.",
+      },
     ],
     related: ["admin-qbo", "admin-qbo-oauth", "admin-qbo-health", "admin-audit"],
   },

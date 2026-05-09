@@ -78,6 +78,19 @@ Key pieces:
   `/api/admin/qbo-connection/oauth/callback` (registered in
   `routes/qboOauth.ts` before `requireAuth`). Redirects back to
   `/admin/qbo?qboStatus=connected|error&qboMessage=...`.
+- **Redirect URI**: resolved by `services/qboRedirect.ts`. In production
+  (`NODE_ENV === "production"`) the `QBO_OAUTH_REDIRECT_URI` secret is
+  **required** and must be the exact https URL registered on the Intuit
+  app's keys tab (e.g.
+  `https://ht-expense-management.replit.app/api/admin/qbo-connection/oauth/callback`).
+  Missing or non-https values raise `QboRedirectConfigError` and the
+  `/admin/qbo-connection/oauth/start` endpoint returns a 400
+  problem+json with an actionable message instead of sending a wrong
+  redirect to Intuit. Intuit checks redirect URIs separately on the
+  Sandbox (Development keys) and Production keys tabs — the URI must be
+  registered on the tab matching the org's stored `environment`.
+  Outside production, the resolver falls back to `REPLIT_DEV_DOMAIN`
+  and request headers so the demo flow Just Works.
 - **Token refresh**: `index.ts` schedules a sweep 30 s after boot and every
   15 min thereafter (gated by `NODE_ENV !== "test"`).
 - **Admin UI**: `artifacts/web/src/pages/admin/QboPage.tsx` (Configuration,

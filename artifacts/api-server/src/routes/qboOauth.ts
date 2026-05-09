@@ -18,7 +18,10 @@ import {
   type Response,
 } from "express";
 import { handleQboOauthCallback } from "../services/qbo";
-import { resolveQboRedirectUri } from "../services/qboRedirect";
+import {
+  QboRedirectConfigError,
+  resolveQboRedirectUri,
+} from "../services/qboRedirect";
 
 const router: IRouter = Router();
 
@@ -59,7 +62,21 @@ router.get(
 
     // `state` is an opaque nonce; the org/user binding is resolved
     // server-side from the qbo_oauth_states row.
-    const redirectUri = resolveQboRedirectUri(req);
+    let redirectUri: string;
+    try {
+      redirectUri = resolveQboRedirectUri(req);
+    } catch (err) {
+      if (err instanceof QboRedirectConfigError) {
+        // Should be rare — the start endpoint already gates on this — but
+        // guard against config drift between authorize-time and callback-
+        // time so the admin sees a friendly banner instead of a 500.
+        res.redirect(
+          `${ADMIN_QBO_PATH}?qboStatus=error&qboMessage=${encodeURIComponent(err.message)}`,
+        );
+        return;
+      }
+      throw err;
+    }
     const result = await handleQboOauthCallback({
       state,
       code,

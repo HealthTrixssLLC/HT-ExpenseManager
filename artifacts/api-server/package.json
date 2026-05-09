@@ -10,9 +10,11 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:encryption": "tsx ./scripts/test-encryption.ts",
     "test:intuit": "tsx ./scripts/test-intuit-client.ts",
+    "test:qbo-redirect": "tsx ./scripts/test-qbo-redirect.ts",
+    "test:qbo-oauth-start": "tsx ./scripts/test-qbo-oauth-start.ts",
     "test:qbo-services": "tsx ./scripts/test-qbo-services.ts",
     "test:system-reset": "tsx ./scripts/test-system-reset.ts",
-    "test": "pnpm run test:encryption && pnpm run test:intuit && pnpm run test:qbo-services && pnpm run test:system-reset",
+    "test": "pnpm run test:encryption && pnpm run test:intuit && pnpm run test:qbo-redirect && pnpm run test:qbo-oauth-start && pnpm run test:qbo-services && pnpm run test:system-reset",
     "seed": "pnpm --filter @workspace/scripts run seed",
     "smoke": "pnpm --filter @workspace/scripts run smoke"
   },

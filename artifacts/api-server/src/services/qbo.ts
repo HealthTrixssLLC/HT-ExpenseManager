@@ -60,6 +60,7 @@ import {
   revokeToken,
   type IntuitTokenResponse,
 } from "./intuitClient";
+import { isDevDomainRedirect } from "./qboRedirect";
 import { recordAudit } from "./audit";
 import { logger } from "../lib/logger";
 
@@ -412,6 +413,14 @@ export type QboPreflightResult = {
 export async function runQboPreflight(args: {
   orgId: string;
   resolvedRedirectUri: string;
+  /**
+   * If the deployment was unable to resolve a redirect URI at all (e.g.
+   * production without QBO_OAUTH_REDIRECT_URI set), the route may pass an
+   * actionable message here. The preflight then surfaces it as a `fail`
+   * row on the `redirect_uri` check instead of pretending the empty string
+   * is a valid value.
+   */
+  redirectError?: string | null;
   fetchFn?: typeof fetch;
 }): Promise<QboPreflightResult> {
   const fetchImpl = args.fetchFn ?? fetch;
@@ -494,15 +503,52 @@ export async function runQboPreflight(args: {
     });
   }
 
-  // Redirect URI surfacing — always reported as "pass" because it is the
-  // value the server will actually send. The UI prompts the admin to
-  // confirm it is registered on Intuit (we cannot verify that remotely).
-  checks.push({
-    id: "redirect_uri",
-    label: "OAuth redirect URI is resolved",
-    status: "pass",
-    detail: `Register this exact URI on developer.intuit.com → Keys & OAuth → Redirect URIs: ${args.resolvedRedirectUri}`,
-  });
+  // Redirect URI surfacing. If the deployment couldn't resolve a URI at
+  // all (production without QBO_OAUTH_REDIRECT_URI), we flip this row to
+  // `fail` with the actionable error from the route. Otherwise we pass
+  // and surface the exact string the server will send so the admin can
+  // diff it against Intuit's keys tab.
+  if (args.redirectError) {
+    checks.push({
+      id: "redirect_uri",
+      label: "OAuth redirect URI is configured",
+      status: "fail",
+      detail: args.redirectError,
+    });
+  } else {
+    checks.push({
+      id: "redirect_uri",
+      label: "OAuth redirect URI is resolved",
+      status: "pass",
+      detail: `This is the exact value the server will send to Intuit. It must be registered character-for-character on developer.intuit.com → Keys & OAuth → Redirect URIs (${conn.environment === "production" ? "Production" : "Development"} keys tab): ${args.resolvedRedirectUri}`,
+    });
+
+    // Environment-vs-URI mismatch warning. Intuit checks redirect URIs
+    // separately for Sandbox (Development keys) and Production keys, so
+    // a production org pointing at a *.replit.dev URI (or vice versa)
+    // will be rejected at authorize time even though both look valid.
+    const looksLikeDev = isDevDomainRedirect(args.resolvedRedirectUri);
+    if (conn.environment === "production" && looksLikeDev) {
+      checks.push({
+        id: "redirect_uri_environment_match",
+        label: "Redirect URI matches the configured QBO environment",
+        status: "warn",
+        detail:
+          "The org is configured for Production but the resolved redirect URI is a *.replit.dev dev domain. Intuit's Production keys tab will reject this URI. Set QBO_OAUTH_REDIRECT_URI to the public production URL registered on Intuit.",
+      });
+    } else if (conn.environment === "sandbox" && !looksLikeDev) {
+      // Soft signal — sandbox usually uses a dev domain, but a deployed
+      // staging environment could legitimately use a stable host. Warn,
+      // don't fail.
+      checks.push({
+        id: "redirect_uri_environment_match",
+        label: "Redirect URI matches the configured QBO environment",
+        status: "warn",
+        detail:
+          "The org is configured for Sandbox but the resolved redirect URI is not a *.replit.dev dev domain. Make sure this exact URI is registered on Intuit's Development keys tab (not just Production).",
+      });
+    }
+  }
 
   // Optional Client ID probe. Intuit's token endpoint distinguishes:
   //   invalid_client  → Client ID/Secret pair is not recognized

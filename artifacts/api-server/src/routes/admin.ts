@@ -64,7 +64,10 @@ import {
   startQboOauth,
   updateTag,
 } from "../services/qbo";
-import { resolveQboRedirectUri } from "../services/qboRedirect";
+import {
+  QboRedirectConfigError,
+  resolveQboRedirectUri,
+} from "../services/qboRedirect";
 import multer from "multer";
 import {
   applyRestore,
@@ -607,7 +610,16 @@ router.post(
   requireRole(...ADMIN_ROLES),
   async (req, res): Promise<void> => {
     const orgId = req.auth!.user.orgId;
-    const redirectUri = resolveQboRedirectUri(req);
+    let redirectUri: string;
+    try {
+      redirectUri = resolveQboRedirectUri(req);
+    } catch (err) {
+      if (err instanceof QboRedirectConfigError) {
+        sendProblem(res, 400, "QBO Redirect URI Not Configured", err.message, err.code);
+        return;
+      }
+      throw err;
+    }
     try {
       const result = await startQboOauth({
         orgId,
@@ -634,8 +646,23 @@ router.post(
   requireRole(...ADMIN_ROLES),
   async (req, res): Promise<void> => {
     const orgId = req.auth!.user.orgId;
-    const redirectUri = resolveQboRedirectUri(req);
-    const result = await runQboPreflight({ orgId, resolvedRedirectUri: redirectUri });
+    let redirectUri: string;
+    let redirectError: string | null = null;
+    try {
+      redirectUri = resolveQboRedirectUri(req);
+    } catch (err) {
+      if (err instanceof QboRedirectConfigError) {
+        redirectUri = "";
+        redirectError = err.message;
+      } else {
+        throw err;
+      }
+    }
+    const result = await runQboPreflight({
+      orgId,
+      resolvedRedirectUri: redirectUri,
+      redirectError,
+    });
     res.json(result);
   },
 );
