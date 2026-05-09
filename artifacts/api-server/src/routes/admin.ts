@@ -4,14 +4,16 @@ import {
   type Request,
   type Response,
 } from "express";
-import { and, desc, eq, isNull, or } from "drizzle-orm";
+import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 import {
+  AdminCreateDepartmentBody,
   AdminCreateUserBody as CreateUserBody,
   AdminCreateDelegationBody as CreateDelegationBody,
   AdminCreateQboTagBody as CreateQboTagBody,
   AdminGetQboConnectionResponse,
   AdminListGlMappingsResponse,
   AdminListUsersResponse,
+  AdminRenameDepartmentBody,
   AdminSaveQboCredentialsBody as SaveQboCredentialsBody,
   AdminSaveQboPostingPreferencesBody as SaveQboPostingPreferencesBody,
   AdminUpdateGlMappingBody as UpdateGlMappingBody,
@@ -253,6 +255,225 @@ router.delete(
       .where(
         and(eq(usersTable.id, id), eq(usersTable.orgId, req.auth!.user.orgId)),
       );
+    res.status(204).end();
+  },
+);
+
+// Department management. The /lookups/departments read endpoint is the
+// general-purpose picker source; these admin routes are scoped to admins
+// and surface usage counts so the UI can guard delete.
+router.get(
+  "/admin/departments",
+  requireRole(...ADMIN_ROLES),
+  async (req, res): Promise<void> => {
+    const orgId = req.auth!.user.orgId;
+    const rows = await db
+      .select({
+        id: departmentsTable.id,
+        name: departmentsTable.name,
+        userCount: sql<number>`(
+          SELECT COUNT(*)::int
+          FROM ${usersTable}
+          WHERE ${usersTable.departmentId} = ${departmentsTable.id}
+        )`,
+      })
+      .from(departmentsTable)
+      .where(eq(departmentsTable.orgId, orgId))
+      .orderBy(departmentsTable.name);
+    res.json(rows.map((r) => ({ id: r.id, name: r.name, userCount: Number(r.userCount) })));
+  },
+);
+
+router.post(
+  "/admin/departments",
+  requireRole(...ADMIN_ROLES),
+  async (req, res): Promise<void> => {
+    const parsed = AdminCreateDepartmentBody.safeParse(req.body);
+    if (!parsed.success) {
+      sendProblem(res, 400, "Invalid Body", parsed.error.message);
+      return;
+    }
+    const orgId = req.auth!.user.orgId;
+    const name = parsed.data.name.trim();
+    if (!name) {
+      sendProblem(res, 400, "Invalid Body", "Department name is required.");
+      return;
+    }
+    const existing = (
+      await db
+        .select()
+        .from(departmentsTable)
+        .where(
+          and(eq(departmentsTable.orgId, orgId), eq(departmentsTable.name, name)),
+        )
+        .limit(1)
+    )[0];
+    if (existing) {
+      sendProblem(
+        res,
+        409,
+        "Duplicate Department",
+        `A department named "${name}" already exists.`,
+      );
+      return;
+    }
+    let created;
+    try {
+      [created] = await db
+        .insert(departmentsTable)
+        .values({ orgId, name })
+        .returning();
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        sendProblem(
+          res,
+          409,
+          "Duplicate Department",
+          `A department named "${name}" already exists.`,
+        );
+        return;
+      }
+      throw err;
+    }
+    res.status(201).json({ id: created.id, name: created.name, userCount: 0 });
+  },
+);
+
+router.patch(
+  "/admin/departments/:id",
+  requireRole(...ADMIN_ROLES),
+  async (req, res): Promise<void> => {
+    const id = pathId(req, "id");
+    const parsed = AdminRenameDepartmentBody.safeParse(req.body);
+    if (!parsed.success) {
+      sendProblem(res, 400, "Invalid Body", parsed.error.message);
+      return;
+    }
+    const orgId = req.auth!.user.orgId;
+    const name = parsed.data.name.trim();
+    if (!name) {
+      sendProblem(res, 400, "Invalid Body", "Department name is required.");
+      return;
+    }
+    const existing = (
+      await db
+        .select()
+        .from(departmentsTable)
+        .where(
+          and(eq(departmentsTable.id, id), eq(departmentsTable.orgId, orgId)),
+        )
+        .limit(1)
+    )[0];
+    if (!existing) {
+      sendProblem(res, 404, "Not Found");
+      return;
+    }
+    if (existing.name !== name) {
+      const dup = (
+        await db
+          .select()
+          .from(departmentsTable)
+          .where(
+            and(
+              eq(departmentsTable.orgId, orgId),
+              eq(departmentsTable.name, name),
+            ),
+          )
+          .limit(1)
+      )[0];
+      if (dup && dup.id !== id) {
+        sendProblem(
+          res,
+          409,
+          "Duplicate Department",
+          `A department named "${name}" already exists.`,
+        );
+        return;
+      }
+    }
+    let updated;
+    try {
+      [updated] = await db
+        .update(departmentsTable)
+        .set({ name })
+        .where(eq(departmentsTable.id, id))
+        .returning();
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        sendProblem(
+          res,
+          409,
+          "Duplicate Department",
+          `A department named "${name}" already exists.`,
+        );
+        return;
+      }
+      throw err;
+    }
+    const userCountRow = (
+      await db
+        .select({
+          c: sql<number>`COUNT(*)::int`,
+        })
+        .from(usersTable)
+        .where(eq(usersTable.departmentId, updated.id))
+    )[0];
+    res.json({
+      id: updated.id,
+      name: updated.name,
+      userCount: Number(userCountRow?.c ?? 0),
+    });
+  },
+);
+
+router.delete(
+  "/admin/departments/:id",
+  requireRole(...ADMIN_ROLES),
+  async (req, res): Promise<void> => {
+    const id = pathId(req, "id");
+    const orgId = req.auth!.user.orgId;
+    const existing = (
+      await db
+        .select()
+        .from(departmentsTable)
+        .where(
+          and(eq(departmentsTable.id, id), eq(departmentsTable.orgId, orgId)),
+        )
+        .limit(1)
+    )[0];
+    if (!existing) {
+      sendProblem(res, 404, "Not Found");
+      return;
+    }
+    const userRows = await db
+      .select({ id: usersTable.id })
+      .from(usersTable)
+      .where(eq(usersTable.departmentId, id))
+      .limit(1);
+    if (userRows.length > 0) {
+      sendProblem(
+        res,
+        409,
+        "Department In Use",
+        "Reassign users off this department before deleting it.",
+      );
+      return;
+    }
+    const reportRows = await db
+      .select({ id: expenseReportsTable.id })
+      .from(expenseReportsTable)
+      .where(eq(expenseReportsTable.departmentId, id))
+      .limit(1);
+    if (reportRows.length > 0) {
+      sendProblem(
+        res,
+        409,
+        "Department In Use",
+        "Existing expense reports reference this department. Reassign or remove them first.",
+      );
+      return;
+    }
+    await db.delete(departmentsTable).where(eq(departmentsTable.id, id));
     res.status(204).end();
   },
 );
@@ -1319,6 +1540,18 @@ void isNull;
 function pathId(req: Request, key: string): string {
   const raw = (req.params as Record<string, string | string[]>)[key];
   return Array.isArray(raw) ? raw[0] : raw;
+}
+
+// Detect Postgres unique-constraint violations (SQLSTATE 23505) so we can
+// translate concurrent-insert races into clean 409 responses instead of
+// surfacing as 500s.
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    (err as { code?: unknown }).code === "23505"
+  );
 }
 
 export default router;

@@ -286,6 +286,89 @@ paths:
         "204":
           description: Deactivated
 
+  /admin/departments:
+    get:
+      operationId: adminListDepartments
+      tags: [admin]
+      summary: List departments for the caller's org with assigned-user counts
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AdminDepartment" }
+    post:
+      operationId: adminCreateDepartment
+      tags: [admin]
+      summary: Create a new department
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdminCreateDepartmentBody" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminDepartment" }
+        "409":
+          description: Duplicate name
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /admin/departments/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      operationId: adminRenameDepartment
+      tags: [admin]
+      summary: Rename a department
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdminRenameDepartmentBody" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminDepartment" }
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "409":
+          description: Duplicate name
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+    delete:
+      operationId: adminDeleteDepartment
+      tags: [admin]
+      summary: Delete a department (only when no users or reports reference it)
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "409":
+          description: Department is in use
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
   /admin/gl-mappings:
     get:
       operationId: adminListGlMappings
@@ -1557,6 +1640,26 @@ components:
         id: { type: string, format: uuid }
         name: { type: string }
       required: [id, name]
+
+    AdminDepartment:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        userCount: { type: integer, minimum: 0 }
+      required: [id, name, userCount]
+
+    AdminCreateDepartmentBody:
+      type: object
+      properties:
+        name: { type: string, minLength: 1 }
+      required: [name]
+
+    AdminRenameDepartmentBody:
+      type: object
+      properties:
+        name: { type: string, minLength: 1 }
+      required: [name]
 
     PolicyRule:
       type: object

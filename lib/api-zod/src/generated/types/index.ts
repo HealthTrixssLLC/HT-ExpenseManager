@@ -8,9 +8,12 @@
 
 export * from "./adminAuditLogCategory";
 export * from "./adminAuditLogParams";
+export * from "./adminCreateDepartmentBody";
+export * from "./adminDepartment";
 export * from "./adminListDelegationsParams";
 export * from "./adminListQboAccountsParams";
 export * from "./adminListQboPostingHistoryParams";
+export * from "./adminRenameDepartmentBody";
 export * from "./approvalAction";
 export * from "./approvalActionBody";
 export * from "./auditEntry";

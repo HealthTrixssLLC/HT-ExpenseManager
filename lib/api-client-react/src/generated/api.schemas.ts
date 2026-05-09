@@ -170,6 +170,23 @@ export interface Department {
   name: string;
 }
 
+export interface AdminDepartment {
+  id: string;
+  name: string;
+  /** @minimum 0 */
+  userCount: number;
+}
+
+export interface AdminCreateDepartmentBody {
+  /** @minLength 1 */
+  name: string;
+}
+
+export interface AdminRenameDepartmentBody {
+  /** @minLength 1 */
+  name: string;
+}
+
 export interface PolicyRule {
   name: string;
   value: unknown;

@@ -9,8 +9,15 @@ import {
   adminListQboAccounts,
   useAdminListQboAccounts,
   getAdminListQboAccountsQueryKey,
+  useAdminListDepartments,
+  getAdminListDepartmentsQueryKey,
+  useAdminCreateDepartment,
+  useAdminRenameDepartment,
+  useAdminDeleteDepartment,
+  getListDepartmentsQueryKey,
   type GlMapping,
   type QboAccount,
+  type AdminDepartment,
 } from "@workspace/api-client-react";
 import { HtCard } from "@/components/brand/Card";
 import { HelpLink } from "@/components/help/HelpLink";
@@ -24,7 +31,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { AlertTriangle, Pencil, Check, X, RefreshCcw, Search } from "lucide-react";
+import { AlertTriangle, Pencil, Check, X, RefreshCcw, Search, Trash2, Plus } from "lucide-react";
+import { describeApiError } from "@/lib/api";
 
 interface AccountPickerProps {
   value: string;
@@ -267,12 +275,13 @@ export function GlMappingPage() {
       <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-[var(--ht-ink)]">
-            GL Mapping
+            Departments &amp; GL
           </h1>
           <p className="text-sm text-[var(--ht-ink-3)]">
-            Map expense categories to QuickBooks Online accounts.{" "}
+            Manage the departments employees can pick on their reports, and
+            map each expense category to a QuickBooks Online account.{" "}
             {realConnected
-              ? "Use the picker to search your real QBO Chart of Accounts."
+              ? "Use the GL picker to search your real QBO Chart of Accounts."
               : "Demo mode: enter account references as free text."}
           </p>
         </div>
@@ -282,6 +291,12 @@ export function GlMappingPage() {
         </div>
       </div>
 
+      <DepartmentsCard />
+
+      <div>
+        <h2 className="mb-2 text-lg font-semibold tracking-tight text-[var(--ht-ink)]">
+          GL Mapping
+        </h2>
       <HtCard>
         {mappingsLoading ? (
           <div className="p-8 text-center text-sm text-[var(--ht-ink-3)]">
@@ -381,6 +396,258 @@ export function GlMappingPage() {
                   </TableRow>
                 );
               })}
+            </TableBody>
+          </Table>
+        )}
+      </HtCard>
+      </div>
+    </div>
+  );
+}
+
+function DepartmentsCard() {
+  const qc = useQueryClient();
+  const departmentsQuery = useAdminListDepartments({
+    query: { queryKey: getAdminListDepartmentsQueryKey() },
+  });
+  const departments = departmentsQuery.data ?? [];
+
+  const [newName, setNewName] = useState("");
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
+  const [rowError, setRowError] = useState<{ id: string; message: string } | null>(
+    null,
+  );
+
+  const invalidateAll = () => {
+    qc.invalidateQueries({ queryKey: getAdminListDepartmentsQueryKey() });
+    qc.invalidateQueries({ queryKey: getListDepartmentsQueryKey() });
+  };
+
+  const createDept = useAdminCreateDepartment();
+  const renameDept = useAdminRenameDepartment();
+  const deleteDept = useAdminDeleteDepartment();
+
+  const handleCreate = () => {
+    const name = newName.trim();
+    setCreateError(null);
+    if (!name) {
+      setCreateError("Enter a department name.");
+      return;
+    }
+    createDept.mutate(
+      { data: { name } },
+      {
+        onSuccess: () => {
+          setNewName("");
+          invalidateAll();
+        },
+        onError: (err) => {
+          setCreateError(describeApiError(err).detail);
+        },
+      },
+    );
+  };
+
+  const handleEdit = (dept: AdminDepartment) => {
+    setEditingId(dept.id);
+    setEditName(dept.name);
+    setEditError(null);
+    setRowError(null);
+  };
+
+  const handleCancel = () => {
+    setEditingId(null);
+    setEditName("");
+    setEditError(null);
+  };
+
+  const handleRename = (id: string) => {
+    const name = editName.trim();
+    setEditError(null);
+    if (!name) {
+      setEditError("Department name is required.");
+      return;
+    }
+    renameDept.mutate(
+      { id, data: { name } },
+      {
+        onSuccess: () => {
+          setEditingId(null);
+          setEditName("");
+          invalidateAll();
+        },
+        onError: (err) => {
+          setEditError(describeApiError(err).detail);
+        },
+      },
+    );
+  };
+
+  const handleDelete = (dept: AdminDepartment) => {
+    setRowError(null);
+    if (!window.confirm(`Delete department "${dept.name}"?`)) return;
+    deleteDept.mutate(
+      { id: dept.id },
+      {
+        onSuccess: () => {
+          invalidateAll();
+        },
+        onError: (err) => {
+          setRowError({ id: dept.id, message: describeApiError(err).detail });
+        },
+      },
+    );
+  };
+
+  return (
+    <div data-testid="section-departments">
+      <h2 className="mb-2 text-lg font-semibold tracking-tight text-[var(--ht-ink)]">
+        Departments
+      </h2>
+      <HtCard>
+        {departmentsQuery.isLoading ? (
+          <div className="p-8 text-center text-sm text-[var(--ht-ink-3)]">
+            Loading departments...
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Users</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {departments.map((dept) => {
+                const isEditing = editingId === dept.id;
+                const showRowError = rowError?.id === dept.id;
+                return (
+                  <TableRow
+                    key={dept.id}
+                    data-testid={`row-department-${dept.id}`}
+                  >
+                    <TableCell className="font-medium">
+                      {isEditing ? (
+                        <div className="space-y-1">
+                          <Input
+                            value={editName}
+                            onChange={(e) => setEditName(e.target.value)}
+                            className="h-8 w-64"
+                            data-testid={`input-edit-department-${dept.id}`}
+                            autoFocus
+                          />
+                          {editError ? (
+                            <div
+                              className="text-xs text-red-600"
+                              data-testid={`error-edit-department-${dept.id}`}
+                            >
+                              {editError}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <span>{dept.name}</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-sm text-[var(--ht-ink-3)]">
+                      {dept.userCount}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {isEditing ? (
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleRename(dept.id)}
+                            disabled={renameDept.isPending}
+                            data-testid={`btn-save-department-${dept.id}`}
+                          >
+                            <Check className="h-4 w-4 text-green-600" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleCancel}
+                          >
+                            <X className="h-4 w-4 text-red-600" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-end gap-1">
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleEdit(dept)}
+                              data-testid={`btn-edit-department-${dept.id}`}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDelete(dept)}
+                              disabled={deleteDept.isPending}
+                              data-testid={`btn-delete-department-${dept.id}`}
+                            >
+                              <Trash2 className="h-4 w-4 text-red-600" />
+                            </Button>
+                          </div>
+                          {showRowError ? (
+                            <div
+                              className="max-w-xs text-right text-xs text-red-600"
+                              data-testid={`error-department-${dept.id}`}
+                            >
+                              {rowError!.message}
+                            </div>
+                          ) : null}
+                        </div>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+              <TableRow>
+                <TableCell>
+                  <div className="space-y-1">
+                    <Input
+                      value={newName}
+                      onChange={(e) => setNewName(e.target.value)}
+                      placeholder="New department name"
+                      className="h-8 w-64"
+                      data-testid="input-new-department"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleCreate();
+                      }}
+                    />
+                    {createError ? (
+                      <div
+                        className="text-xs text-red-600"
+                        data-testid="error-new-department"
+                      >
+                        {createError}
+                      </div>
+                    ) : null}
+                  </div>
+                </TableCell>
+                <TableCell />
+                <TableCell className="text-right">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCreate}
+                    disabled={createDept.isPending}
+                    data-testid="btn-add-department"
+                  >
+                    <Plus className="mr-1 h-4 w-4" />
+                    Add department
+                  </Button>
+                </TableCell>
+              </TableRow>
             </TableBody>
           </Table>
         )}

@@ -18,9 +18,12 @@ import type {
 
 import type {
   AdminAuditLogParams,
+  AdminCreateDepartmentBody,
+  AdminDepartment,
   AdminListDelegationsParams,
   AdminListQboAccountsParams,
   AdminListQboPostingHistoryParams,
+  AdminRenameDepartmentBody,
   ApprovalActionBody,
   AuthSession,
   BootstrapBody,
@@ -1346,6 +1349,340 @@ export const useAdminDeactivateUser = <
   TContext
 > => {
   return useMutation(getAdminDeactivateUserMutationOptions(options));
+};
+
+/**
+ * @summary List departments for the caller's org with assigned-user counts
+ */
+export const getAdminListDepartmentsUrl = () => {
+  return `/api/admin/departments`;
+};
+
+export const adminListDepartments = async (
+  options?: RequestInit,
+): Promise<AdminDepartment[]> => {
+  return customFetch<AdminDepartment[]>(getAdminListDepartmentsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getAdminListDepartmentsQueryKey = () => {
+  return [`/api/admin/departments`] as const;
+};
+
+export const getAdminListDepartmentsQueryOptions = <
+  TData = Awaited<ReturnType<typeof adminListDepartments>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof adminListDepartments>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getAdminListDepartmentsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof adminListDepartments>>
+  > = ({ signal }) => adminListDepartments({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof adminListDepartments>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type AdminListDepartmentsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof adminListDepartments>>
+>;
+export type AdminListDepartmentsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List departments for the caller's org with assigned-user counts
+ */
+
+export function useAdminListDepartments<
+  TData = Awaited<ReturnType<typeof adminListDepartments>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof adminListDepartments>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getAdminListDepartmentsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Create a new department
+ */
+export const getAdminCreateDepartmentUrl = () => {
+  return `/api/admin/departments`;
+};
+
+export const adminCreateDepartment = async (
+  adminCreateDepartmentBody: AdminCreateDepartmentBody,
+  options?: RequestInit,
+): Promise<AdminDepartment> => {
+  return customFetch<AdminDepartment>(getAdminCreateDepartmentUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(adminCreateDepartmentBody),
+  });
+};
+
+export const getAdminCreateDepartmentMutationOptions = <
+  TError = ErrorType<Problem>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminCreateDepartment>>,
+    TError,
+    { data: BodyType<AdminCreateDepartmentBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminCreateDepartment>>,
+  TError,
+  { data: BodyType<AdminCreateDepartmentBody> },
+  TContext
+> => {
+  const mutationKey = ["adminCreateDepartment"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminCreateDepartment>>,
+    { data: BodyType<AdminCreateDepartmentBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return adminCreateDepartment(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminCreateDepartmentMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminCreateDepartment>>
+>;
+export type AdminCreateDepartmentMutationBody =
+  BodyType<AdminCreateDepartmentBody>;
+export type AdminCreateDepartmentMutationError = ErrorType<Problem>;
+
+/**
+ * @summary Create a new department
+ */
+export const useAdminCreateDepartment = <
+  TError = ErrorType<Problem>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminCreateDepartment>>,
+    TError,
+    { data: BodyType<AdminCreateDepartmentBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminCreateDepartment>>,
+  TError,
+  { data: BodyType<AdminCreateDepartmentBody> },
+  TContext
+> => {
+  return useMutation(getAdminCreateDepartmentMutationOptions(options));
+};
+
+/**
+ * @summary Rename a department
+ */
+export const getAdminRenameDepartmentUrl = (id: string) => {
+  return `/api/admin/departments/${id}`;
+};
+
+export const adminRenameDepartment = async (
+  id: string,
+  adminRenameDepartmentBody: AdminRenameDepartmentBody,
+  options?: RequestInit,
+): Promise<AdminDepartment> => {
+  return customFetch<AdminDepartment>(getAdminRenameDepartmentUrl(id), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(adminRenameDepartmentBody),
+  });
+};
+
+export const getAdminRenameDepartmentMutationOptions = <
+  TError = ErrorType<Problem>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminRenameDepartment>>,
+    TError,
+    { id: string; data: BodyType<AdminRenameDepartmentBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminRenameDepartment>>,
+  TError,
+  { id: string; data: BodyType<AdminRenameDepartmentBody> },
+  TContext
+> => {
+  const mutationKey = ["adminRenameDepartment"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminRenameDepartment>>,
+    { id: string; data: BodyType<AdminRenameDepartmentBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return adminRenameDepartment(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminRenameDepartmentMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminRenameDepartment>>
+>;
+export type AdminRenameDepartmentMutationBody =
+  BodyType<AdminRenameDepartmentBody>;
+export type AdminRenameDepartmentMutationError = ErrorType<Problem>;
+
+/**
+ * @summary Rename a department
+ */
+export const useAdminRenameDepartment = <
+  TError = ErrorType<Problem>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminRenameDepartment>>,
+    TError,
+    { id: string; data: BodyType<AdminRenameDepartmentBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminRenameDepartment>>,
+  TError,
+  { id: string; data: BodyType<AdminRenameDepartmentBody> },
+  TContext
+> => {
+  return useMutation(getAdminRenameDepartmentMutationOptions(options));
+};
+
+/**
+ * @summary Delete a department (only when no users or reports reference it)
+ */
+export const getAdminDeleteDepartmentUrl = (id: string) => {
+  return `/api/admin/departments/${id}`;
+};
+
+export const adminDeleteDepartment = async (
+  id: string,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getAdminDeleteDepartmentUrl(id), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getAdminDeleteDepartmentMutationOptions = <
+  TError = ErrorType<Problem>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminDeleteDepartment>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminDeleteDepartment>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["adminDeleteDepartment"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminDeleteDepartment>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return adminDeleteDepartment(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminDeleteDepartmentMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminDeleteDepartment>>
+>;
+
+export type AdminDeleteDepartmentMutationError = ErrorType<Problem>;
+
+/**
+ * @summary Delete a department (only when no users or reports reference it)
+ */
+export const useAdminDeleteDepartment = <
+  TError = ErrorType<Problem>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminDeleteDepartment>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminDeleteDepartment>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getAdminDeleteDepartmentMutationOptions(options));
 };
 
 /**

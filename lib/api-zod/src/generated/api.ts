@@ -332,6 +332,54 @@ export const AdminDeactivateUserParams = zod.object({
 });
 
 /**
+ * @summary List departments for the caller's org with assigned-user counts
+ */
+export const adminListDepartmentsResponseUserCountMin = 0;
+
+export const AdminListDepartmentsResponseItem = zod.object({
+  id: zod.string().uuid(),
+  name: zod.string(),
+  userCount: zod.number().min(adminListDepartmentsResponseUserCountMin),
+});
+export const AdminListDepartmentsResponse = zod.array(
+  AdminListDepartmentsResponseItem,
+);
+
+/**
+ * @summary Create a new department
+ */
+
+export const AdminCreateDepartmentBody = zod.object({
+  name: zod.string().min(1),
+});
+
+/**
+ * @summary Rename a department
+ */
+export const AdminRenameDepartmentParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+export const AdminRenameDepartmentBody = zod.object({
+  name: zod.string().min(1),
+});
+
+export const adminRenameDepartmentResponseUserCountMin = 0;
+
+export const AdminRenameDepartmentResponse = zod.object({
+  id: zod.string().uuid(),
+  name: zod.string(),
+  userCount: zod.number().min(adminRenameDepartmentResponseUserCountMin),
+});
+
+/**
+ * @summary Delete a department (only when no users or reports reference it)
+ */
+export const AdminDeleteDepartmentParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+/**
  * @summary GL category mappings
  */
 export const AdminListGlMappingsResponseItem = zod.object({
