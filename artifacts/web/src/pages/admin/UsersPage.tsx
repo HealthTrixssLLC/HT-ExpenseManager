@@ -53,6 +53,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Pencil, UserCheck, UserPlus, UserX } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { describeApiError } from "@/lib/api";
 
 const ALL_ROLES: Role[] = [
   Role.Employee,
@@ -117,6 +118,8 @@ export function UsersPage() {
   const [departmentId, setDepartmentId] = useState("");
   const [managerId, setManagerId] = useState("");
   const [isActive, setIsActive] = useState(true);
+  const [title, setTitle] = useState("");
+  const [isAlsoEmployee, setIsAlsoEmployee] = useState(false);
 
   const { data: users = [], isLoading: usersLoading } = useAdminListUsers({
     query: { queryKey: getAdminListUsersQueryKey() },
@@ -146,7 +149,9 @@ export function UsersPage() {
           email,
           password,
           roles: Array.from(roles),
-          departmentId,
+          title: title.trim() ? title.trim() : undefined,
+          isAlsoEmployee,
+          departmentId: departmentId || undefined,
           managerId: managerId || undefined,
         },
       },
@@ -168,7 +173,9 @@ export function UsersPage() {
         id: selectedUser.id,
         data: {
           roles: Array.from(roles),
-          departmentId,
+          title: title.trim() ? title.trim() : null,
+          isAlsoEmployee,
+          departmentId: departmentId || null,
           managerId: managerId || null,
           isActive,
         },
@@ -204,6 +211,10 @@ export function UsersPage() {
     setDepartmentId("");
     setManagerId("");
     setIsActive(true);
+    setTitle("");
+    setIsAlsoEmployee(false);
+    createUser.reset();
+    updateUser.reset();
   };
 
   const openEdit = (user: User) => {
@@ -212,6 +223,9 @@ export function UsersPage() {
     setDepartmentId(user.departmentId || "");
     setManagerId(user.managerId || "");
     setIsActive(user.isActive);
+    setTitle(user.title ?? "");
+    setIsAlsoEmployee(user.isAlsoEmployee ?? false);
+    updateUser.reset();
     setEditOpen(true);
   };
 
@@ -383,6 +397,14 @@ export function UsersPage() {
               />
             </div>
             <div className="space-y-2">
+              <Label htmlFor="title">Title (Optional)</Label>
+              <Input
+                id="title"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
               <Label>Roles</Label>
               <RolesCheckboxList
                 selected={roles}
@@ -390,13 +412,27 @@ export function UsersPage() {
                 idPrefix="create-role"
               />
             </div>
+            <div className="flex items-center space-x-2">
+              <Switch
+                id="create-also-employee"
+                checked={isAlsoEmployee}
+                onCheckedChange={setIsAlsoEmployee}
+              />
+              <Label htmlFor="create-also-employee">
+                Also an employee (can submit their own reports)
+              </Label>
+            </div>
             <div className="space-y-2">
-              <Label>Department</Label>
-              <Select value={departmentId} onValueChange={setDepartmentId}>
+              <Label>Department (Optional)</Label>
+              <Select
+                value={departmentId || "none"}
+                onValueChange={(v) => setDepartmentId(v === "none" ? "" : v)}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select Department" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
                   {departments.map((d) => (
                     <SelectItem key={d.id} value={d.id}>
                       {d.name}
@@ -424,6 +460,17 @@ export function UsersPage() {
                 </SelectContent>
               </Select>
             </div>
+            {createUser.error ? (
+              <div
+                className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800"
+                data-testid="create-user-error"
+              >
+                <div className="font-medium">
+                  {describeApiError(createUser.error).title}
+                </div>
+                <div>{describeApiError(createUser.error).detail}</div>
+              </div>
+            ) : null}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>
@@ -435,7 +482,6 @@ export function UsersPage() {
                 !fullName ||
                 !email ||
                 !password ||
-                !departmentId ||
                 roles.size === 0 ||
                 createUser.isPending
               }
@@ -508,6 +554,14 @@ export function UsersPage() {
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="space-y-2">
+              <Label htmlFor="edit-title">Title (Optional)</Label>
+              <Input
+                id="edit-title"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
               <Label>Roles</Label>
               <RolesCheckboxList
                 selected={roles}
@@ -515,13 +569,27 @@ export function UsersPage() {
                 idPrefix="edit-role"
               />
             </div>
+            <div className="flex items-center space-x-2">
+              <Switch
+                id="edit-also-employee"
+                checked={isAlsoEmployee}
+                onCheckedChange={setIsAlsoEmployee}
+              />
+              <Label htmlFor="edit-also-employee">
+                Also an employee (can submit their own reports)
+              </Label>
+            </div>
             <div className="space-y-2">
-              <Label>Department</Label>
-              <Select value={departmentId} onValueChange={setDepartmentId}>
+              <Label>Department (Optional)</Label>
+              <Select
+                value={departmentId || "none"}
+                onValueChange={(v) => setDepartmentId(v === "none" ? "" : v)}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select Department" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
                   {departments.map((d) => (
                     <SelectItem key={d.id} value={d.id}>
                       {d.name}
@@ -553,6 +621,17 @@ export function UsersPage() {
               <Switch id="active" checked={isActive} onCheckedChange={setIsActive} />
               <Label htmlFor="active">Active User</Label>
             </div>
+            {updateUser.error ? (
+              <div
+                className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800"
+                data-testid="edit-user-error"
+              >
+                <div className="font-medium">
+                  {describeApiError(updateUser.error).title}
+                </div>
+                <div>{describeApiError(updateUser.error).detail}</div>
+              </div>
+            ) : null}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditOpen(false)}>
@@ -560,7 +639,7 @@ export function UsersPage() {
             </Button>
             <Button
               onClick={handleEdit}
-              disabled={!departmentId || roles.size === 0 || updateUser.isPending}
+              disabled={roles.size === 0 || updateUser.isPending}
             >
               {updateUser.isPending ? "Saving..." : "Save Changes"}
             </Button>
