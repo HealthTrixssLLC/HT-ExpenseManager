@@ -10,12 +10,13 @@ import {
   useRegisterReceipt,
   useListLineItems,
   getListLineItemsQueryKey,
-  useAttachReceiptToLine
+  useAttachReceiptToLine,
+  useDeleteReceipt
 } from "@workspace/api-client-react";
 import { HtCard } from "@/components/brand/Card";
 import { ReceiptThumb } from "@/components/brand/ReceiptThumb";
 import { Button } from "@/components/ui/button";
-import { UploadCloud, Check, Paperclip, X } from "lucide-react";
+import { UploadCloud, Check, Paperclip, X, Trash2 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatMoney, formatDate } from "@/lib/format";
 import { notifySuccess } from "@/lib/notify";
@@ -48,6 +49,7 @@ export function ReceiptsPage({ id }: { id: string }) {
   const requestUploadUrl = useRequestUploadUrl();
   const registerReceipt = useRegisterReceipt();
   const attachToLine = useAttachReceiptToLine();
+  const deleteReceipt = useDeleteReceipt();
 
   const isEditable = report?.status === "Draft" || report?.status === "Changes Requested";
 
@@ -155,6 +157,25 @@ export function ReceiptsPage({ id }: { id: string }) {
     return () => window.removeEventListener("paste", onPaste);
   }, [isEditable, uploadFiles]);
 
+  const handleDelete = (receiptId: string, filename: string) => {
+    if (!confirm(`Delete "${filename}"? This cannot be undone.`)) return;
+    deleteReceipt.mutate({ id: receiptId }, {
+      onSuccess: () => {
+        qc.invalidateQueries({ queryKey: getListReceiptsQueryKey(id) });
+        qc.invalidateQueries({ queryKey: getGetReportQueryKey(id) });
+        notifySuccess("Receipt deleted", filename);
+      },
+      // Errors are surfaced globally by queryClient's mutationCache.onError
+      // (descriptive toast for 403 / 404 / 5xx). We also force a refresh of
+      // the receipts list so a stale row that was already gone server-side
+      // disappears from the UI rather than leaving a dead delete button.
+      onError: () => {
+        qc.invalidateQueries({ queryKey: getListReceiptsQueryKey(id) });
+        qc.invalidateQueries({ queryKey: getGetReportQueryKey(id) });
+      },
+    });
+  };
+
   const handleAttach = (receiptId: string, lineItemId: string) => {
     const receipt = receipts.find((r) => r.id === receiptId);
     if (!receipt) return;
@@ -225,7 +246,22 @@ export function ReceiptsPage({ id }: { id: string }) {
               <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
                 {orphans.map((receipt) => (
                   <div key={receipt.id} className="space-y-2">
-                    <ReceiptThumb receipt={receipt} size={192} />
+                    <div className="relative group">
+                      <ReceiptThumb receipt={receipt} size={192} />
+                      {isEditable && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDelete(receipt.id, receipt.filename)}
+                          disabled={deleteReceipt.isPending}
+                          aria-label={`Delete ${receipt.filename}`}
+                          data-testid={`button-delete-receipt-${receipt.id}`}
+                          className="absolute top-1 right-1 h-7 w-7 bg-white/90 hover:bg-red-50 text-red-600 hover:text-red-700 border border-[var(--ht-border)] shadow-sm"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      )}
+                    </div>
                     {isEditable && (
                       <div className="px-1">
                         <Select onValueChange={(val) => handleAttach(receipt.id, val)}>

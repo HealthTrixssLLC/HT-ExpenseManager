@@ -31,6 +31,7 @@ export function ReceiptViewer({
   canEdit,
   onAttach,
   onDetach,
+  onDelete,
   isMutating,
 }: {
   receipt: Receipt | null;
@@ -41,6 +42,9 @@ export function ReceiptViewer({
   canEdit?: boolean;
   onAttach?: (receipt: Receipt, lineId: string) => Promise<void> | void;
   onDetach?: (receipt: Receipt) => Promise<void> | void;
+  // Optional: when provided AND the receipt is currently unattached, the
+  // viewer surfaces a delete affordance in the top bar.
+  onDelete?: (receipt: Receipt) => Promise<void> | void;
   isMutating?: boolean;
 }) {
   const insets = useSafeAreaInsets();
@@ -92,6 +96,17 @@ export function ReceiptViewer({
           {dlQuery.data?.downloadURL ? (
             <Pressable onPress={openExternal} style={styles.iconBtn} hitSlop={10}>
               <Feather name="external-link" size={20} color="#FFFFFF" />
+            </Pressable>
+          ) : null}
+          {receipt && onDelete && !receipt.lineItemId ? (
+            <Pressable
+              onPress={() => onDelete(receipt)}
+              style={styles.iconBtn}
+              hitSlop={10}
+              disabled={!!isMutating}
+              accessibilityLabel={`Delete ${receipt.filename}`}
+            >
+              <Feather name="trash-2" size={20} color="#FFFFFF" />
             </Pressable>
           ) : null}
         </View>

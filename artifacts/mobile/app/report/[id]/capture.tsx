@@ -3,10 +3,14 @@ import {
   ApiError,
   type LineItem,
   getGetReportQueryKey,
+  getListReceiptsQueryKey,
+  getListReportsQueryKey,
+  useDeleteReceipt,
   useGetReport,
   useRegisterReceipt,
   useRequestUploadUrl,
 } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   CameraView,
   useCameraPermissions,
@@ -55,6 +59,7 @@ type Pending = Captured & {
   error?: string;
   lineItemId: string | null;
   attempts: number;
+  receiptId?: string;
 };
 
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -84,11 +89,13 @@ export default function CaptureScreen() {
   const router = useRouter();
   const cameraRef = useRef<CameraView | null>(null);
 
+  const qc = useQueryClient();
   const reportQ = useGetReport(id, {
     query: { enabled: !!id, queryKey: getGetReportQueryKey(id) },
   });
   const uploadUrlMutation = useRequestUploadUrl();
   const registerMutation = useRegisterReceipt();
+  const deleteMutation = useDeleteReceipt();
 
   const [permission, requestPermission] = useCameraPermissions();
   const [facing] = useState<CameraType>("back");
@@ -219,6 +226,53 @@ export default function CaptureScreen() {
     if (activePendingId === pid) setActivePendingId(null);
   };
 
+  const deleteUploaded = (pid: string) => {
+    const target = pending.find((p) => p.id === pid);
+    // Scope: this delete is for orphan / "report inbox" receipts only.
+    // Receipts that were assigned to a line item during capture must use
+    // the existing detach-or-delete flow on the report detail screen.
+    if (!target?.receiptId || target.lineItemId) return;
+    const confirmAndDelete = () => {
+      deleteMutation.mutate(
+        { id: target.receiptId! },
+        {
+          onSuccess: () => {
+            setPending((arr) => arr.filter((p) => p.id !== pid));
+            if (activePendingId === pid) setActivePendingId(null);
+            qc.invalidateQueries({ queryKey: getListReceiptsQueryKey(id) });
+            qc.invalidateQueries({ queryKey: getGetReportQueryKey(id) });
+            qc.invalidateQueries({ queryKey: getListReportsQueryKey({ scope: "mine" }) });
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+            pickAlert("Receipt deleted", target.filename);
+          },
+          onError: (err: unknown) => {
+            const msg =
+              err instanceof ApiError
+                ? err.message
+                : err instanceof Error
+                  ? err.message
+                  : "Couldn't delete receipt.";
+            pickAlert("Couldn't delete receipt", msg);
+          },
+        },
+      );
+    };
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      if (window.confirm(`Delete "${target.filename}"? This cannot be undone.`)) {
+        confirmAndDelete();
+      }
+    } else {
+      Alert.alert(
+        "Delete receipt?",
+        `"${target.filename}" will be permanently removed.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Delete", style: "destructive", onPress: confirmAndDelete },
+        ],
+      );
+    }
+  };
+
   // ---- Upload (with progress + retry) -------------------------------------
 
   const uploadOne = async (p: Pending) => {
@@ -267,7 +321,7 @@ export default function CaptureScreen() {
       });
 
       // 4. Register the receipt
-      await registerMutation.mutateAsync({
+      const registered = await registerMutation.mutateAsync({
         id,
         data: {
           objectPath: upload.objectPath,
@@ -280,7 +334,11 @@ export default function CaptureScreen() {
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       setPending((arr) =>
-        arr.map((q) => (q.id === p.id ? { ...q, status: "done", progress: 100 } : q)),
+        arr.map((q) =>
+          q.id === p.id
+            ? { ...q, status: "done", progress: 100, receiptId: registered?.id }
+            : q,
+        ),
       );
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : err instanceof Error ? err.message : "Upload failed.";
@@ -529,6 +587,8 @@ export default function CaptureScreen() {
             }
             onRetry={() => uploadOne(p)}
             onRemove={() => removeFromQueue(p.id)}
+            onDelete={() => deleteUploaded(p.id)}
+            deleting={deleteMutation.isPending}
             isExpanded={activePendingId === p.id}
             onToggle={() => setActivePendingId(activePendingId === p.id ? null : p.id)}
           />
@@ -589,6 +649,8 @@ function PendingRow({
   onAssign,
   onRetry,
   onRemove,
+  onDelete,
+  deleting,
   isExpanded,
   onToggle,
 }: {
@@ -598,6 +660,8 @@ function PendingRow({
   onAssign: (lineItemId: string | null) => void;
   onRetry: () => void;
   onRemove: () => void;
+  onDelete: () => void;
+  deleting: boolean;
   isExpanded: boolean;
   onToggle: () => void;
 }) {
@@ -627,7 +691,7 @@ function PendingRow({
             <Text style={styles.pendingErr}>{p.error}</Text>
           ) : null}
         </View>
-        <View style={{ alignItems: "flex-end" }}>
+        <View style={{ alignItems: "flex-end", flexDirection: "row", gap: 10 }}>
           {p.status === "queued" ? (
             <Pressable onPress={onRemove} hitSlop={6} disabled={disabled}>
               <Feather name="x" size={18} color={HT.ink4} />
@@ -635,7 +699,21 @@ function PendingRow({
           ) : p.status === "uploading" ? (
             <Text style={styles.pendingStatus}>{p.progress}%</Text>
           ) : p.status === "done" ? (
-            <Feather name="check-circle" size={20} color={HT.success} />
+            <>
+              <Feather name="check-circle" size={20} color={HT.success} />
+              {/* Delete only for orphan / "report inbox" uploads — attached
+                  receipts are managed from the report detail screen. */}
+              {p.receiptId && !p.lineItemId ? (
+                <Pressable
+                  onPress={onDelete}
+                  hitSlop={6}
+                  disabled={deleting}
+                  accessibilityLabel={`Delete ${p.filename}`}
+                >
+                  <Feather name="trash-2" size={18} color={HT.danger} />
+                </Pressable>
+              ) : null}
+            </>
           ) : (
             <Pressable onPress={onRetry} hitSlop={6} disabled={disabled}>
               <Feather name="rotate-ccw" size={18} color={HT.warning} />

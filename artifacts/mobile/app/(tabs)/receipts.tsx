@@ -1,16 +1,19 @@
 import { Feather } from "@expo/vector-icons";
 import {
+  ApiError,
   type ExpenseReport,
   type ExpenseReportSummary,
   type Receipt,
   getGetReportQueryKey,
   getListReceiptsQueryKey,
   getListReportsQueryKey,
+  useDeleteReceipt,
   useGetReport,
   useListReceipts,
   useListReports,
   useUpdateReceipt,
 } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
@@ -69,6 +72,50 @@ export default function ReceiptsTab() {
   });
   const activeReport = activeReportQ.data as ExpenseReport | undefined;
   const updateReceipt = useUpdateReceipt();
+  const deleteReceipt = useDeleteReceipt();
+  const qc = useQueryClient();
+
+  const performDelete = useCallback(
+    async (rcpt: Receipt, reportId: string) => {
+      try {
+        await deleteReceipt.mutateAsync({ id: rcpt.id });
+        setViewer(null);
+        qc.invalidateQueries({ queryKey: getListReceiptsQueryKey(reportId) });
+        qc.invalidateQueries({ queryKey: getGetReportQueryKey(reportId) });
+        qc.invalidateQueries({ queryKey: getListReportsQueryKey({ scope: "mine" }) });
+        Alert.alert("Receipt deleted", rcpt.filename);
+      } catch (err) {
+        const msg =
+          err instanceof ApiError
+            ? err.message
+            : err instanceof Error
+              ? err.message
+              : "Please try again.";
+        Alert.alert("Couldn't delete receipt", msg);
+      }
+    },
+    [deleteReceipt, qc],
+  );
+
+  const confirmDelete = useCallback(
+    (rcpt: Receipt, reportId: string) => {
+      Alert.alert(
+        "Delete receipt?",
+        `"${rcpt.filename}" will be permanently removed.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: () => {
+              void performDelete(rcpt, reportId);
+            },
+          },
+        ],
+      );
+    },
+    [performDelete],
+  );
 
   // Show reports that have at least one receipt OR are editable (so user can attach)
   const reportsWithReceipts = (query.data ?? []).filter(
@@ -133,6 +180,8 @@ export default function ReceiptsTab() {
                   editable: isEditable(item.status),
                 })
               }
+              onDeleteReceipt={(r) => confirmDelete(r, item.id)}
+              isDeleting={deleteReceipt.isPending}
             />
           )}
           ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
@@ -159,7 +208,7 @@ export default function ReceiptsTab() {
         onClose={() => setViewer(null)}
         lines={viewer?.editable ? activeReport?.lineItems : undefined}
         canEdit={!!viewer?.editable}
-        isMutating={updateReceipt.isPending}
+        isMutating={updateReceipt.isPending || deleteReceipt.isPending}
         onAttach={async (rcpt, lineId) => {
           try {
             const updated = await updateReceipt.mutateAsync({
@@ -175,6 +224,13 @@ export default function ReceiptsTab() {
             );
           }
         }}
+        onDelete={
+          viewer?.editable
+            ? (rcpt) => {
+                if (viewer) confirmDelete(rcpt, viewer.reportId);
+              }
+            : undefined
+        }
         onDetach={async (rcpt) => {
           try {
             const updated = await updateReceipt.mutateAsync({
@@ -200,11 +256,15 @@ function ReportReceiptsCard({
   onCapture,
   onOpen,
   onPickReceipt,
+  onDeleteReceipt,
+  isDeleting,
 }: {
   item: ExpenseReportSummary;
   onCapture: () => void;
   onOpen: () => void;
   onPickReceipt: (r: Receipt) => void;
+  onDeleteReceipt: (r: Receipt) => void;
+  isDeleting: boolean;
 }) {
   const editable = isEditable(item.status);
   const receiptsQ = useListReceipts(item.id, {
@@ -248,14 +308,32 @@ function ReportReceiptsCard({
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.thumbStrip}
           >
-            {(receiptsQ.data ?? []).map((r) => (
-              <ReceiptThumb
-                key={r.id}
-                receipt={r}
-                size={72}
-                onPress={() => onPickReceipt(r)}
-              />
-            ))}
+            {(receiptsQ.data ?? []).map((r) => {
+              const showDelete = editable && !r.lineItemId;
+              return (
+                <View key={r.id} style={styles.thumbCell}>
+                  <ReceiptThumb
+                    receipt={r}
+                    size={72}
+                    onPress={() => onPickReceipt(r)}
+                  />
+                  {showDelete ? (
+                    <Pressable
+                      onPress={() => onDeleteReceipt(r)}
+                      hitSlop={6}
+                      disabled={isDeleting}
+                      style={({ pressed }) => [
+                        styles.thumbDeleteBtn,
+                        pressed && { opacity: 0.7 },
+                      ]}
+                      accessibilityLabel={`Delete ${r.filename}`}
+                    >
+                      <Feather name="trash-2" size={12} color="#FFFFFF" />
+                    </Pressable>
+                  ) : null}
+                </View>
+              );
+            })}
           </ScrollView>
         )
       ) : null}
@@ -311,6 +389,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingBottom: 12,
     gap: 8,
+  },
+  thumbCell: {
+    position: "relative",
+  },
+  thumbDeleteBtn: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: HT.danger,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: HT.surface,
   },
   thumbLoading: {
     paddingVertical: 18,
