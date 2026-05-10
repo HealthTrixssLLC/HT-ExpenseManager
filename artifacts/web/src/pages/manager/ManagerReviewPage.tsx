@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useLocation } from "wouter";
+import { useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetReport,
@@ -33,7 +33,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { AlertTriangle, ExternalLink } from "lucide-react";
+import { AlertTriangle, Paperclip } from "lucide-react";
 
 export function ManagerReviewPage({ id }: { id: string }) {
   const qc = useQueryClient();
@@ -115,12 +115,6 @@ export function ManagerReviewPage({ id }: { id: string }) {
           <p className="mt-1 text-[var(--ht-ink-2)]">
             {report.employee?.fullName} • {report.periodStart ? formatDate(report.periodStart) : "-"} - {report.periodEnd ? formatDate(report.periodEnd) : "-"}
           </p>
-          <Link href={`/reports/${report.id}`}>
-            <Button variant="ghost" size="sm" className="mt-2 -ml-3">
-              <ExternalLink className="w-4 h-4 mr-1" />
-              Open full report (edit)
-            </Button>
-          </Link>
         </div>
         <div className="text-right">
           <div className="text-3xl font-semibold tracking-tight text-[var(--ht-ink)]">
@@ -155,23 +149,60 @@ export function ManagerReviewPage({ id }: { id: string }) {
                   <TableHead>Date</TableHead>
                   <TableHead>Merchant</TableHead>
                   <TableHead>Category</TableHead>
+                  <TableHead>Payment</TableHead>
+                  <TableHead>Flags</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {lineItems.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center text-[var(--ht-ink-3)] h-24">
+                    <TableCell colSpan={6} className="text-center text-[var(--ht-ink-3)] h-24">
                       No line items.
                     </TableCell>
                   </TableRow>
                 ) : (
                   lineItems.map(item => (
-                    <TableRow key={item.id}>
-                      <TableCell className="text-sm">{formatDate(item.occurredOn)}</TableCell>
-                      <TableCell className="font-medium">{item.merchant}</TableCell>
-                      <TableCell className="text-[var(--ht-ink-2)]">{item.category || "Uncategorized"}</TableCell>
-                      <TableCell className="text-right font-medium">{formatMoney(Number(item.amount))}</TableCell>
+                    <TableRow key={item.id} data-testid={`review-line-item-${item.id}`}>
+                      <TableCell className="text-sm align-top">{formatDate(item.occurredOn)}</TableCell>
+                      <TableCell className="align-top">
+                        <div className="font-medium">{item.merchant}</div>
+                        {item.description ? (
+                          <div className="mt-1 text-xs text-[var(--ht-ink-3)] whitespace-pre-wrap">
+                            {item.description}
+                          </div>
+                        ) : null}
+                      </TableCell>
+                      <TableCell className="text-[var(--ht-ink-2)] align-top">
+                        {item.category || "Uncategorized"}
+                      </TableCell>
+                      <TableCell className="text-[var(--ht-ink-2)] text-xs align-top">
+                        {item.paymentMethod}
+                      </TableCell>
+                      <TableCell className="align-top">
+                        <div className="flex flex-wrap gap-1">
+                          {item.needsReview && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 text-amber-800 px-2 py-0.5 text-xs font-medium">
+                              <AlertTriangle className="w-3 h-3" />
+                              Policy review
+                            </span>
+                          )}
+                          {item.receiptCount === 0 ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-red-50 text-red-700 px-2 py-0.5 text-xs font-medium">
+                              <Paperclip className="w-3 h-3" />
+                              Missing receipt
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 text-emerald-700 px-2 py-0.5 text-xs font-medium">
+                              <Paperclip className="w-3 h-3" />
+                              {item.receiptCount} receipt{item.receiptCount === 1 ? "" : "s"}
+                            </span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right font-medium align-top">
+                        {formatMoney(Number(item.amount))}
+                      </TableCell>
                     </TableRow>
                   ))
                 )}

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link } from "wouter";
+import { useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatMoney, formatRelative } from "@/lib/format";
 import { StatusPill } from "@/components/brand/StatusPill";
@@ -47,6 +47,7 @@ function ageBucketLabel(days: number): { label: string; tone: string } {
 
 export function ManagerQueuePage() {
   const qc = useQueryClient();
+  const [, setLocation] = useLocation();
   const { data: reports = [], isLoading } = useManagerQueue({
     query: { queryKey: getManagerQueueQueryKey() }
   });
@@ -217,8 +218,13 @@ export function ManagerQueuePage() {
                 const days = ageDays(report.updatedAt);
                 const ag = ageBucketLabel(days);
                 return (
-                  <TableRow key={report.id} data-testid={`table-row-report-${report.id}`}>
-                    <TableCell>
+                  <TableRow
+                    key={report.id}
+                    data-testid={`table-row-report-${report.id}`}
+                    onClick={() => setLocation(`/manager/queue/${report.id}`)}
+                    className="cursor-pointer hover:bg-[var(--ht-primary-soft,#EEF2F8)]"
+                  >
+                    <TableCell onClick={(e) => e.stopPropagation()}>
                       <Checkbox
                         checked={selected.has(report.id)}
                         onCheckedChange={(c) => toggleOne(report.id, !!c)}
@@ -227,12 +233,9 @@ export function ManagerQueuePage() {
                     </TableCell>
                     <TableCell className="font-mono text-xs">{report.displayCode}</TableCell>
                     <TableCell>
-                      <Link
-                        href={`/manager/queue/${report.id}`}
-                        className="font-medium text-[var(--ht-primary)] hover:underline"
-                      >
+                      <span className="font-medium text-[var(--ht-primary)] hover:underline">
                         {report.title}
-                      </Link>
+                      </span>
                     </TableCell>
                     <TableCell>{report.employee?.fullName}</TableCell>
                     <TableCell>

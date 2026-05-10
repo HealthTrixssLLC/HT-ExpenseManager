@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import {
   useListReports,
   getListReportsQueryKey,
@@ -20,6 +20,7 @@ import {
 import { PlusCircle, Search } from "lucide-react";
 
 export function MyReportsPage() {
+  const [, setLocation] = useLocation();
   const [search, setSearch] = useState("");
   
   const { data: reports = [], isLoading } = useListReports(
@@ -83,15 +84,17 @@ export function MyReportsPage() {
             </TableHeader>
             <TableBody>
               {filteredReports.map((report) => (
-                <TableRow key={report.id}>
+                <TableRow
+                  key={report.id}
+                  data-testid={`my-reports-row-${report.id}`}
+                  onClick={() => setLocation(`/reports/${report.id}`)}
+                  className="cursor-pointer hover:bg-[var(--ht-primary-soft,#EEF2F8)]"
+                >
                   <TableCell className="font-mono text-xs">{report.displayCode}</TableCell>
                   <TableCell className="font-medium">
-                    <Link
-                      href={`/reports/${report.id}`}
-                      className="text-[var(--ht-primary)] hover:underline"
-                    >
+                    <span className="text-[var(--ht-primary)] hover:underline">
                       {report.title}
-                    </Link>
+                    </span>
                   </TableCell>
                   <TableCell className="text-sm text-[var(--ht-ink-2)]">
                     {report.period ? formatDate(report.period) : "-"}

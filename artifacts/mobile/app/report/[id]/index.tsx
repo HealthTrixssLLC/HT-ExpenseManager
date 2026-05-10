@@ -50,6 +50,14 @@ import { useAuth } from "@/contexts/AuthContext";
 import { confirmAction } from "@/lib/confirm";
 import type { Receipt } from "@workspace/api-client-react";
 
+const POST_FINANCE_LOCKED_STATUSES: ExpenseReport["status"][] = [
+  "Finance Approved",
+  "Posted to QuickBooks",
+  "Ready for Payroll Reimbursement",
+  "Paid Through Payroll",
+  "Reconciled",
+];
+
 function showError(title: string, message: string) {
   if (Platform.OS === "web" && typeof window !== "undefined") {
     window.alert(`${title}\n\n${message}`);
@@ -122,6 +130,8 @@ export default function ReportDetailScreen() {
   const userRoles = user?.roles ?? [];
   const isManager = userRoles.includes("Manager Approver");
   const editable = isOwner && isEditable(report.status);
+  const showLockedNotice =
+    isOwner && !editable && POST_FINANCE_LOCKED_STATUSES.includes(report.status);
   const canSubmit = editable;
   const canRecall = isOwner && report.status === "Submitted";
   const canVoid =
@@ -129,7 +139,9 @@ export default function ReportDetailScreen() {
     userRoles.includes("Accounting Admin") ||
     userRoles.includes("System Admin");
   const canDelete = isOwner && report.status === "Draft";
-  const canManagerAct = isManager && report.status === "Manager Review";
+  const canManagerAct =
+    isManager &&
+    (report.status === "Manager Review" || report.status === "Submitted");
 
   const totalCount = report.lineItems.length;
 
@@ -269,7 +281,20 @@ export default function ReportDetailScreen() {
           <Feather name="chevron-left" size={26} color={HT.ink} />
         </Pressable>
         <Text style={styles.headerTitle} numberOfLines={1}>{report.displayCode}</Text>
-        <HelpLink topicId="lifecycle" />
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          {editable ? (
+            <Pressable
+              onPress={() => router.push(`/report/${id}/edit`)}
+              style={({ pressed }) => [styles.editChip, pressed && { opacity: 0.7 }]}
+              hitSlop={6}
+              testID="button-edit-report"
+            >
+              <Feather name="edit-2" size={14} color={HT.navy} />
+              <Text style={styles.editChipText}>Edit</Text>
+            </Pressable>
+          ) : null}
+          <HelpLink topicId="lifecycle" />
+        </View>
       </View>
 
       <ScrollView
@@ -310,6 +335,19 @@ export default function ReportDetailScreen() {
             </View>
           </View>
         </View>
+
+        {showLockedNotice ? (
+          <View style={styles.lockedNotice}>
+            <Feather name="lock" size={18} color={HT.ink3} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.lockedTitle}>This report is locked</Text>
+              <Text style={styles.lockedBody}>
+                Finance has approved this report, so it can no longer be
+                edited. Contact your finance team if a correction is needed.
+              </Text>
+            </View>
+          </View>
+        ) : null}
 
         <Section title="Status">
           <View style={{ padding: 16 }}>
@@ -382,13 +420,25 @@ export default function ReportDetailScreen() {
                 <View style={{ alignItems: "flex-end", gap: 8 }}>
                   <Money value={line.amount} size={16} weight="700" />
                   {editable ? (
-                    <Pressable
-                      onPress={() => removeLine(line)}
-                      hitSlop={8}
-                      style={({ pressed }) => [{ opacity: pressed ? 0.4 : 0.7 }]}
-                    >
-                      <Feather name="trash-2" size={16} color={HT.danger} />
-                    </Pressable>
+                    <View style={{ flexDirection: "row", gap: 12 }}>
+                      <Pressable
+                        onPress={() =>
+                          router.push(`/report/${id}/edit-line/${line.id}`)
+                        }
+                        hitSlop={8}
+                        style={({ pressed }) => [{ opacity: pressed ? 0.4 : 0.85 }]}
+                        testID={`button-edit-line-${line.id}`}
+                      >
+                        <Feather name="edit-2" size={16} color={HT.navy} />
+                      </Pressable>
+                      <Pressable
+                        onPress={() => removeLine(line)}
+                        hitSlop={8}
+                        style={({ pressed }) => [{ opacity: pressed ? 0.4 : 0.7 }]}
+                      >
+                        <Feather name="trash-2" size={16} color={HT.danger} />
+                      </Pressable>
+                    </View>
                   ) : null}
                 </View>
               </View>
@@ -741,6 +791,26 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   totalValue: { fontFamily: "Inter_700Bold", fontSize: 22, color: HT.ink },
+  lockedNotice: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    marginHorizontal: 12,
+    marginTop: 12,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: HT.border,
+    backgroundColor: HT.surfaceAlt,
+  },
+  lockedTitle: { fontFamily: "Inter_700Bold", fontSize: 14, color: HT.ink },
+  lockedBody: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 13,
+    color: HT.ink2,
+    marginTop: 2,
+    lineHeight: 18,
+  },
   addBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -749,6 +819,16 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   addBtnText: { fontFamily: "Inter_600SemiBold", fontSize: 13, color: HT.navy },
+  editChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: HT.tintNavy,
+  },
+  editChipText: { fontFamily: "Inter_700Bold", fontSize: 12, color: HT.navy },
   lineRow: {
     flexDirection: "row",
     alignItems: "flex-start",

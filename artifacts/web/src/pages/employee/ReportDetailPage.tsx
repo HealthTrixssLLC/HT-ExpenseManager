@@ -46,7 +46,16 @@ import {
   ArrowLeftCircle,
   Pencil,
   AlertTriangle,
+  Lock,
 } from "lucide-react";
+
+const POST_FINANCE_LOCKED_STATUSES = new Set([
+  "Finance Approved",
+  "Posted to QuickBooks",
+  "Ready for Payroll Reimbursement",
+  "Paid Through Payroll",
+  "Reconciled",
+]);
 
 export function ReportDetailPage({ id }: { id: string }) {
   const qc = useQueryClient();
@@ -161,6 +170,8 @@ export function ReportDetailPage({ id }: { id: string }) {
   const canRecall = isOwner && (report.status === "Submitted" || report.status === "Manager Review");
   const canSubmit = isOwner && (report.status === "Draft" || report.status === "Changes Requested");
   const showFooter = canEdit || canRecall || canSubmit;
+  const showLockedNotice =
+    isOwner && !canEdit && POST_FINANCE_LOCKED_STATUSES.has(report.status);
 
   return (
     <div className="space-y-6 pb-24" data-testid="page-reportdetail">
@@ -205,6 +216,22 @@ export function ReportDetailPage({ id }: { id: string }) {
           <div className="text-sm text-[var(--ht-ink-3)] mt-1">Total Amount</div>
         </div>
       </div>
+
+      {showLockedNotice && (
+        <div
+          className="flex items-start gap-3 p-3 rounded-md border border-[var(--ht-border)] bg-gray-50 text-sm text-[var(--ht-ink-2)]"
+          data-testid="banner-report-locked"
+        >
+          <Lock className="w-5 h-5 shrink-0 mt-px text-[var(--ht-ink-3)]" />
+          <div>
+            <p className="font-medium text-[var(--ht-ink)]">This report is locked</p>
+            <p>
+              Finance has approved this report, so it can no longer be edited.
+              Contact your finance team if a correction is needed.
+            </p>
+          </div>
+        </div>
+      )}
 
       {report.editedSinceLastApproval && (
         <div
