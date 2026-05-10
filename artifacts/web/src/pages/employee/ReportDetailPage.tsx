@@ -342,6 +342,16 @@ export function ReportDetailPage({ id }: { id: string }) {
               )}
             </div>
           </HtCard>
+
+          <HtCard>
+            <HtCardHeader
+              title="Audit Log"
+              subtitle={`${timeline.length} event${timeline.length === 1 ? "" : "s"} on this report`}
+            />
+            <div className="p-4" data-testid="report-audit-log">
+              <ChangeFeed items={timeline} />
+            </div>
+          </HtCard>
         </div>
 
         <div className="space-y-6">
@@ -353,16 +363,6 @@ export function ReportDetailPage({ id }: { id: string }) {
           </HtCard>
 
           <ReportTagPicker report={report} />
-
-          <HtCard>
-            <HtCardHeader
-              title="Audit Log"
-              subtitle={`${timeline.length} event${timeline.length === 1 ? "" : "s"} on this report`}
-            />
-            <div className="p-4" data-testid="report-audit-log">
-              <ChangeFeed items={timeline} />
-            </div>
-          </HtCard>
         </div>
       </div>
 

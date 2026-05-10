@@ -222,15 +222,6 @@ export function ManagerReviewPage({ id }: { id: string }) {
               )}
             </div>
           </HtCard>
-        </div>
-
-        <div className="space-y-6">
-          <HtCard>
-            <HtCardHeader title="Workflow Status" />
-            <div className="p-4">
-              <StatusTracker current={report.status} />
-            </div>
-          </HtCard>
 
           <HtCard>
             <HtCardHeader
@@ -239,6 +230,15 @@ export function ManagerReviewPage({ id }: { id: string }) {
             />
             <div className="p-4" data-testid="report-audit-log">
               <ChangeFeed items={timeline} />
+            </div>
+          </HtCard>
+        </div>
+
+        <div className="space-y-6">
+          <HtCard>
+            <HtCardHeader title="Workflow Status" />
+            <div className="p-4">
+              <StatusTracker current={report.status} />
             </div>
           </HtCard>
         </div>
