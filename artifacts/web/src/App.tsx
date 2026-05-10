@@ -10,6 +10,7 @@ import { useAuth } from "@/lib/auth-context";
 import { AppShell, ProtectedRoute } from "@/components/AppShell";
 import { LoginPage } from "@/pages/LoginPage";
 import { ForbiddenPage } from "@/pages/ForbiddenPage";
+import { EulaPage } from "@/pages/legal/EulaPage";
 import NotFound from "@/pages/not-found";
 import {
   roleCanFinanceReview,
@@ -183,6 +184,9 @@ function AuthedRoutes() {
         <Route path="/help" component={HelpIndexPage} />
         <Route path="/help/:id" component={HelpTopicPage} />
 
+        {/* Legal */}
+        <Route path="/legal/eula" component={EulaPage} />
+
         <Route path="/forbidden" component={ForbiddenPage} />
         <Route component={NotFound} />
       </Switch>
@@ -196,7 +200,16 @@ function Root() {
     configureApi();
   }, []);
   if (status === "loading") return <FullPageSpinner />;
-  if (status === "anonymous") return <LoginPage />;
+  if (status === "anonymous") {
+    // Allow the EULA page to be reachable while signed out so the login link
+    // and externally-shared deep links work without an account.
+    return (
+      <Switch>
+        <Route path="/legal/eula" component={EulaPage} />
+        <Route component={LoginPage} />
+      </Switch>
+    );
+  }
   return <AuthedRoutes />;
 }
 

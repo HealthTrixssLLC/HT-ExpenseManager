@@ -126,6 +126,18 @@ export default function ProfileTab() {
         </Pressable>
       </Section>
 
+      <Section title="About">
+        <Pressable
+          testID="profile-eula"
+          style={styles.linkRow}
+          onPress={() => router.push("/legal/eula" as never)}
+        >
+          <Feather name="file-text" size={18} color={HT.navy} />
+          <Text style={styles.linkText}>End User Agreement</Text>
+          <Feather name="chevron-right" size={18} color={HT.ink4} />
+        </Pressable>
+      </Section>
+
       <View style={styles.signOut}>
         <PrimaryButton
           title="Sign out"

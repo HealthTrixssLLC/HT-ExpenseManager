@@ -1,9 +1,16 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { Link } from "wouter";
 import {
   useGetBootstrapStatus,
   getGetBootstrapStatusQueryKey,
 } from "@workspace/api-client-react";
+import {
+  EULA_ACKNOWLEDGEMENT_PREFIX,
+  EULA_SHORT_LABEL,
+  EULA_VERSION,
+} from "@workspace/legal";
 import { HealthtrixMark } from "@/components/brand/BrandHeader";
+import { EulaModal } from "@/components/legal/EulaModal";
 import { useAuth } from "@/lib/auth-context";
 import { describeApiError } from "@/lib/api";
 
@@ -34,6 +41,10 @@ export function LoginPage() {
   async function onLogin(e: FormEvent) {
     e.preventDefault();
     setErr(null);
+    if (!eulaAccepted) {
+      setErr("Please acknowledge the End User Agreement to continue.");
+      return;
+    }
     try {
       await login({ email: email.trim(), password });
     } catch (caught) {
@@ -45,6 +56,10 @@ export function LoginPage() {
   async function onBootstrap(e: FormEvent) {
     e.preventDefault();
     setErr(null);
+    if (!eulaAccepted) {
+      setErr("Please acknowledge the End User Agreement to continue.");
+      return;
+    }
     try {
       await bootstrap({
         orgName: orgName.trim(),
@@ -60,6 +75,8 @@ export function LoginPage() {
 
   const busy = loginPending || bootstrapPending;
   const isLoading = bootstrapStatus.isLoading;
+  const [eulaOpen, setEulaOpen] = useState(false);
+  const [eulaAccepted, setEulaAccepted] = useState(false);
 
   return (
     <div
@@ -194,6 +211,9 @@ export function LoginPage() {
               onSubmit={onBootstrap}
               busy={busy}
               err={err}
+              eulaAccepted={eulaAccepted}
+              onToggleEula={(v) => setEulaAccepted(v)}
+              onOpenEula={() => setEulaOpen(true)}
             />
           ) : (
             <LoginForm
@@ -204,10 +224,89 @@ export function LoginPage() {
               onSubmit={onLogin}
               busy={busy}
               err={err}
+              eulaAccepted={eulaAccepted}
+              onToggleEula={(v) => setEulaAccepted(v)}
+              onOpenEula={() => setEulaOpen(true)}
             />
           )}
         </div>
       </main>
+      {eulaOpen && <EulaModal onClose={() => setEulaOpen(false)} />}
+    </div>
+  );
+}
+
+function EulaAcknowledgement({
+  accepted,
+  onToggle,
+  onOpenModal,
+}: {
+  accepted: boolean;
+  onToggle: (v: boolean) => void;
+  onOpenModal: () => void;
+}) {
+  return (
+    <div
+      data-testid="login-eula-acknowledgement"
+      style={{
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 10,
+        marginBottom: 14,
+        fontSize: 12,
+        color: "var(--ht-ink-2)",
+        lineHeight: 1.5,
+      }}
+    >
+      <input
+        id="eula-accept-checkbox"
+        type="checkbox"
+        checked={accepted}
+        onChange={(e) => onToggle(e.target.checked)}
+        data-testid="checkbox-eula"
+        style={{
+          marginTop: 2,
+          width: 16,
+          height: 16,
+          accentColor: "var(--ht-navy)",
+          cursor: "pointer",
+          flexShrink: 0,
+        }}
+      />
+      <span>
+        <label
+          htmlFor="eula-accept-checkbox"
+          style={{ cursor: "pointer" }}
+        >
+          {EULA_ACKNOWLEDGEMENT_PREFIX}
+        </label>{" "}
+        <button
+          type="button"
+          onClick={onOpenModal}
+          data-testid="login-eula-link"
+          style={{
+            background: "transparent",
+            border: "none",
+            padding: 0,
+            color: "var(--ht-navy)",
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: "pointer",
+            textDecoration: "underline",
+          }}
+        >
+          {EULA_SHORT_LABEL}
+        </button>{" "}
+        (v{EULA_VERSION}).{" "}
+        <Link
+          href="/legal/eula"
+          data-testid="login-eula-page-link"
+          style={{ color: "var(--ht-ink-3)" }}
+        >
+          Open page
+        </Link>
+        .
+      </span>
     </div>
   );
 }
@@ -220,6 +319,9 @@ function LoginForm(props: {
   onSubmit: (e: FormEvent) => void;
   busy: boolean;
   err: string | null;
+  eulaAccepted: boolean;
+  onToggleEula: (v: boolean) => void;
+  onOpenEula: () => void;
 }) {
   return (
     <form onSubmit={props.onSubmit}>
@@ -269,11 +371,16 @@ function LoginForm(props: {
         />
       </Field>
       {props.err && <ErrorBanner message={props.err} />}
+      <EulaAcknowledgement
+        accepted={props.eulaAccepted}
+        onToggle={props.onToggleEula}
+        onOpenModal={props.onOpenEula}
+      />
       <button
         type="submit"
-        disabled={props.busy}
+        disabled={props.busy || !props.eulaAccepted}
         data-testid="button-login"
-        style={primaryButtonStyle(props.busy)}
+        style={primaryButtonStyle(props.busy || !props.eulaAccepted)}
       >
         {props.busy ? "Signing in…" : "Sign in"}
       </button>
@@ -293,6 +400,9 @@ function BootstrapForm(props: {
   onSubmit: (e: FormEvent) => void;
   busy: boolean;
   err: string | null;
+  eulaAccepted: boolean;
+  onToggleEula: (v: boolean) => void;
+  onOpenEula: () => void;
 }) {
   return (
     <form onSubmit={props.onSubmit}>
@@ -378,11 +488,16 @@ function BootstrapForm(props: {
         />
       </Field>
       {props.err && <ErrorBanner message={props.err} />}
+      <EulaAcknowledgement
+        accepted={props.eulaAccepted}
+        onToggle={props.onToggleEula}
+        onOpenModal={props.onOpenEula}
+      />
       <button
         type="submit"
-        disabled={props.busy}
+        disabled={props.busy || !props.eulaAccepted}
         data-testid="button-bootstrap"
-        style={primaryButtonStyle(props.busy)}
+        style={primaryButtonStyle(props.busy || !props.eulaAccepted)}
       >
         {props.busy ? "Creating…" : "Create admin & sign in"}
       </button>

@@ -61,8 +61,12 @@ function AuthGate() {
 
   useEffect(() => {
     if (status === "loading") return;
-    const inLogin = segments[0] === "login";
-    if (status === "signed-out" && !inLogin) {
+    const firstSegment = segments[0] as string | undefined;
+    const inLogin = firstSegment === "login";
+    // Public routes that don't require auth — keep these reachable when
+    // signed out so the login-screen EULA link and shareable deep links work.
+    const inPublicRoute = firstSegment === "legal";
+    if (status === "signed-out" && !inLogin && !inPublicRoute) {
       router.replace("/login");
     } else if (status === "signed-in" && inLogin) {
       router.replace("/(tabs)");
@@ -90,6 +94,7 @@ function AuthGate() {
       />
       <Stack.Screen name="help/index" />
       <Stack.Screen name="help/[id]" />
+      <Stack.Screen name="legal/eula" />
     </Stack>
   );
 }

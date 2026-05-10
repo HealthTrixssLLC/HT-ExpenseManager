@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { DesktopTopbar } from "@/components/brand/BrandHeader";
 import { SidebarNav, type NavSection } from "@/components/brand/SidebarNav";
+import { AppFooter } from "@/components/legal/AppFooter";
 import { useAuth } from "@/lib/auth-context";
 import {
   roleCanFinanceReview,
@@ -180,10 +181,19 @@ export function AppShell({ children }: { children: ReactNode }) {
             flex: 1,
             minWidth: 0,
             overflowY: "auto",
-            padding: "28px 32px 48px",
+            display: "flex",
+            flexDirection: "column",
           }}
         >
-          <div style={{ maxWidth: 1280, margin: "0 auto" }}>{children}</div>
+          <div
+            style={{
+              flex: 1,
+              padding: "28px 32px 48px",
+            }}
+          >
+            <div style={{ maxWidth: 1280, margin: "0 auto" }}>{children}</div>
+          </div>
+          <AppFooter />
         </main>
       </div>
     </div>

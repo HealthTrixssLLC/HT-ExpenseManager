@@ -4,7 +4,13 @@ import {
   getGetBootstrapStatusQueryKey,
   useGetBootstrapStatus,
 } from "@workspace/api-client-react";
+import {
+  EULA_ACKNOWLEDGEMENT_PREFIX,
+  EULA_SHORT_LABEL,
+  EULA_VERSION,
+} from "@workspace/legal";
 import { LinearGradient } from "expo-linear-gradient";
+import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
   Keyboard,
@@ -33,12 +39,14 @@ const DEMO_PASSWORD = "Healthtrix!2026";
 
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const { signIn } = useAuth();
   const [email, setEmail] = useState("priya@healthtrix.test");
   const [password, setPassword] = useState(DEMO_PASSWORD);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showPwd, setShowPwd] = useState(false);
+  const [eulaAccepted, setEulaAccepted] = useState(false);
 
   const bootstrapQ = useGetBootstrapStatus({
     query: {
@@ -53,6 +61,10 @@ export default function LoginScreen() {
     Keyboard.dismiss();
     if (!email.trim() || !password) {
       setError("Enter your email and password.");
+      return;
+    }
+    if (!eulaAccepted) {
+      setError("Please acknowledge the End User Agreement to continue.");
       return;
     }
     setSubmitting(true);
@@ -160,11 +172,47 @@ export default function LoginScreen() {
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
+        <View style={styles.eulaRow} testID="login-eula-acknowledgement">
+          <Pressable
+            testID="checkbox-eula"
+            onPress={() => setEulaAccepted((v) => !v)}
+            hitSlop={8}
+            style={[
+              styles.checkbox,
+              eulaAccepted && styles.checkboxChecked,
+            ]}
+          >
+            {eulaAccepted ? (
+              <Feather name="check" size={14} color="#FFFFFF" />
+            ) : null}
+          </Pressable>
+          <Text
+            style={styles.eulaLine}
+            onPress={() => setEulaAccepted((v) => !v)}
+          >
+            {EULA_ACKNOWLEDGEMENT_PREFIX}{" "}
+            <Text
+              style={styles.eulaLink}
+              testID="login-eula-link"
+              onPress={(e) => {
+                // Stop the parent Text's onPress from also firing and toggling
+                // the checkbox when the user just wants to open the EULA.
+                e.stopPropagation();
+                router.push("/legal/eula" as never);
+              }}
+            >
+              {EULA_SHORT_LABEL}
+            </Text>
+            {" "}(v{EULA_VERSION}).
+          </Text>
+        </View>
+
         <View style={{ marginTop: 16 }}>
           <PrimaryButton
             title="Sign in"
             onPress={submit}
             loading={submitting}
+            disabled={!eulaAccepted}
             fullWidth
             size="lg"
           />
@@ -273,6 +321,39 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_500Medium",
     fontSize: 13,
     marginTop: 8,
+  },
+  eulaRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    marginTop: 14,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: HT.border,
+    backgroundColor: HT.surface,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 1,
+  },
+  checkboxChecked: {
+    backgroundColor: HT.navy,
+    borderColor: HT.navy,
+  },
+  eulaLine: {
+    flex: 1,
+    fontFamily: "Inter_400Regular",
+    fontSize: 12,
+    color: HT.ink2,
+    lineHeight: 18,
+  },
+  eulaLink: {
+    fontFamily: "Inter_600SemiBold",
+    color: HT.navy,
+    textDecorationLine: "underline",
   },
   demoHeading: {
     marginTop: 32,
