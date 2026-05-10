@@ -6,10 +6,11 @@ import {
   useSetReportTags,
   useListActiveQboTags,
   getListActiveQboTagsQueryKey,
+  type ExpenseReport,
   type QboTag,
 } from "@workspace/api-client-react";
 import { useAuth } from "@/lib/auth-context";
-import { roleCanEditReportTags } from "@/lib/types";
+import { canEditReportTagsClient } from "@/lib/edit-permissions";
 import { SILENT_404_META } from "@/lib/queryClient";
 import { HtCard, HtCardHeader } from "@/components/brand/Card";
 import { HelpLink } from "@/components/help/HelpLink";
@@ -36,10 +37,11 @@ function TagChip({ tag }: { tag: QboTag }) {
   );
 }
 
-export function ReportTagPicker({ reportId }: { reportId: string }) {
+export function ReportTagPicker({ report }: { report: ExpenseReport }) {
+  const reportId = report.id;
   const qc = useQueryClient();
-  const { roles } = useAuth();
-  const canEdit = roleCanEditReportTags(roles);
+  const { user, roles } = useAuth();
+  const canEdit = canEditReportTagsClient(report, user, roles);
 
   const [editing, setEditing] = useState(false);
   const [draftIds, setDraftIds] = useState<Set<string>>(new Set());

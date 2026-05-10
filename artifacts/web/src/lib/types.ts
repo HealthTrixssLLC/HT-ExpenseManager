@@ -78,27 +78,6 @@ export function roleCanAdmin(roles: Role[]): boolean {
 }
 
 /**
- * UI gate for the QBO tag picker on a report. Mirrors the broader
- * `canEditReportTags` rule on the server: tagging is allowed for the
- * report owner / their manager (subject to the report still being
- * editable) AND for finance / admin roles regardless of editability.
- *
- * The owner-vs-finance distinction lives on the server; here we only
- * widen visibility so finance + admin always see the picker. Owner /
- * manager visibility is handled by the page that hosts the picker
- * (it only renders the report detail when the user can view it).
- */
-export function roleCanEditReportTags(roles: Role[]): boolean {
-  return hasAnyRole(roles, [
-    "Employee",
-    "Manager Approver",
-    "Finance Approver",
-    "Accounting Admin",
-    "System Admin",
-  ]);
-}
-
-/**
  * System-Admin-only operations such as backup & restore. Accounting Admins
  * intentionally cannot trigger these, since they would wipe org data.
  */

@@ -325,7 +325,7 @@ export function ReportDetailPage({ id }: { id: string }) {
             </div>
           </HtCard>
 
-          <ReportTagPicker reportId={report.id} />
+          <ReportTagPicker report={report} />
 
           <HtCard>
             <HtCardHeader

@@ -343,6 +343,13 @@ export async function canEditReport(
  *    has been Reconciled or Voided). They can correct tags right up to
  *    the moment of QBO posting and still tweak them on a Sync Error.
  *
+ * The two paths are evaluated independently. If a caller qualifies on the
+ * owner/manager path we accept that immediately, even if they ALSO hold
+ * finance/admin roles — otherwise an owner who happens to also be an
+ * admin (the common test/demo account) would lose the ability to tag
+ * their own Draft. We only fall back to the finance window when the
+ * caller is acting purely as finance/admin on someone else's report.
+ *
  * The lock for finance/admin uses a slightly wider status window than the
  * owner path because finance needs to fix tag mistakes between Manager
  * Approved and the Posted/Ready-for-Payroll handoff.
@@ -368,25 +375,67 @@ export async function canEditReportTags(
       detail: "Report not in your organization.",
     };
   }
+  // Owner path: the report owner ALWAYS uses the content-edit window,
+  // independent of any finance/admin roles they may also hold. This
+  // closes the original Task #63 bug where an owner who was also an
+  // admin got routed through the finance window (which excludes
+  // Draft and other early owner-side statuses). It also stops an
+  // owner with a finance hat from editing tags on their own record
+  // once it has moved into a finance-only status.
+  const isOwner = user.id === report.employeeId;
+  if (isOwner) {
+    if (isReportContentEditable(report.status)) {
+      return { ok: true };
+    }
+    return {
+      ok: false,
+      status: 409,
+      title: "Locked",
+      detail: `Cannot edit tags on a report in status "${report.status}".`,
+    };
+  }
+
+  // Non-owner: evaluate BOTH the manager path AND the finance/admin
+  // path independently. Either qualification is enough. This preserves
+  // the pre-existing behaviour where a non-owner who is both a
+  // manager-of-the-employee AND a finance/admin can still tag a
+  // finance-only status (Posted to QuickBooks, Sync Error, etc.) via
+  // their finance role.
+  const isManagerOrDelegate = await isManagerOrDelegateOf(
+    report.employeeId,
+    user,
+  );
+  if (isManagerOrDelegate && isReportContentEditable(report.status)) {
+    return { ok: true };
+  }
   const isFinanceOrAdmin = user.roles.some(
     (r) =>
       r === "Finance Approver" ||
       r === "Accounting Admin" ||
       r === "System Admin",
   );
-  if (isFinanceOrAdmin) {
-    if (!FINANCE_TAG_EDITABLE_STATUSES.includes(report.status)) {
-      return {
-        ok: false,
-        status: 409,
-        title: "Locked",
-        detail: `Cannot edit tags on a report in status "${report.status}".`,
-      };
-    }
+  if (isFinanceOrAdmin && FINANCE_TAG_EDITABLE_STATUSES.includes(report.status)) {
     return { ok: true };
   }
-  // Fall through to the owner/manager rules.
-  return canEditReport(report, user);
+
+  // Caller has at least one qualifying role but the status is wrong:
+  // surface a Locked (409) so the UI can show a status-specific
+  // message rather than a Forbidden.
+  if (isManagerOrDelegate || isFinanceOrAdmin) {
+    return {
+      ok: false,
+      status: 409,
+      title: "Locked",
+      detail: `Cannot edit tags on a report in status "${report.status}".`,
+    };
+  }
+
+  return {
+    ok: false,
+    status: 403,
+    title: "Forbidden",
+    detail: "Only the report owner or their manager can edit this report.",
+  };
 }
 
 // True if `user` is the direct manager of the employee with id
