@@ -337,7 +337,7 @@ export function ReportDetailPage({ id }: { id: string }) {
                 <div className="text-sm text-[var(--ht-ink-3)]">No receipts attached.</div>
               ) : (
                 receipts.map(r => (
-                  <ReceiptThumb key={r.id} receipt={r} />
+                  <ReceiptThumb key={r.id} receipt={r} size={96} showCaption captionWidth={140} />
                 ))
               )}
             </div>

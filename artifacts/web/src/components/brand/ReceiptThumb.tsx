@@ -32,14 +32,39 @@ function pickIcon(mimeType: string | null | undefined) {
  * a content-type-aware icon. Click to enlarge in a modal (or open the file
  * in a new tab for PDFs/other types).
  */
+function formatBytes(bytes: number | null | undefined): string {
+  if (!bytes || bytes <= 0) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(kb < 10 ? 1 : 0)} KB`;
+  const mb = kb / 1024;
+  return `${mb.toFixed(mb < 10 ? 1 : 0)} MB`;
+}
+
+function fileTypeLabel(mime: string | null | undefined): string {
+  if (!mime) return "File";
+  if (IMAGE_TYPES.has(mime)) {
+    const sub = mime.split("/")[1] ?? "";
+    return sub ? sub.toUpperCase() : "Image";
+  }
+  if (PDF_TYPES.has(mime)) return "PDF";
+  return mime;
+}
+
 export function ReceiptThumb({
   receipt,
   size = 56,
   enlargeable = true,
+  showCaption = false,
+  captionWidth,
 }: {
   receipt: Receipt;
   size?: number;
   enlargeable?: boolean;
+  /** When true, render a caption (filename + file type/size) under the thumb. */
+  showCaption?: boolean;
+  /** Optional fixed caption width (defaults to the thumb size). */
+  captionWidth?: number;
 }) {
   const isImage = receipt.mimeType ? IMAGE_TYPES.has(receipt.mimeType) : false;
   const isPdf = receipt.mimeType ? PDF_TYPES.has(receipt.mimeType) : false;
@@ -109,11 +134,40 @@ export function ReceiptThumb({
     </div>
   );
 
-  if (!enlargeable) return thumb;
+  const captionEl = showCaption ? (
+    <div
+      style={{ width: captionWidth ?? size }}
+      className="mt-2 text-xs leading-tight"
+      data-testid={`receipt-caption-${receipt.id}`}
+    >
+      <div
+        className="font-medium text-[var(--ht-ink)] truncate"
+        title={receipt.filename ?? undefined}
+      >
+        {receipt.filename ?? "Untitled receipt"}
+      </div>
+      <div className="text-[var(--ht-ink-3)] truncate">
+        {[fileTypeLabel(receipt.mimeType), formatBytes(receipt.sizeBytes)]
+          .filter(Boolean)
+          .join(" · ")}
+      </div>
+    </div>
+  ) : null;
+
+  const thumbWithCaption = showCaption ? (
+    <div className="flex flex-col items-start">
+      {thumb}
+      {captionEl}
+    </div>
+  ) : (
+    thumb
+  );
+
+  if (!enlargeable) return thumbWithCaption;
 
   return (
     <>
-      {thumb}
+      {thumbWithCaption}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent
           className="max-w-3xl p-0 overflow-hidden"

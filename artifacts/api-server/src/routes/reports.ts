@@ -778,6 +778,13 @@ router.get("/reports/:id/receipts", async (req, res): Promise<void> => {
 
 // Attach an already-uploaded object to a specific line item. The line's
 // parent report drives ownership and editability checks.
+//
+// If a receipt row for this `objectPath` already exists on the report (the
+// common case — the client uploaded + registered the receipt first, then
+// asked to attach it to a line), we UPDATE that row's `lineItemId` instead
+// of inserting a duplicate. Only when no existing row is found do we fall
+// back to inserting a new one (verifying the object in storage first), so
+// direct one-shot callers still work.
 router.post("/lines/:lineId/receipts", async (req, res): Promise<void> => {
   try {
     const lineId = pathId(req, "lineId");
@@ -809,10 +816,62 @@ router.post("/lines/:lineId/receipts", async (req, res): Promise<void> => {
       sendProblem(res, auth.status, auth.title, auth.detail);
       return;
     }
-    // Authoritative server-side check: re-derive size + content type from the
-    // actual object the client uploaded, and verify the canonical key embeds
-    // *this* org and report. We persist the storage-reported values, never
-    // the client-claimed ones.
+    // Look for an existing receipt with this objectPath on this report.
+    // The objectPath is the canonical /objects/org/{orgId}/reports/{reportId}/...
+    // key, so scoping by orgId + reportId is the same row uniqueness as
+    // scoping by objectPath alone — but we keep all three in the predicate
+    // for defence in depth against cross-tenant lookups.
+    const existing = (
+      await db
+        .select()
+        .from(receiptsTable)
+        .where(
+          and(
+            eq(receiptsTable.orgId, req.auth!.user.orgId),
+            eq(receiptsTable.reportId, report.id),
+            eq(receiptsTable.objectPath, parsed.data.objectPath),
+          ),
+        )
+        .limit(1)
+    )[0];
+
+    if (existing) {
+      // Same row: nothing to do. Return current state so the client UI can
+      // refresh without a second copy showing up.
+      if (existing.lineItemId === lineId) {
+        res.status(200).json(toReceiptDto(existing));
+        return;
+      }
+      const updated = await db.transaction(async (tx) => {
+        const [row] = await tx
+          .update(receiptsTable)
+          .set({ lineItemId: lineId })
+          .where(eq(receiptsTable.id, existing.id))
+          .returning();
+        await recordAudit({
+          orgId: report.orgId,
+          reportId: report.id,
+          actor: { id: req.auth!.user.id, roles: req.auth!.user.roles },
+          entityType: "receipt",
+          entityId: row.id,
+          action: "updated",
+          fieldDiffs: diffFields(
+            existing as unknown as Record<string, unknown>,
+            row as unknown as Record<string, unknown>,
+            RECEIPT_AUDIT_FIELDS,
+          ),
+          tx,
+        });
+        return row;
+      });
+      res.status(200).json(toReceiptDto(updated));
+      return;
+    }
+
+    // No prior row — verify the object exists and is well-formed, then
+    // insert. Authoritative server-side check: re-derive size + content
+    // type from the actual object the client uploaded, and verify the
+    // canonical key embeds *this* org and report.
     const verified = await verifyReceiptUpload({
       objectStorage: objectStorageService,
       objectPath: parsed.data.objectPath,

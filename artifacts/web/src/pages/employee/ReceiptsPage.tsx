@@ -158,6 +158,12 @@ export function ReceiptsPage({ id }: { id: string }) {
   const handleAttach = (receiptId: string, lineItemId: string) => {
     const receipt = receipts.find((r) => r.id === receiptId);
     if (!receipt) return;
+    // The server identifies the existing receipt by `objectPath` (the
+    // canonical /objects/org/.../receipts/<id>.<ext> key) and updates its
+    // `lineItemId` rather than inserting a duplicate row. We still pass
+    // filename/mimeType/sizeBytes because the typed RegisterReceiptBody
+    // contract requires them, but the server ignores those fields when an
+    // existing row is found.
     attachToLine.mutate({
       lineId: lineItemId,
       data: {
