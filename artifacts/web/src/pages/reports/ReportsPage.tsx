@@ -18,6 +18,7 @@ import {
   PieChart,
   Pie,
   Cell,
+  Legend,
 } from "recharts";
 
 export function ReportsPage() {
@@ -181,6 +182,13 @@ export function ReportsPage() {
                     ))}
                   </Pie>
                   <Tooltip formatter={(value: number) => formatMoney(value)} />
+                  <Legend
+                    layout="vertical"
+                    align="right"
+                    verticalAlign="middle"
+                    iconType="circle"
+                    wrapperStyle={{ fontSize: 12, paddingLeft: 16 }}
+                  />
                 </PieChart>
               </ResponsiveContainer>
             )}
