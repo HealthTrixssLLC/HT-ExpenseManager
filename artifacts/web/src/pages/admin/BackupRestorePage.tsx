@@ -53,12 +53,16 @@ type SystemResetSummary = {
   receiptFileWarnings: string[];
 };
 
+type BackupMode = "full" | "config";
+
 type ManifestPreview = {
   backupSchemaVersion: number;
   appVersion: string;
   orgId: string;
   orgName: string;
   createdAt: string;
+  // Older backups predate the mode field; treat anything missing as "full".
+  mode?: BackupMode;
   includesReceiptFiles: boolean;
   receiptCount: number;
   rowCounts: Record<string, number>;
@@ -84,6 +88,10 @@ export function BackupRestorePage() {
   const qc = useQueryClient();
 
   // ---- export ----
+  // Two presets: "full" backs up operational history + setup, "config"
+  // backs up only setup tables. The selector lives above the receipt
+  // toggle; the toggle is hidden in config mode (receipts are operational).
+  const [exportMode, setExportMode] = useState<BackupMode>("full");
   const [includeReceipts, setIncludeReceipts] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -96,7 +104,9 @@ export function BackupRestorePage() {
         apiUrl("/api/admin/backup"),
         window.location.origin,
       );
-      if (includeReceipts) url.searchParams.set("includeReceiptFiles", "1");
+      url.searchParams.set("mode", exportMode);
+      if (exportMode === "full" && includeReceipts)
+        url.searchParams.set("includeReceiptFiles", "1");
       const res = await fetch(url.toString(), {
         method: "GET",
         credentials: "same-origin",
@@ -113,7 +123,9 @@ export function BackupRestorePage() {
       a.href = downloadUrl;
       a.download = filenameMatch
         ? filenameMatch[1]
-        : `healthtrix-backup-${new Date().toISOString()}.zip`;
+        : `healthtrix-${
+            exportMode === "config" ? "config-backup" : "backup"
+          }-${new Date().toISOString()}.zip`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -371,24 +383,63 @@ export function BackupRestorePage() {
           <div>
             <h2 className="text-lg font-semibold">Export backup</h2>
             <p className="text-sm text-[var(--ht-ink-3)]">
-              Includes departments, GL mappings, policy rules, QuickBooks
-              connection details, users, expense reports, line items, audit
-              entries, and payroll batches scoped to your org.
+              {exportMode === "config"
+                ? "A configuration-only backup includes org structure and setup data — departments, users, employee profiles, GL mappings, policy rules, QuickBooks connection, QBO tags + assignments, and manager delegations. Operational history (expense reports, line items, receipts, audit log, payroll, reconciliation) is excluded."
+                : "A full backup includes departments, GL mappings, policy rules, QuickBooks connection details, users, expense reports, line items, audit entries, and payroll batches scoped to your org."}
             </p>
           </div>
         </div>
 
-        <label className="flex items-center gap-2 text-sm cursor-pointer mb-4">
-          <Checkbox
-            id="include-receipts"
-            checked={includeReceipts}
-            onCheckedChange={(v) => setIncludeReceipts(v === true)}
-            data-testid="checkbox-include-receipts"
-          />
-          <span>
-            Also include uploaded receipt image files (much larger)
-          </span>
-        </label>
+        <fieldset
+          className="mb-4 space-y-2"
+          data-testid="fieldset-backup-mode"
+        >
+          <legend className="text-sm font-medium mb-1">Backup type</legend>
+          <label className="flex items-start gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="backup-mode"
+              value="full"
+              checked={exportMode === "full"}
+              onChange={() => setExportMode("full")}
+              className="mt-1"
+              data-testid="radio-mode-full"
+            />
+            <span>
+              <strong>Full backup</strong> — everything in your org,
+              including all operational history.
+            </span>
+          </label>
+          <label className="flex items-start gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="backup-mode"
+              value="config"
+              checked={exportMode === "config"}
+              onChange={() => setExportMode("config")}
+              className="mt-1"
+              data-testid="radio-mode-config"
+            />
+            <span>
+              <strong>Configuration only</strong> — just the setup tables
+              (smaller file, no expense reports or receipts).
+            </span>
+          </label>
+        </fieldset>
+
+        {exportMode === "full" && (
+          <label className="flex items-center gap-2 text-sm cursor-pointer mb-4">
+            <Checkbox
+              id="include-receipts"
+              checked={includeReceipts}
+              onCheckedChange={(v) => setIncludeReceipts(v === true)}
+              data-testid="checkbox-include-receipts"
+            />
+            <span>
+              Also include uploaded receipt image files (much larger)
+            </span>
+          </label>
+        )}
 
         <div className="flex items-center gap-3">
           <Button
@@ -404,7 +455,9 @@ export function BackupRestorePage() {
             ) : (
               <>
                 <Database className="w-4 h-4 mr-2" />
-                Download backup
+                {exportMode === "config"
+                  ? "Download configuration backup"
+                  : "Download full backup"}
               </>
             )}
           </Button>
@@ -425,14 +478,18 @@ export function BackupRestorePage() {
           <div>
             <h2 className="text-lg font-semibold">Restore from backup</h2>
             <p className="text-sm text-[var(--ht-ink-3)]">
-              Restoring will{" "}
+              Restoring a <strong>full</strong> backup will{" "}
               <strong>
                 permanently delete every record currently in this org
               </strong>{" "}
               (departments, users, expense reports, payroll batches, audit
               log, etc.) and replace it with the contents of the uploaded
-              backup. Backups can only be restored into the org they were
-              exported from.
+              backup. Restoring a <strong>configuration-only</strong>{" "}
+              backup replaces just the setup tables (departments, users,
+              GL mappings, policy rules, QuickBooks connection, QBO tags +
+              assignments, manager delegations) and leaves your operational
+              history untouched. Backups can only be restored into the org
+              they were exported from.
             </p>
           </div>
         </div>
@@ -486,7 +543,9 @@ export function BackupRestorePage() {
             >
               <div className="flex items-center gap-2 font-medium">
                 <FileSearch className="w-4 h-4" />
-                What this backup contains
+                {(parsedManifest.mode ?? "full") === "config"
+                  ? "Configuration backup — will replace setup tables only"
+                  : "Full backup — will replace every record in this org"}
               </div>
               <div className="text-xs">
                 Org{" "}
@@ -517,8 +576,19 @@ export function BackupRestorePage() {
                 )}
               </ul>
               <div className="text-xs italic mt-1">
-                Restoring this backup will <strong>replace</strong> every
-                record currently in your org.
+                {(parsedManifest.mode ?? "full") === "config" ? (
+                  <>
+                    Restoring this backup will <strong>replace</strong> the
+                    setup tables listed above. Existing expense reports,
+                    receipts, audit log, payroll, and reconciliation data
+                    will be left untouched.
+                  </>
+                ) : (
+                  <>
+                    Restoring this backup will <strong>replace</strong>{" "}
+                    every record currently in your org.
+                  </>
+                )}
               </div>
             </div>
           )}
@@ -557,13 +627,19 @@ export function BackupRestorePage() {
               data-testid="text-restore-summary"
             >
               <div className="font-medium mb-1">
-                Restore complete · {restoreResult.manifest.orgName}
+                {(restoreResult.manifest.mode ?? "full") === "config"
+                  ? "Configuration restore complete"
+                  : "Full restore complete"}{" "}
+                · {restoreResult.manifest.orgName}
               </div>
               <div className="text-xs">
                 Backup taken on{" "}
                 {new Date(restoreResult.manifest.createdAt).toLocaleString()}{" "}
                 at app version {restoreResult.manifest.appVersion} (schema v
-                {restoreResult.manifest.backupSchemaVersion}).
+                {restoreResult.manifest.backupSchemaVersion}).{" "}
+                {(restoreResult.manifest.mode ?? "full") === "config"
+                  ? "Operational data was left untouched."
+                  : null}
               </div>
               <ul className="list-disc list-inside text-xs mt-2 space-y-0.5">
                 {Object.entries(restoreResult.rowCountsRestored).map(
@@ -778,13 +854,41 @@ export function BackupRestorePage() {
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent data-testid="dialog-restore-confirm">
           <AlertDialogHeader>
-            <AlertDialogTitle>Confirm restore</AlertDialogTitle>
+            <AlertDialogTitle>
+              {(parsedManifest?.mode ?? "full") === "config"
+                ? "Confirm configuration restore"
+                : "Confirm full restore"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              This will replace <strong>every record</strong> in{" "}
-              <strong>{user?.fullName ? "your org" : "this org"}</strong>{" "}
-              with the contents of{" "}
-              <span className="font-mono">{pickedFile?.name}</span>. The
-              action cannot be undone from inside the app.
+              {(parsedManifest?.mode ?? "full") === "config" ? (
+                <>
+                  This will replace the{" "}
+                  <strong>configuration tables</strong> (org info,
+                  departments, users, employee profiles, GL mappings,
+                  policy rules, QuickBooks connection, QBO tags +
+                  assignments, manager delegations) in{" "}
+                  <strong>{user?.fullName ? "your org" : "this org"}</strong>{" "}
+                  with the contents of{" "}
+                  <span className="font-mono">{pickedFile?.name}</span>.
+                  Existing expense reports, receipts, audit log, payroll,
+                  and reconciliation data will be left in place.
+                  <br />
+                  <br />
+                  If a department or user being removed is still
+                  referenced by existing operational data, the restore
+                  will fail and no changes will be applied — you'll need
+                  to clear that data first or take a full backup
+                  instead.
+                </>
+              ) : (
+                <>
+                  This will replace <strong>every record</strong> in{" "}
+                  <strong>{user?.fullName ? "your org" : "this org"}</strong>{" "}
+                  with the contents of{" "}
+                  <span className="font-mono">{pickedFile?.name}</span>.
+                  The action cannot be undone from inside the app.
+                </>
+              )}
               <br />
               <br />
               Type <strong>RESTORE</strong> below to proceed.

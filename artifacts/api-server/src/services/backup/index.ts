@@ -47,6 +47,8 @@ import {
   policyRulesTable,
   qboConnectionTable,
   qboPostingEventsTable,
+  qboTagsTable,
+  qboTagAssignmentsTable,
   managerDelegationsTable,
   expenseReportsTable,
   lineItemsTable,
@@ -64,6 +66,8 @@ import {
   type PolicyRule,
   type QboConnection,
   type QboPostingEvent,
+  type QboTag,
+  type QboTagAssignment,
   type ManagerDelegation,
   type ExpenseReport,
   type LineItem,
@@ -86,12 +90,30 @@ import {
 
 // ---------- public types ----------
 
+/**
+ * Backup mode.
+ *
+ * - `full`: legacy behavior — every org-scoped table including operational
+ *   history (reports, line items, receipts, audit, payroll, etc.).
+ * - `config`: setup-only payload — orgs, departments, users, employee
+ *   profiles, GL mappings, policy rules, QBO connection, QBO tags +
+ *   assignments, and manager delegations. Operational history is excluded.
+ *   Receipt files are always skipped in config mode.
+ */
+export type BackupMode = "full" | "config";
+
 export type ManifestV1 = {
   backupSchemaVersion: number;
   appVersion: string;
   orgId: string;
   orgName: string;
   createdAt: string;
+  /**
+   * Older backups predate the mode field; absent values are treated as
+   * `"full"` so legacy archives keep restoring with the original
+   * wipe-and-replace semantics.
+   */
+  mode: BackupMode;
   includesReceiptFiles: boolean;
   receiptCount: number;
   rowCounts: Record<string, number>;
@@ -109,6 +131,14 @@ export type BackupPayloadV1 = {
   glMappings: GlMapping[];
   policyRules: PolicyRule[];
   qboConnection: QboConnection | null;
+  /**
+   * Always present in `config` mode. In `full` mode these arrays are absent
+   * from older backups (pre-mode) and from new full backups (the existing
+   * full backup behavior is intentionally unchanged). Restore tolerates
+   * `undefined` and treats it as an empty list.
+   */
+  qboTags?: QboTag[];
+  qboTagAssignments?: QboTagAssignment[];
   qboPostingEvents: QboPostingEvent[];
   managerDelegations: ManagerDelegation[];
   expenseReports: ExpenseReport[];
@@ -121,9 +151,18 @@ export type BackupPayloadV1 = {
   reconciliationRecords: ReconciliationRecord[];
 };
 
+/**
+ * Subset of `BackupPayloadV1` populated when `mode === "config"`. The
+ * operational arrays are still present on the type but are always empty
+ * in this shape so the restore code can treat the payload uniformly.
+ */
+export type ConfigBackupPayloadV1 = BackupPayloadV1;
+
 export type ExportOptions = {
   orgId: string;
   appVersion: string;
+  /** Defaults to `"full"` if omitted, preserving legacy callers. */
+  mode?: BackupMode;
   includeReceiptFiles: boolean;
 };
 
@@ -179,13 +218,23 @@ export class BackupOrgMismatchError extends Error {
 export async function exportBackup(
   opts: ExportOptions,
 ): Promise<ExportResult> {
-  const { orgId, appVersion, includeReceiptFiles } = opts;
+  const { orgId, appVersion } = opts;
+  const mode: BackupMode = opts.mode ?? "full";
+  // Receipt files are inherently operational — they have no place in a
+  // configuration-only backup, so we force the flag off for `config` mode
+  // regardless of what the caller passed.
+  const includeReceiptFiles = mode === "config" ? false : opts.includeReceiptFiles;
 
   const [org] = await db.select().from(orgsTable).where(eq(orgsTable.id, orgId));
   if (!org) {
     throw new BackupParseError(`Org ${orgId} not found.`);
   }
 
+  // Always-fetched config tables (used by both modes). qboTags and
+  // qboTagAssignments are intentionally **not** in this list: the existing
+  // full-backup payload shape predates them and the task is explicit that
+  // full-backup contents must not change. They are fetched only in the
+  // config-mode branch below.
   const [
     departments,
     users,
@@ -193,16 +242,7 @@ export async function exportBackup(
     glMappings,
     policyRules,
     qboConnections,
-    qboPostingEvents,
     managerDelegations,
-    expenseReports,
-    lineItems,
-    receipts,
-    approvalActions,
-    auditEntries,
-    payrollBatches,
-    payrollBatchItems,
-    reconciliationRecords,
   ] = await Promise.all([
     db.select().from(departmentsTable).where(eq(departmentsTable.orgId, orgId)),
     db.select().from(usersTable).where(eq(usersTable.orgId, orgId)),
@@ -220,62 +260,103 @@ export async function exportBackup(
       .where(eq(qboConnectionTable.orgId, orgId)),
     db
       .select()
-      .from(qboPostingEventsTable)
-      .where(eq(qboPostingEventsTable.orgId, orgId)),
-    db
-      .select()
       .from(managerDelegationsTable)
       .where(eq(managerDelegationsTable.orgId, orgId)),
-    db
-      .select()
-      .from(expenseReportsTable)
-      .where(eq(expenseReportsTable.orgId, orgId)),
-    db
-      .select()
-      .from(lineItemsTable)
-      .innerJoin(
-        expenseReportsTable,
-        eq(lineItemsTable.reportId, expenseReportsTable.id),
-      )
-      .where(eq(expenseReportsTable.orgId, orgId))
-      .then((rows) => rows.map((r) => r.line_items)),
-    db.select().from(receiptsTable).where(eq(receiptsTable.orgId, orgId)),
-    db
-      .select()
-      .from(approvalActionsTable)
-      .innerJoin(
-        expenseReportsTable,
-        eq(approvalActionsTable.reportId, expenseReportsTable.id),
-      )
-      .where(eq(expenseReportsTable.orgId, orgId))
-      .then((rows) => rows.map((r) => r.approval_actions)),
-    db
-      .select()
-      .from(auditEntriesTable)
-      .where(eq(auditEntriesTable.orgId, orgId)),
-    db
-      .select()
-      .from(payrollBatchesTable)
-      .where(eq(payrollBatchesTable.orgId, orgId)),
-    db
-      .select()
-      .from(payrollBatchItemsTable)
-      .innerJoin(
-        payrollBatchesTable,
-        eq(payrollBatchItemsTable.batchId, payrollBatchesTable.id),
-      )
-      .where(eq(payrollBatchesTable.orgId, orgId))
-      .then((rows) => rows.map((r) => r.payroll_batch_items)),
-    db
-      .select()
-      .from(reconciliationRecordsTable)
-      .innerJoin(
-        payrollBatchesTable,
-        eq(reconciliationRecordsTable.batchId, payrollBatchesTable.id),
-      )
-      .where(eq(payrollBatchesTable.orgId, orgId))
-      .then((rows) => rows.map((r) => r.reconciliation_records)),
   ]);
+
+  // Config-only extras: qbo tag definitions and assignments. Only fetched
+  // in config mode so the full-mode payload stays bit-for-bit identical
+  // to the legacy shape.
+  let qboTags: QboTag[] = [];
+  let qboTagAssignments: QboTagAssignment[] = [];
+  if (mode === "config") {
+    [qboTags, qboTagAssignments] = await Promise.all([
+      db.select().from(qboTagsTable).where(eq(qboTagsTable.orgId, orgId)),
+      db
+        .select()
+        .from(qboTagAssignmentsTable)
+        .where(eq(qboTagAssignmentsTable.orgId, orgId)),
+    ]);
+  }
+
+  // Operational tables — only populated in full mode.
+  let qboPostingEvents: QboPostingEvent[] = [];
+  let expenseReports: ExpenseReport[] = [];
+  let lineItems: LineItem[] = [];
+  let receipts: Receipt[] = [];
+  let approvalActions: ApprovalAction[] = [];
+  let auditEntries: AuditEntry[] = [];
+  let payrollBatches: PayrollBatch[] = [];
+  let payrollBatchItems: PayrollBatchItem[] = [];
+  let reconciliationRecords: ReconciliationRecord[] = [];
+
+  if (mode === "full") {
+    [
+      qboPostingEvents,
+      expenseReports,
+      lineItems,
+      receipts,
+      approvalActions,
+      auditEntries,
+      payrollBatches,
+      payrollBatchItems,
+      reconciliationRecords,
+    ] = await Promise.all([
+      db
+        .select()
+        .from(qboPostingEventsTable)
+        .where(eq(qboPostingEventsTable.orgId, orgId)),
+      db
+        .select()
+        .from(expenseReportsTable)
+        .where(eq(expenseReportsTable.orgId, orgId)),
+      db
+        .select()
+        .from(lineItemsTable)
+        .innerJoin(
+          expenseReportsTable,
+          eq(lineItemsTable.reportId, expenseReportsTable.id),
+        )
+        .where(eq(expenseReportsTable.orgId, orgId))
+        .then((rows) => rows.map((r) => r.line_items)),
+      db.select().from(receiptsTable).where(eq(receiptsTable.orgId, orgId)),
+      db
+        .select()
+        .from(approvalActionsTable)
+        .innerJoin(
+          expenseReportsTable,
+          eq(approvalActionsTable.reportId, expenseReportsTable.id),
+        )
+        .where(eq(expenseReportsTable.orgId, orgId))
+        .then((rows) => rows.map((r) => r.approval_actions)),
+      db
+        .select()
+        .from(auditEntriesTable)
+        .where(eq(auditEntriesTable.orgId, orgId)),
+      db
+        .select()
+        .from(payrollBatchesTable)
+        .where(eq(payrollBatchesTable.orgId, orgId)),
+      db
+        .select()
+        .from(payrollBatchItemsTable)
+        .innerJoin(
+          payrollBatchesTable,
+          eq(payrollBatchItemsTable.batchId, payrollBatchesTable.id),
+        )
+        .where(eq(payrollBatchesTable.orgId, orgId))
+        .then((rows) => rows.map((r) => r.payroll_batch_items)),
+      db
+        .select()
+        .from(reconciliationRecordsTable)
+        .innerJoin(
+          payrollBatchesTable,
+          eq(reconciliationRecordsTable.batchId, payrollBatchesTable.id),
+        )
+        .where(eq(payrollBatchesTable.orgId, orgId))
+        .then((rows) => rows.map((r) => r.reconciliation_records)),
+    ]);
+  }
 
   const payload: BackupPayloadV1 = {
     org,
@@ -296,25 +377,46 @@ export async function exportBackup(
     payrollBatchItems,
     reconciliationRecords,
   };
+  // Only emit qboTags / qboTagAssignments in config mode so the full-mode
+  // payload remains bit-for-bit identical to the legacy shape.
+  if (mode === "config") {
+    payload.qboTags = qboTags;
+    payload.qboTagAssignments = qboTagAssignments;
+  }
 
-  const rowCounts: Record<string, number> = {
-    departments: departments.length,
-    users: users.length,
-    employeeProfiles: employeeProfiles.length,
-    glMappings: glMappings.length,
-    policyRules: policyRules.length,
-    qboConnection: qboConnections.length,
-    qboPostingEvents: qboPostingEvents.length,
-    managerDelegations: managerDelegations.length,
-    expenseReports: expenseReports.length,
-    lineItems: lineItems.length,
-    receipts: receipts.length,
-    approvalActions: approvalActions.length,
-    auditEntries: auditEntries.length,
-    payrollBatches: payrollBatches.length,
-    payrollBatchItems: payrollBatchItems.length,
-    reconciliationRecords: reconciliationRecords.length,
-  };
+  // rowCounts only reports the tables actually included in this mode so
+  // the manifest accurately reflects what's in the archive.
+  const rowCounts: Record<string, number> =
+    mode === "config"
+      ? {
+          departments: departments.length,
+          users: users.length,
+          employeeProfiles: employeeProfiles.length,
+          glMappings: glMappings.length,
+          policyRules: policyRules.length,
+          qboConnection: qboConnections.length,
+          qboTags: qboTags.length,
+          qboTagAssignments: qboTagAssignments.length,
+          managerDelegations: managerDelegations.length,
+        }
+      : {
+          departments: departments.length,
+          users: users.length,
+          employeeProfiles: employeeProfiles.length,
+          glMappings: glMappings.length,
+          policyRules: policyRules.length,
+          qboConnection: qboConnections.length,
+          qboPostingEvents: qboPostingEvents.length,
+          managerDelegations: managerDelegations.length,
+          expenseReports: expenseReports.length,
+          lineItems: lineItems.length,
+          receipts: receipts.length,
+          approvalActions: approvalActions.length,
+          auditEntries: auditEntries.length,
+          payrollBatches: payrollBatches.length,
+          payrollBatchItems: payrollBatchItems.length,
+          reconciliationRecords: reconciliationRecords.length,
+        };
 
   const manifest: ManifestV1 = {
     backupSchemaVersion: CURRENT_BACKUP_SCHEMA_VERSION,
@@ -322,8 +424,9 @@ export async function exportBackup(
     orgId,
     orgName: org.name,
     createdAt: new Date().toISOString(),
+    mode,
     includesReceiptFiles: includeReceiptFiles,
-    receiptCount: receipts.length,
+    receiptCount: mode === "config" ? 0 : receipts.length,
     rowCounts,
   };
 
@@ -487,10 +590,62 @@ export async function applyRestore(
 
   const restoredCounts: Record<string, number> = {};
 
+  if (manifest.mode === "config") {
+    await applyConfigRestore(payload, restoredCounts);
+  } else {
+    await applyFullRestore(opts.orgId, payload, restoredCounts);
+  }
+
+  // Best-effort: re-upload receipt blobs after the txn commits. This is the
+  // only step that cannot participate in the DB transaction (object storage
+  // is a separate system), so we surface failures as warnings rather than
+  // rolling back.
+  const warnings: string[] = [];
+  let receiptFilesRestored = 0;
+  if (receiptFiles.size > 0) {
+    const objectStorage = new ObjectStorageService();
+    for (const r of payload.receipts) {
+      const blob = receiptFiles.get(r.id);
+      if (!blob) continue;
+      try {
+        await uploadReceiptBlob({
+          objectStorage,
+          objectPath: r.objectPath,
+          mimeType: blob.mimeType,
+          data: blob.data,
+        });
+        receiptFilesRestored += 1;
+      } catch (err) {
+        warnings.push(
+          `Receipt ${r.id} re-upload failed: ${(err as Error).message}`,
+        );
+      }
+    }
+  }
+
+  return {
+    manifest,
+    rowCountsRestored: restoredCounts,
+    receiptFilesRestored,
+    receiptFileWarnings: warnings,
+  };
+}
+
+// ---------- restore helpers ----------
+
+/**
+ * Full-mode restore: drop the org row (CASCADE wipes everything) and
+ * re-insert every table from the payload. This is the legacy behavior.
+ */
+async function applyFullRestore(
+  orgId: string,
+  payload: BackupPayloadV1,
+  restoredCounts: Record<string, number>,
+): Promise<void> {
   await db.transaction(async (tx) => {
     // CASCADE wipes everything via the orgs FK chain, plus tables that
     // reference users (employee_profiles, sessions, etc.).
-    await tx.delete(orgsTable).where(eq(orgsTable.id, opts.orgId));
+    await tx.delete(orgsTable).where(eq(orgsTable.id, orgId));
 
     // Re-create the org with the same id so all FK references in the
     // payload resolve.
@@ -602,40 +757,245 @@ export async function applyRestore(
     restoredCounts.reconciliationRecords =
       payload.reconciliationRecords.length;
   });
+}
 
-  // Best-effort: re-upload receipt blobs after the txn commits. This is the
-  // only step that cannot participate in the DB transaction (object storage
-  // is a separate system), so we surface failures as warnings rather than
-  // rolling back.
-  const warnings: string[] = [];
-  let receiptFilesRestored = 0;
-  if (receiptFiles.size > 0) {
-    const objectStorage = new ObjectStorageService();
-    for (const r of payload.receipts) {
-      const blob = receiptFiles.get(r.id);
-      if (!blob) continue;
-      try {
-        await uploadReceiptBlob({
-          objectStorage,
-          objectPath: r.objectPath,
-          mimeType: blob.mimeType,
-          data: blob.data,
+/**
+ * Config-mode restore: replace the configuration tables for the org and
+ * leave operational data (reports, line items, receipts, approval
+ * actions, audit entries, QBO posting events, payroll batches/items,
+ * reconciliation records) untouched.
+ *
+ * Replacement semantics — for every config table the post-restore state
+ * matches the backup exactly: rows in the backup are inserted/updated,
+ * and rows that exist in the DB but are absent from the backup are
+ * deleted. There are two implementations of this:
+ *
+ * - **Wipe + insert** for tables that nothing operational references, or
+ *   whose only references cascade-delete (`employee_profiles`,
+ *   `gl_mappings`, `policy_rules`, `qbo_connection`, `qbo_tags` — and
+ *   `qbo_tag_assignments`, which cascade from both tags and reports,
+ *   `manager_delegations`).
+ * - **Upsert + delete-extras** for `users` and `departments`, which are
+ *   referenced by operational rows (`expense_reports.user_id` /
+ *   `department_id`, `payroll_batches.requested_by_id`, audit entries,
+ *   etc.) with `restrict` / `set null`. We update existing rows in
+ *   place, insert new rows, then attempt to delete any rows present in
+ *   the DB but absent from the backup. If a "to-delete" row is still
+ *   referenced by operational data the delete will raise a foreign-key
+ *   violation and roll back the entire transaction — surfacing the
+ *   conflict to the operator rather than silently dropping the link or
+ *   silently keeping a stale config row.
+ *
+ * `qbo_tag_assignments.report_id` references `expense_reports` (NOT
+ * NULL, ON DELETE CASCADE). In config mode we do not touch the reports
+ * table, so any assignment in the backup whose report no longer exists
+ * cannot be inserted. We drop those rows and surface the count via the
+ * caller's `restoredCounts` so the summary reflects what actually
+ * landed.
+ */
+async function applyConfigRestore(
+  payload: BackupPayloadV1,
+  restoredCounts: Record<string, number>,
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    // Reconcile the org row itself. We can't delete + reinsert in config
+    // mode (that would CASCADE-wipe operational data), so we update the
+    // row in place from the backup. The `orgs` schema is intentionally
+    // small (id, name, createdAt); we update `name` and leave `id`/
+    // `createdAt` alone since they are immutable identity fields.
+    await tx
+      .update(orgsTable)
+      .set({ name: payload.org.name })
+      .where(eq(orgsTable.id, payload.org.id));
+    restoredCounts.org = 1;
+
+    // ---- Upsert + delete-extras (preserve rows referenced by ops) ----
+
+    // Departments first: users.department_id references departments. We
+    // upsert all rows from the backup, then delete extras. If an extra
+    // department is still referenced by operational rows with `restrict`
+    // semantics, the delete fails and the whole txn rolls back.
+    for (const d of payload.departments) {
+      await tx
+        .insert(departmentsTable)
+        .values(d)
+        .onConflictDoUpdate({
+          target: departmentsTable.id,
+          set: { name: d.name },
         });
-        receiptFilesRestored += 1;
-      } catch (err) {
-        warnings.push(
-          `Receipt ${r.id} re-upload failed: ${(err as Error).message}`,
-        );
+    }
+    {
+      const keepIds = payload.departments.map((d) => d.id);
+      if (keepIds.length > 0) {
+        await tx.execute(sql`
+          DELETE FROM departments
+          WHERE org_id = ${payload.org.id}
+            AND id <> ALL(${keepIds}::uuid[])
+        `);
+      } else {
+        await tx
+          .delete(departmentsTable)
+          .where(eq(departmentsTable.orgId, payload.org.id));
       }
     }
-  }
+    restoredCounts.departments = payload.departments.length;
 
-  return {
-    manifest,
-    rowCountsRestored: restoredCounts,
-    receiptFilesRestored,
-    receiptFileWarnings: warnings,
-  };
+    // Users: two-pass so manager FKs (self-reference) always resolve,
+    // upsert by id with managerId nulled on pass 1, then restore manager
+    // pointers on pass 2, then delete any extras not in the backup.
+    if (payload.users.length > 0) {
+      for (const u of payload.users) {
+        const { managerId: _omit, ...rest } = u;
+        const firstPass = { ...rest, managerId: null as string | null };
+        await tx
+          .insert(usersTable)
+          .values(firstPass)
+          .onConflictDoUpdate({
+            target: usersTable.id,
+            set: {
+              email: firstPass.email,
+              passwordHash: firstPass.passwordHash,
+              fullName: firstPass.fullName,
+              title: firstPass.title,
+              roles: firstPass.roles,
+              isAlsoEmployee: firstPass.isAlsoEmployee,
+              isActive: firstPass.isActive,
+              departmentId: firstPass.departmentId,
+              managerId: null,
+              updatedAt: firstPass.updatedAt,
+            },
+          });
+      }
+      for (const u of payload.users) {
+        if (u.managerId) {
+          await tx
+            .update(usersTable)
+            .set({ managerId: u.managerId })
+            .where(eq(usersTable.id, u.id));
+        }
+      }
+    }
+    {
+      const keepIds = payload.users.map((u) => u.id);
+      if (keepIds.length > 0) {
+        // First, clear any manager pointers that target a user we are
+        // about to delete — otherwise the self-FK blocks the delete.
+        await tx.execute(sql`
+          UPDATE users
+          SET manager_id = NULL
+          WHERE org_id = ${payload.org.id}
+            AND manager_id <> ALL(${keepIds}::uuid[])
+        `);
+        await tx.execute(sql`
+          DELETE FROM users
+          WHERE org_id = ${payload.org.id}
+            AND id <> ALL(${keepIds}::uuid[])
+        `);
+      } else {
+        // Backup has zero users — clear all manager pointers first so
+        // the org-wide delete isn't blocked by the self-FK.
+        await tx
+          .update(usersTable)
+          .set({ managerId: null })
+          .where(eq(usersTable.orgId, payload.org.id));
+        await tx
+          .delete(usersTable)
+          .where(eq(usersTable.orgId, payload.org.id));
+      }
+    }
+    restoredCounts.users = payload.users.length;
+
+    // ---- Wipe + reinsert tables (no restricting operational refs) ----
+
+    // employee_profiles cascades from users; safe to wipe by org via the
+    // user join.
+    await tx.execute(sql`
+      DELETE FROM employee_profiles
+      WHERE user_id IN (
+        SELECT id FROM users WHERE org_id = ${payload.org.id}
+      )
+    `);
+    if (payload.employeeProfiles.length > 0) {
+      await tx
+        .insert(employeeProfilesTable)
+        .values(payload.employeeProfiles);
+    }
+    restoredCounts.employeeProfiles = payload.employeeProfiles.length;
+
+    await tx
+      .delete(glMappingsTable)
+      .where(eq(glMappingsTable.orgId, payload.org.id));
+    if (payload.glMappings.length > 0) {
+      await tx.insert(glMappingsTable).values(payload.glMappings);
+    }
+    restoredCounts.glMappings = payload.glMappings.length;
+
+    await tx
+      .delete(policyRulesTable)
+      .where(eq(policyRulesTable.orgId, payload.org.id));
+    if (payload.policyRules.length > 0) {
+      await tx.insert(policyRulesTable).values(payload.policyRules);
+    }
+    restoredCounts.policyRules = payload.policyRules.length;
+
+    await tx
+      .delete(qboConnectionTable)
+      .where(eq(qboConnectionTable.orgId, payload.org.id));
+    if (payload.qboConnection) {
+      await tx.insert(qboConnectionTable).values(payload.qboConnection);
+      restoredCounts.qboConnection = 1;
+    } else {
+      restoredCounts.qboConnection = 0;
+    }
+
+    // qbo_tags wipe-and-replace; assignments cascade-delete from tags so
+    // we re-insert assignments after the tags are back in place.
+    await tx
+      .delete(qboTagsTable)
+      .where(eq(qboTagsTable.orgId, payload.org.id));
+    const tags = payload.qboTags ?? [];
+    if (tags.length > 0) {
+      await tx.insert(qboTagsTable).values(tags);
+    }
+    restoredCounts.qboTags = tags.length;
+
+    // qbo_tag_assignments.report_id is NOT NULL with ON DELETE CASCADE
+    // against expense_reports — config mode does not touch reports, so
+    // any assignment whose report no longer exists in this org would
+    // fail to insert. Filter to assignments whose report still exists,
+    // and report the dropped count so the operator sees what happened.
+    const tagAssignments = payload.qboTagAssignments ?? [];
+    let insertedAssignments = 0;
+    if (tagAssignments.length > 0) {
+      const existingReports = await tx
+        .select({ id: expenseReportsTable.id })
+        .from(expenseReportsTable)
+        .where(eq(expenseReportsTable.orgId, payload.org.id));
+      const liveReportIds = new Set(existingReports.map((r) => r.id));
+      const insertable = tagAssignments.filter((a) =>
+        liveReportIds.has(a.reportId),
+      );
+      if (insertable.length > 0) {
+        await tx.insert(qboTagAssignmentsTable).values(insertable);
+      }
+      insertedAssignments = insertable.length;
+      const skipped = tagAssignments.length - insertable.length;
+      if (skipped > 0) {
+        restoredCounts.qboTagAssignmentsSkippedMissingReport = skipped;
+      }
+    }
+    restoredCounts.qboTagAssignments = insertedAssignments;
+
+    await tx
+      .delete(managerDelegationsTable)
+      .where(eq(managerDelegationsTable.orgId, payload.org.id));
+    if (payload.managerDelegations.length > 0) {
+      await tx
+        .insert(managerDelegationsTable)
+        .values(payload.managerDelegations);
+    }
+    restoredCounts.managerDelegations = payload.managerDelegations.length;
+  });
 }
 
 // ---------- helpers ----------
@@ -723,6 +1083,26 @@ function jsonReplacer(_key: string, value: unknown): unknown {
 // out of the round-trip. The fields below are the ones we read in tests so
 // keeping them as Date avoids accidental ISO-string drift.
 function reviveDates(payload: BackupPayloadV1): void {
+  // Config-only payloads omit the operational arrays. Default any missing
+  // arrays to empty so the restore code below can iterate uniformly.
+  payload.departments ??= [];
+  payload.users ??= [];
+  payload.employeeProfiles ??= [];
+  payload.glMappings ??= [];
+  payload.policyRules ??= [];
+  payload.qboTags ??= [];
+  payload.qboTagAssignments ??= [];
+  payload.qboPostingEvents ??= [];
+  payload.managerDelegations ??= [];
+  payload.expenseReports ??= [];
+  payload.lineItems ??= [];
+  payload.receipts ??= [];
+  payload.approvalActions ??= [];
+  payload.auditEntries ??= [];
+  payload.payrollBatches ??= [];
+  payload.payrollBatchItems ??= [];
+  payload.reconciliationRecords ??= [];
+
   payload.org.createdAt = toDate(payload.org.createdAt);
   for (const d of payload.departments) d.createdAt = toDate(d.createdAt);
   for (const u of payload.users) {
@@ -747,6 +1127,11 @@ function reviveDates(payload: BackupPayloadV1): void {
       payload.qboConnection.lastSyncAt,
     );
   }
+  for (const t of payload.qboTags) {
+    t.createdAt = toDate(t.createdAt);
+    t.updatedAt = toDate(t.updatedAt);
+  }
+  for (const a of payload.qboTagAssignments) a.createdAt = toDate(a.createdAt);
   for (const e of payload.qboPostingEvents) e.createdAt = toDate(e.createdAt);
   for (const m of payload.managerDelegations) {
     m.createdAt = toDate(m.createdAt);
@@ -812,12 +1197,16 @@ function validateManifest(raw: unknown): ManifestV1 {
       "manifest.json missing includesReceiptFiles.",
     );
   }
+  // Older backups predate the `mode` field; default missing/invalid values
+  // to "full" so they continue to restore with the legacy semantics.
+  const mode: BackupMode = m.mode === "config" ? "config" : "full";
   return {
     backupSchemaVersion: m.backupSchemaVersion,
     appVersion: m.appVersion,
     orgId: m.orgId,
     orgName: m.orgName,
     createdAt: m.createdAt,
+    mode,
     includesReceiptFiles: m.includesReceiptFiles,
     receiptCount: typeof m.receiptCount === "number" ? m.receiptCount : 0,
     rowCounts:

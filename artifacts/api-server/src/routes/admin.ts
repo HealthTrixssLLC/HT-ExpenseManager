@@ -1341,22 +1341,32 @@ router.get(
     const includeReceiptFiles =
       typeof req.query.includeReceiptFiles === "string" &&
       ["1", "true", "yes"].includes(req.query.includeReceiptFiles);
+    // Backup mode: "full" (default) or "config". Anything other than the
+    // explicit "config" string falls back to full so legacy callers and
+    // typo'd query params behave conservatively.
+    const mode: "full" | "config" =
+      typeof req.query.mode === "string" && req.query.mode === "config"
+        ? "config"
+        : "full";
 
     try {
       const result = await exportBackup({
         orgId: req.auth!.user.orgId,
         appVersion: APP_VERSION,
+        mode,
         includeReceiptFiles,
       });
       const ts = result.manifest.createdAt.replace(/[:.]/g, "-");
+      const filenamePart = mode === "config" ? "config-backup" : "backup";
       res.setHeader("Content-Type", "application/zip");
       res.setHeader(
         "Content-Disposition",
-        `attachment; filename="healthtrix-backup-${ts}.zip"`,
+        `attachment; filename="healthtrix-${filenamePart}-${ts}.zip"`,
       );
       res.setHeader("X-Backup-Schema-Version", String(CURRENT_BACKUP_SCHEMA_VERSION));
       res.setHeader("X-Backup-App-Version", result.manifest.appVersion);
       res.setHeader("X-Backup-Org-Id", result.manifest.orgId);
+      res.setHeader("X-Backup-Mode", result.manifest.mode);
       res.setHeader(
         "X-Backup-Includes-Receipt-Files",
         result.manifest.includesReceiptFiles ? "1" : "0",
