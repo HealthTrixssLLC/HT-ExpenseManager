@@ -257,6 +257,17 @@ export type IntuitAccountingClient = {
     raw: unknown;
   }>;
   fetchCompanyInfo(): Promise<{ companyName: string; raw: unknown }>;
+  /**
+   * Create a new Vendor in QBO. Returns the durable Vendor Id assigned by
+   * Intuit. Used when posting a JournalEntry whose credit line targets an
+   * Accounts Payable account — Intuit requires an Entity (Vendor or
+   * Employee) on every A/P or A/R line, and we resolve / create it from
+   * the report submitter on demand.
+   */
+  createVendor(args: {
+    displayName: string;
+    primaryEmail?: string | null;
+  }): Promise<{ Id: string; raw: unknown }>;
   /** Returns the *currently active* access token (after any auto-refresh). */
   currentAccessToken(): string;
 };
@@ -427,6 +438,29 @@ export function createIntuitAccountingClient(
           200,
           "no_attachable_id",
           "Intuit returned an attachable upload response without an Id.",
+          result,
+        );
+      }
+      return { Id: id, raw: result };
+    },
+    async createVendor({ displayName, primaryEmail }) {
+      const body: Record<string, unknown> = { DisplayName: displayName };
+      if (primaryEmail) {
+        body.PrimaryEmailAddr = { Address: primaryEmail };
+      }
+      const result = await jsonRequest<{
+        Vendor: { Id: string; SyncToken: string };
+      }>(`/vendor?minorversion=70`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const id = result.Vendor?.Id;
+      if (!id) {
+        throw new IntuitApiError(
+          200,
+          "no_vendor_id",
+          "Intuit returned a vendor create response without an Id.",
           result,
         );
       }

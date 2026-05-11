@@ -12,6 +12,7 @@ import {
 import { sql } from "drizzle-orm";
 import { orgsTable } from "./orgs";
 import { expenseReportsTable } from "./reports";
+import { usersTable } from "./users";
 import {
   qboConnectionHealthEnum,
   qboConnectionModeEnum,
@@ -212,6 +213,38 @@ export const qboAccountsCacheTable = pgTable(
   }),
 );
 
+// Cached map of (org, internal user) → QBO Vendor Id. Populated on demand
+// the first time we need to attach an Entity reference to a JournalEntry
+// line whose AccountRef targets an Accounts Payable / Receivable account
+// (Intuit requires Entity on AP/AR lines). Kept lightweight on purpose —
+// we only need the durable Vendor Id to short-circuit the Vendor lookup
+// (and avoid a redundant create-or-find round-trip) on every subsequent
+// post for the same submitter.
+export const qboVendorCacheTable = pgTable(
+  "qbo_vendor_cache",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => orgsTable.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => usersTable.id, { onDelete: "cascade" }),
+    qboVendorId: text("qbo_vendor_id").notNull(),
+    displayName: text("display_name").notNull(),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    orgUserUnique: uniqueIndex("qbo_vendor_cache_org_user_unique").on(
+      t.orgId,
+      t.userId,
+    ),
+    orgIdx: index("qbo_vendor_cache_org_idx").on(t.orgId),
+  }),
+);
+
 // Lightweight rolling log of token-refresh outcomes for the Connection
 // Health panel. Persisted so admins can see the last few attempts even
 // across server restarts.
@@ -255,3 +288,5 @@ export type InsertQboOauthState = typeof qboOauthStatesTable.$inferInsert;
 export type QboTokenRefreshLog = typeof qboTokenRefreshLogTable.$inferSelect;
 export type InsertQboTokenRefreshLog =
   typeof qboTokenRefreshLogTable.$inferInsert;
+export type QboVendorCache = typeof qboVendorCacheTable.$inferSelect;
+export type InsertQboVendorCache = typeof qboVendorCacheTable.$inferInsert;

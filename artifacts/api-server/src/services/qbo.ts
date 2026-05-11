@@ -35,6 +35,7 @@ import {
   qboTagAssignmentsTable,
   qboTagsTable,
   qboTokenRefreshLogTable,
+  qboVendorCacheTable,
   receiptsTable,
   usersTable,
   type ExpenseReport,
@@ -58,6 +59,7 @@ import {
   IntuitApiError,
   refreshAccessToken,
   revokeToken,
+  type IntuitAccountingClient,
   type IntuitTokenResponse,
 } from "./intuitClient";
 import { isDevDomainRedirect } from "./qboRedirect";
@@ -72,6 +74,13 @@ const PAYABLE_ACCOUNT = "Employee Reimbursement Payable";
 const CURRENCY = "USD";
 const ACCOUNTS_CACHE_TTL_MS = 10 * 60 * 1000;
 
+export type GlPreviewLineEntity = {
+  /** Intuit accepts Vendor or Employee on AP/AR lines. We use Vendor. */
+  type: "Vendor" | "Employee";
+  refValue: string;
+  refName: string;
+};
+
 export type GlPreviewLine = {
   account: string;
   /**
@@ -81,9 +90,36 @@ export type GlPreviewLine = {
    * could change in QBO without our knowledge.
    */
   accountId: string | null;
+  /**
+   * Cached QBO AccountType for `accountId` (e.g. "Accounts Payable",
+   * "Expense"). Populated from `qbo_accounts_cache` when available. We
+   * use this to decide whether the JournalEntry line needs an Entity
+   * reference — Intuit requires Entity on every line whose AccountRef
+   * targets an A/P or A/R account.
+   */
+  accountType?: string | null;
   category: string;
   amount: string;
+  /**
+   * Entity reference (Vendor/Employee) attached to this line on the
+   * wire. Populated by `postReportToQboReal` for AP/AR lines from the
+   * report submitter via `resolveSubmitterVendor`. Null in stub mode
+   * and on lines that don't need an entity.
+   */
+  entity?: GlPreviewLineEntity | null;
 };
+
+/** AccountType values that Intuit requires an Entity reference on. */
+export const ENTITY_REQUIRED_ACCOUNT_TYPES: ReadonlySet<string> = new Set([
+  "Accounts Payable",
+  "Accounts Receivable",
+]);
+
+export function lineRequiresEntity(line: GlPreviewLine): boolean {
+  return Boolean(
+    line.accountType && ENTITY_REQUIRED_ACCOUNT_TYPES.has(line.accountType),
+  );
+}
 
 export type GlPreview = {
   reportId: string;
@@ -127,6 +163,24 @@ export async function buildGlPreview(
       .then((rows) => rows[0]),
   ]);
 
+  // Account-type lookup from the cached chart of accounts. Used to flag
+  // AP/AR lines that require an Entity reference at post time. We don't
+  // force-refresh here because account_type rarely changes for an existing
+  // QBO account Id; in real-mode posting, postReportToQboReal calls
+  // ensureAccountTypesForLines before evaluating Entity attachment so a
+  // cold or stale cache cannot cause us to ship an AP/AR line without
+  // its required Entity block.
+  const cachedAccounts = await db
+    .select({
+      qboAccountId: qboAccountsCacheTable.qboAccountId,
+      accountType: qboAccountsCacheTable.accountType,
+    })
+    .from(qboAccountsCacheTable)
+    .where(eq(qboAccountsCacheTable.orgId, report.orgId));
+  const accountTypeById = new Map(
+    cachedAccounts.map((a) => [a.qboAccountId, a.accountType] as const),
+  );
+
   const accountByCategory = new Map(
     mappings.map((m) => [
       m.code,
@@ -148,12 +202,18 @@ export async function buildGlPreview(
 
   const debits: GlPreviewLine[] = [...debitsByCategory.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([category, cents]) => ({
-      account: accountByCategory.get(category)?.name ?? FALLBACK_ACCOUNT,
-      accountId: accountByCategory.get(category)?.id ?? null,
-      category,
-      amount: centsToDecimal(cents),
-    }));
+    .map(([category, cents]) => {
+      const acc = accountByCategory.get(category);
+      const accountId = acc?.id ?? null;
+      return {
+        account: acc?.name ?? FALLBACK_ACCOUNT,
+        accountId,
+        accountType: accountId ? accountTypeById.get(accountId) ?? null : null,
+        category,
+        amount: centsToDecimal(cents),
+        entity: null,
+      };
+    });
 
   const payableName =
     conn?.defaultPayableAccountName ?? PAYABLE_ACCOUNT;
@@ -163,8 +223,10 @@ export async function buildGlPreview(
     {
       account: payableName,
       accountId: payableId,
+      accountType: payableId ? accountTypeById.get(payableId) ?? null : null,
       category: payableName,
       amount: centsToDecimal(totalCents),
+      entity: null,
     },
   ];
 
@@ -1168,7 +1230,6 @@ async function postReportToQboReal(
   const preview = await buildGlPreview(report);
   const tags = await listTagsForReport(report.id);
   const tagNames = tags.map((t) => t.name);
-  const payload = buildJournalEntryPayload(preview, tagNames);
   // Pre-flight: every line must have a QBO Account Id. Intuit's
   // JournalEntry API requires AccountRef.value (the durable Account Id)
   // — sending only the human name returns the generic
@@ -1184,6 +1245,7 @@ async function postReportToQboReal(
       `Open QuickBooks settings and either set a default payable account ` +
       `or link the affected category to a Chart-of-Accounts entry, then retry. ` +
       `(No request was sent to QuickBooks — this is a local validation failure.)`;
+    const payload = buildJournalEntryPayload(preview, tagNames);
     await persistPostingFailure(report, conn, payload, tagNames, errorMessage);
     return { status: "error", errorMessage, payload };
   }
@@ -1201,6 +1263,7 @@ async function postReportToQboReal(
     !liveConn.realmId
   ) {
     const errorMessage = "QuickBooks connection is incomplete; reconnect required.";
+    const payload = buildJournalEntryPayload(preview, tagNames);
     await persistPostingFailure(report, liveConn, payload, tagNames, errorMessage);
     return { status: "error", errorMessage, payload };
   }
@@ -1231,6 +1294,67 @@ async function postReportToQboReal(
         .where(eq(qboConnectionTable.orgId, report.orgId));
     },
   });
+
+  // Resolve a Vendor reference for any AP/AR line that needs one. Intuit
+  // requires JournalEntryLineDetail.Entity on every line whose AccountRef
+  // targets an Accounts Payable or Accounts Receivable account; sending
+  // the JE without it returns the generic "Required param missing, need
+  // to supply the required value for the API" Fault and parks the report
+  // in Sync Error. We source the entity from the report submitter
+  // (lookup or create their Vendor in QBO, cached per (org,user) so we
+  // only pay the round-trip on the first post for a given submitter).
+  // If any line has an accountId but no cached accountType (cold or stale
+  // qbo_accounts_cache for that account), look it up live from QBO before
+  // evaluating Entity attachment — otherwise an AP/AR line could ship
+  // without its required Entity block and we'd reproduce the original
+  // "Required param missing" Fault from report 2222ff05.
+  await ensureAccountTypesForLines({
+    orgId: report.orgId,
+    client,
+    lines: [...preview.debits, ...preview.credits],
+  });
+
+  const entityRequired =
+    preview.debits.some(lineRequiresEntity) ||
+    preview.credits.some(lineRequiresEntity);
+  if (entityRequired) {
+    try {
+      const vendor = await resolveSubmitterVendor({
+        orgId: report.orgId,
+        userId: report.employeeId,
+        client,
+      });
+      const attach = (line: GlPreviewLine): GlPreviewLine =>
+        lineRequiresEntity(line)
+          ? {
+              ...line,
+              entity: {
+                type: "Vendor",
+                refValue: vendor.qboVendorId,
+                refName: vendor.displayName,
+              },
+            }
+          : line;
+      preview.debits = preview.debits.map(attach);
+      preview.credits = preview.credits.map(attach);
+    } catch (err) {
+      const errorMessage =
+        `Cannot post to QuickBooks: failed to resolve a QuickBooks Vendor for the report submitter, ` +
+        `which is required when posting to an Accounts Payable account. ` +
+        `${err instanceof Error ? err.message : String(err)}`;
+      const payload = buildJournalEntryPayload(preview, tagNames);
+      await persistPostingFailure(
+        report,
+        liveConn,
+        payload,
+        tagNames,
+        errorMessage,
+      );
+      return { status: "error", errorMessage, payload };
+    }
+  }
+
+  const payload = buildJournalEntryPayload(preview, tagNames);
 
   // Idempotency key: report id + attempt count (existing posting events).
   const priorAttempts = await db
@@ -1387,6 +1511,26 @@ function buildAccountRef(line: GlPreviewLine): Record<string, string> {
   return { name: line.account };
 }
 
+function buildLineDetail(line: GlPreviewLine, postingType: "Debit" | "Credit"): Record<string, unknown> {
+  const detail: Record<string, unknown> = {
+    PostingType: postingType,
+    AccountRef: buildAccountRef(line),
+  };
+  if (line.entity) {
+    // Intuit JournalEntryLineDetail.Entity shape:
+    //   { Type: "Vendor", EntityRef: { value, name } }
+    // Required on every line whose AccountRef targets an A/P or A/R
+    // account; sending a JournalEntry without it is what produces the
+    // generic "Required param missing, need to supply the required
+    // value for the API" Fault Intuit returns for these lines.
+    detail.Entity = {
+      Type: line.entity.type,
+      EntityRef: { value: line.entity.refValue, name: line.entity.refName },
+    };
+  }
+  return detail;
+}
+
 export function buildJournalEntryPayload(
   preview: GlPreview,
   tagNames: string[],
@@ -1413,20 +1557,14 @@ export function buildJournalEntryPayload(
           Description: d.category,
           Amount: parseFloat(d.amount),
           DetailType: "JournalEntryLineDetail",
-          JournalEntryLineDetail: {
-            PostingType: "Debit",
-            AccountRef: buildAccountRef(d),
-          },
+          JournalEntryLineDetail: buildLineDetail(d, "Debit"),
         })),
         ...preview.credits.map((c, idx) => ({
           Id: String(preview.debits.length + idx + 1),
           Description: c.category,
           Amount: parseFloat(c.amount),
           DetailType: "JournalEntryLineDetail",
-          JournalEntryLineDetail: {
-            PostingType: "Credit",
-            AccountRef: buildAccountRef(c),
-          },
+          JournalEntryLineDetail: buildLineDetail(c, "Credit"),
         })),
       ],
       CurrencyRef: { value: preview.currency },
@@ -1660,6 +1798,248 @@ export async function listChartOfAccounts(args: {
     }
   });
   return accounts;
+}
+
+/**
+ * Resolve a QBO Vendor for a workforce user (the report submitter), looking
+ * the cached id up first and falling back to a name lookup + create round-
+ * trip on the live Intuit API. The cache short-circuits subsequent posts
+ * for the same submitter so we don't repeatedly query/insert.
+ *
+ * Failure modes are bubbled up to the caller — we'd rather park the post
+ * with an actionable "could not resolve vendor" message than silently
+ * post without an Entity reference and let Intuit reject the JE with the
+ * generic "Required param missing" Fault.
+ */
+export async function resolveSubmitterVendor(args: {
+  orgId: string;
+  userId: string;
+  client: IntuitAccountingClient;
+}): Promise<{ qboVendorId: string; displayName: string }> {
+  const cached = (
+    await db
+      .select()
+      .from(qboVendorCacheTable)
+      .where(
+        and(
+          eq(qboVendorCacheTable.orgId, args.orgId),
+          eq(qboVendorCacheTable.userId, args.userId),
+        ),
+      )
+      .limit(1)
+  )[0];
+  if (cached) {
+    return {
+      qboVendorId: cached.qboVendorId,
+      displayName: cached.displayName,
+    };
+  }
+
+  const [user] = await db
+    .select({
+      id: usersTable.id,
+      email: usersTable.email,
+      fullName: usersTable.fullName,
+    })
+    .from(usersTable)
+    .where(eq(usersTable.id, args.userId))
+    .limit(1);
+  if (!user) {
+    throw new Error(`Submitter user ${args.userId} not found`);
+  }
+  const displayName = (user.fullName?.trim() || user.email).slice(0, 100);
+
+  // Look the vendor up first so we don't trigger a "Duplicate Name Exists"
+  // create. Intuit's query language requires single-quote escaping.
+  const escaped = displayName.replace(/'/g, "''");
+  type VendorRow = { Id: string; DisplayName: string };
+  let resolvedId: string | null = null;
+  let resolvedName: string = displayName;
+  try {
+    const queryResult = await args.client.query<{
+      QueryResponse?: { Vendor?: VendorRow[] };
+    }>(`SELECT Id, DisplayName FROM Vendor WHERE DisplayName = '${escaped}'`);
+    const row = queryResult.QueryResponse?.Vendor?.[0];
+    if (row) {
+      resolvedId = row.Id;
+      resolvedName = row.DisplayName;
+    }
+  } catch (err) {
+    logger.warn(
+      { err, orgId: args.orgId, userId: args.userId, displayName },
+      "QBO vendor lookup failed; will attempt create",
+    );
+  }
+
+  if (!resolvedId) {
+    try {
+      const created = await args.client.createVendor({
+        displayName,
+        primaryEmail: user.email,
+      });
+      resolvedId = created.Id;
+      resolvedName = displayName;
+    } catch (err) {
+      // Duplicate-name conflicts can occur if a Customer (or another
+      // entity) already uses this name and our prior query missed it
+      // (Vendor query is scoped to Vendor). Re-query before giving up
+      // so the next attempt at least sees what's actually there.
+      if (
+        err instanceof IntuitApiError &&
+        /duplicate/i.test(err.message)
+      ) {
+        try {
+          const reQuery = await args.client.query<{
+            QueryResponse?: { Vendor?: VendorRow[] };
+          }>(`SELECT Id, DisplayName FROM Vendor WHERE DisplayName = '${escaped}'`);
+          const row = reQuery.QueryResponse?.Vendor?.[0];
+          if (row) {
+            resolvedId = row.Id;
+            resolvedName = row.DisplayName;
+          }
+        } catch {
+          /* fall through to throw */
+        }
+      }
+      if (!resolvedId) throw err;
+    }
+  }
+
+  // Cache the resolution. ON CONFLICT keeps the existing row in case a
+  // concurrent post raced us — both rows resolve the same Vendor Id, so
+  // either is acceptable.
+  await db
+    .insert(qboVendorCacheTable)
+    .values({
+      orgId: args.orgId,
+      userId: args.userId,
+      qboVendorId: resolvedId,
+      displayName: resolvedName,
+    })
+    .onConflictDoUpdate({
+      target: [qboVendorCacheTable.orgId, qboVendorCacheTable.userId],
+      set: { qboVendorId: resolvedId, displayName: resolvedName, fetchedAt: new Date() },
+    });
+
+  return { qboVendorId: resolvedId, displayName: resolvedName };
+}
+
+/**
+ * Mutates `lines` in place: for any line whose `accountId` is set but whose
+ * `accountType` is null (cache miss/stale), live-query Intuit for the
+ * AccountType and patch both the line and `qbo_accounts_cache`. Used by
+ * the real-mode posting path so that AP/AR detection is deterministic
+ * regardless of cache warmth — without this, a cold cache would silently
+ * drop the required Entity block on AP/AR lines and reproduce the
+ * "Required param missing" Fault.
+ */
+export async function ensureAccountTypesForLines(args: {
+  orgId: string;
+  client: IntuitAccountingClient;
+  lines: GlPreviewLine[];
+}): Promise<void> {
+  const missingIds = Array.from(
+    new Set(
+      args.lines
+        .filter((l) => l.accountId && !l.accountType)
+        .map((l) => l.accountId as string),
+    ),
+  );
+  if (missingIds.length === 0) return;
+
+  // Try the cache once more in case a concurrent path warmed it.
+  const cached = await db
+    .select({
+      qboAccountId: qboAccountsCacheTable.qboAccountId,
+      accountType: qboAccountsCacheTable.accountType,
+    })
+    .from(qboAccountsCacheTable)
+    .where(eq(qboAccountsCacheTable.orgId, args.orgId));
+  const known = new Map(cached.map((c) => [c.qboAccountId, c.accountType] as const));
+  const stillMissing = missingIds.filter((id) => !known.has(id));
+
+  // Resolve any remaining ids by querying Intuit directly. Intuit's IN
+  // operator on Id requires single-quoted string literals.
+  const fetched = new Map<
+    string,
+    {
+      name: string;
+      fullyQualifiedName: string;
+      accountType: string;
+      accountSubType: string | null;
+      classification: string | null;
+      active: boolean;
+    }
+  >();
+  if (stillMissing.length > 0) {
+    const inList = stillMissing.map((id) => `'${id.replace(/'/g, "''")}'`).join(",");
+    try {
+      const res = await args.client.query<{
+        QueryResponse?: {
+          Account?: Array<{
+            Id: string;
+            Name: string;
+            FullyQualifiedName: string;
+            AccountType: string;
+            AccountSubType?: string;
+            Classification?: string;
+            Active: boolean;
+          }>;
+        };
+      }>(`SELECT * FROM Account WHERE Id IN (${inList})`);
+      for (const a of res.QueryResponse?.Account ?? []) {
+        fetched.set(a.Id, {
+          name: a.Name,
+          fullyQualifiedName: a.FullyQualifiedName,
+          accountType: a.AccountType,
+          accountSubType: a.AccountSubType ?? null,
+          classification: a.Classification ?? null,
+          active: a.Active,
+        });
+        known.set(a.Id, a.AccountType);
+      }
+    } catch (err) {
+      logger.warn(
+        { err, orgId: args.orgId, accountIds: stillMissing },
+        "Failed to resolve QBO account types for posting; AP/AR detection may be incomplete",
+      );
+    }
+    if (fetched.size > 0) {
+      await db
+        .insert(qboAccountsCacheTable)
+        .values(
+          [...fetched.entries()].map(([id, a]) => ({
+            orgId: args.orgId,
+            qboAccountId: id,
+            name: a.name,
+            fullyQualifiedName: a.fullyQualifiedName,
+            accountType: a.accountType,
+            accountSubType: a.accountSubType,
+            classification: a.classification,
+            active: a.active,
+          })),
+        )
+        .onConflictDoUpdate({
+          target: [qboAccountsCacheTable.orgId, qboAccountsCacheTable.qboAccountId],
+          set: {
+            accountType: sql`excluded.account_type`,
+            accountSubType: sql`excluded.account_sub_type`,
+            classification: sql`excluded.classification`,
+            name: sql`excluded.name`,
+            fullyQualifiedName: sql`excluded.fully_qualified_name`,
+            active: sql`excluded.active`,
+            fetchedAt: new Date(),
+          },
+        });
+    }
+  }
+
+  for (const line of args.lines) {
+    if (line.accountId && !line.accountType) {
+      const t = known.get(line.accountId);
+      if (t) line.accountType = t;
+    }
+  }
 }
 
 function toCachedAccountDto(

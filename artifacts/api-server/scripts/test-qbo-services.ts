@@ -448,6 +448,456 @@ await test("postReportToQbo on real mode posts successfully when every line has 
   assert.equal(events[0].errorMessage, null);
 });
 
+await test("postReportToQbo on real mode attaches Vendor Entity on AP credit lines and caches the resolved Vendor Id (regression for report 2222ff05 'Required param missing')", async () => {
+  const { glMappingsTable, lineItemsTable, qboAccountsCacheTable, qboVendorCacheTable } = await import(
+    "@workspace/db"
+  );
+  const { orgId, userId } = await makeOrg("realApEntity");
+  await saveQboCredentials({
+    orgId,
+    clientId: "C",
+    clientSecret: "S",
+    environment: "sandbox",
+  });
+  await db
+    .update(qboConnectionTable)
+    .set({
+      mode: "real",
+      status: "connected",
+      connectionHealth: "healthy",
+      realmId: "9130354997998",
+      companyName: "Sandbox Co",
+      accessTokenEncrypted: encMod.encryptString("AT"),
+      refreshTokenEncrypted: encMod.encryptString("RT"),
+      tokenExpiresAt: new Date(Date.now() + 24 * 3600_000),
+      refreshTokenExpiresAt: new Date(Date.now() + 30 * 86_400_000),
+      lastTokenRefreshAt: new Date(),
+      // Mirrors report 2222ff05's actual config: payable defaulted to
+      // the org's true Accounts Payable (A/P) account, which Intuit
+      // requires JournalEntryLineDetail.Entity on.
+      defaultPayableAccountId: "33",
+      defaultPayableAccountName: "Accounts Payable (A/P)",
+    })
+    .where(eq(qboConnectionTable.orgId, orgId));
+  await db.insert(qboAccountsCacheTable).values([
+    {
+      orgId,
+      qboAccountId: "13",
+      name: "Meals and Entertainment",
+      fullyQualifiedName: "Meals and Entertainment",
+      accountType: "Expense",
+      accountSubType: "EntertainmentMeals",
+      classification: "Expense",
+      active: true,
+    },
+    {
+      orgId,
+      qboAccountId: "33",
+      name: "Accounts Payable (A/P)",
+      fullyQualifiedName: "Accounts Payable (A/P)",
+      accountType: "Accounts Payable",
+      accountSubType: "AccountsPayable",
+      classification: "Liability",
+      active: true,
+    },
+  ]);
+  await db.insert(glMappingsTable).values({
+    orgId,
+    code: "Meals & Entertainment",
+    qboAccount: "Meals and Entertainment",
+    qboAccountId: "13",
+  });
+  const [dept] = await db
+    .insert(departmentsTable)
+    .values({ orgId, name: "Test Dept" })
+    .returning();
+  const [report] = await db
+    .insert(expenseReportsTable)
+    .values({
+      orgId,
+      employeeId: userId,
+      departmentId: dept.id,
+      title: "Real-mode AP entity",
+      status: "Finance Approved",
+      displayCode: `AP1-${randomUUID().slice(0, 6).toUpperCase()}`,
+    })
+    .returning();
+  await db.insert(lineItemsTable).values({
+    reportId: report.id,
+    occurredOn: "2026-05-10",
+    merchant: "Catering Co",
+    description: "Team Party",
+    category: "Meals & Entertainment",
+    amount: "300.00",
+    paymentMethod: "Personal Card",
+  });
+
+  // Track every URL we hit so we can assert we both (a) looked the vendor
+  // up before posting and (b) did NOT make a redundant create when one
+  // already exists. The mock answers Vendor query with a hit, so the
+  // create endpoint must never be called on this path.
+  const urlsHit: string[] = [];
+  let postedBody: unknown = null;
+  const fetchMock = (async (url: string, init: RequestInit) => {
+    const u = String(url);
+    urlsHit.push(`${init?.method ?? "GET"} ${u}`);
+    if (u.includes("/query?") && /Vendor/i.test(decodeURIComponent(u))) {
+      return new Response(
+        JSON.stringify({
+          QueryResponse: {
+            Vendor: [{ Id: "58", DisplayName: "QBO Test Admin" }],
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    if (u.includes("/vendor?") && (init?.method === "POST")) {
+      throw new Error(
+        "createVendor must NOT be called when the lookup already hits an existing vendor",
+      );
+    }
+    if (u.includes("/journalentry?")) {
+      postedBody = JSON.parse(String(init.body));
+      return new Response(
+        JSON.stringify({ JournalEntry: { Id: "171", SyncToken: "0" } }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    throw new Error(`unexpected fetch in AP-entity test: ${u}`);
+  }) as unknown as typeof fetch;
+
+  const result = await postReportToQbo(report, { fetchFn: fetchMock });
+  assert.equal(result.status, "posted", `expected posted, got: ${JSON.stringify(result)}`);
+  if (result.status === "posted" || result.status === "retried") {
+    assert.equal(result.qboJournalId, "171");
+  }
+
+  // Vendor lookup must have happened BEFORE the journal entry post.
+  const queryIdx = urlsHit.findIndex(
+    (u) => u.includes("/query?") && /Vendor/i.test(decodeURIComponent(u)),
+  );
+  const postIdx = urlsHit.findIndex((u) => u.includes("/journalentry?"));
+  assert.ok(queryIdx !== -1, `expected a Vendor query, got: ${JSON.stringify(urlsHit)}`);
+  assert.ok(postIdx !== -1, `expected a JournalEntry post, got: ${JSON.stringify(urlsHit)}`);
+  assert.ok(queryIdx < postIdx, "Vendor lookup must precede JE post");
+
+  // Wire payload assertions: the AP credit line must carry an Entity
+  // block with Type=Vendor and the resolved EntityRef.value. The pre-
+  // fix payload had no Entity block at all, which is what produced
+  // Intuit's "Required param missing" Fault on report 2222ff05.
+  const sent = postedBody as {
+    Line: Array<{
+      JournalEntryLineDetail: {
+        PostingType: string;
+        AccountRef: { value?: string };
+        Entity?: { Type: string; EntityRef: { value: string; name: string } };
+      };
+    }>;
+  };
+  const apLine = sent.Line.find(
+    (l) => l.JournalEntryLineDetail.AccountRef.value === "33",
+  );
+  assert.ok(apLine, "expected an AP credit line in the wire body");
+  assert.equal(apLine!.JournalEntryLineDetail.PostingType, "Credit");
+  assert.ok(
+    apLine!.JournalEntryLineDetail.Entity,
+    `AP credit line must carry an Entity block, got: ${JSON.stringify(apLine)}`,
+  );
+  assert.equal(apLine!.JournalEntryLineDetail.Entity!.Type, "Vendor");
+  assert.equal(apLine!.JournalEntryLineDetail.Entity!.EntityRef.value, "58");
+  // The expense (debit) line must NOT carry an Entity block — Intuit
+  // requires Entity only on AP/AR lines.
+  const expLine = sent.Line.find(
+    (l) => l.JournalEntryLineDetail.AccountRef.value === "13",
+  );
+  assert.ok(expLine, "expected an expense debit line");
+  assert.equal(
+    expLine!.JournalEntryLineDetail.Entity,
+    undefined,
+    "non-AP/AR line must not carry an Entity block",
+  );
+
+  // The persisted posting event reflects the success and the cached
+  // vendor row was written so subsequent posts skip the lookup round-
+  // trip.
+  const events = await db
+    .select()
+    .from(qboPostingEventsTable)
+    .where(eq(qboPostingEventsTable.reportId, report.id));
+  assert.equal(events.length, 1);
+  assert.equal(events[0].status, "posted");
+  assert.equal(events[0].qboJournalId, "171");
+  const cached = await db
+    .select()
+    .from(qboVendorCacheTable)
+    .where(
+      and(
+        eq(qboVendorCacheTable.orgId, orgId),
+        eq(qboVendorCacheTable.userId, userId),
+      ),
+    );
+  assert.equal(cached.length, 1);
+  assert.equal(cached[0].qboVendorId, "58");
+});
+
+await test("postReportToQbo on real mode resolves AP account type from QBO when qbo_accounts_cache is cold and still attaches Entity (regression: cold-cache must not silently drop Entity)", async () => {
+  const { glMappingsTable, lineItemsTable, qboAccountsCacheTable } = await import(
+    "@workspace/db"
+  );
+  const { orgId, userId } = await makeOrg("realApEntityColdCache");
+  await saveQboCredentials({
+    orgId,
+    clientId: "C",
+    clientSecret: "S",
+    environment: "sandbox",
+  });
+  await db
+    .update(qboConnectionTable)
+    .set({
+      mode: "real",
+      status: "connected",
+      connectionHealth: "healthy",
+      realmId: "9130354997998",
+      companyName: "Sandbox Co",
+      accessTokenEncrypted: encMod.encryptString("AT"),
+      refreshTokenEncrypted: encMod.encryptString("RT"),
+      tokenExpiresAt: new Date(Date.now() + 24 * 3600_000),
+      refreshTokenExpiresAt: new Date(Date.now() + 30 * 86_400_000),
+      lastTokenRefreshAt: new Date(),
+      defaultPayableAccountId: "33",
+      defaultPayableAccountName: "Accounts Payable (A/P)",
+    })
+    .where(eq(qboConnectionTable.orgId, orgId));
+  // Deliberately do NOT seed qbo_accounts_cache. The posting path must
+  // resolve account types live from QBO so AP detection still fires.
+  await db.insert(glMappingsTable).values({
+    orgId,
+    code: "Meals & Entertainment",
+    qboAccount: "Meals and Entertainment",
+    qboAccountId: "13",
+  });
+  const [dept] = await db
+    .insert(departmentsTable)
+    .values({ orgId, name: "D" })
+    .returning();
+  const [report] = await db
+    .insert(expenseReportsTable)
+    .values({
+      orgId,
+      employeeId: userId,
+      departmentId: dept.id,
+      title: "Cold cache AP entity",
+      status: "Finance Approved",
+      displayCode: `CLD-${randomUUID().slice(0, 6).toUpperCase()}`,
+    })
+    .returning();
+  await db.insert(lineItemsTable).values({
+    reportId: report.id,
+    occurredOn: "2026-05-10",
+    merchant: "M",
+    description: "x",
+    category: "Meals & Entertainment",
+    amount: "75.00",
+    paymentMethod: "Personal Card",
+  });
+
+  let accountQueryCount = 0;
+  let postedBody: unknown = null;
+  const fetchMock = (async (url: string, init: RequestInit) => {
+    const u = String(url);
+    if (u.includes("/query?")) {
+      const decoded = decodeURIComponent(u);
+      if (/FROM Account/i.test(decoded)) {
+        accountQueryCount += 1;
+        // Cold cache forced posting to live-look up the AP and expense
+        // accounts; return both so downstream detection wires Entity.
+        return new Response(
+          JSON.stringify({
+            QueryResponse: {
+              Account: [
+                { Id: "33", Name: "AP", FullyQualifiedName: "AP", AccountType: "Accounts Payable", AccountSubType: "AccountsPayable", Classification: "Liability", Active: true },
+                { Id: "13", Name: "Meals", FullyQualifiedName: "Meals", AccountType: "Expense", AccountSubType: "EntertainmentMeals", Classification: "Expense", Active: true },
+              ],
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (/FROM Vendor/i.test(decoded)) {
+        return new Response(
+          JSON.stringify({ QueryResponse: { Vendor: [{ Id: "58", DisplayName: "QBO Test Admin" }] } }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+    }
+    if (u.includes("/journalentry?")) {
+      postedBody = JSON.parse(String(init.body));
+      return new Response(
+        JSON.stringify({ JournalEntry: { Id: "999", SyncToken: "0" } }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    throw new Error(`unexpected fetch in cold-cache test: ${u}`);
+  }) as unknown as typeof fetch;
+
+  const result = await postReportToQbo(report, { fetchFn: fetchMock });
+  assert.equal(result.status, "posted", `expected posted, got: ${JSON.stringify(result)}`);
+  assert.ok(accountQueryCount >= 1, "cold cache must trigger an Account live-lookup");
+
+  const sent = postedBody as {
+    Line: Array<{
+      JournalEntryLineDetail: {
+        AccountRef: { value?: string };
+        Entity?: { Type: string; EntityRef: { value: string } };
+      };
+    }>;
+  };
+  const apLine = sent.Line.find(
+    (l) => l.JournalEntryLineDetail.AccountRef.value === "33",
+  );
+  assert.ok(apLine, "expected AP credit line");
+  assert.ok(
+    apLine!.JournalEntryLineDetail.Entity,
+    "AP credit line must carry Entity even when cache started cold",
+  );
+  assert.equal(apLine!.JournalEntryLineDetail.Entity!.EntityRef.value, "58");
+
+  // Side-effect: the cache should now be warm for both accounts so a
+  // subsequent post for this org doesn't re-query.
+  const warmed = await db
+    .select()
+    .from(qboAccountsCacheTable)
+    .where(eq(qboAccountsCacheTable.orgId, orgId));
+  const warmedIds = new Set(warmed.map((r) => r.qboAccountId));
+  assert.ok(warmedIds.has("33"), "AP account should be persisted to cache after lookup");
+  assert.ok(warmedIds.has("13"), "expense account should be persisted to cache after lookup");
+});
+
+await test("postReportToQbo on real mode creates a Vendor when none exists, caches the new id, and reuses it on retry (no second create)", async () => {
+  const { glMappingsTable, lineItemsTable, qboAccountsCacheTable, qboVendorCacheTable } = await import(
+    "@workspace/db"
+  );
+  const { orgId, userId } = await makeOrg("realApEntityCreate");
+  await saveQboCredentials({
+    orgId,
+    clientId: "C",
+    clientSecret: "S",
+    environment: "sandbox",
+  });
+  await db
+    .update(qboConnectionTable)
+    .set({
+      mode: "real",
+      status: "connected",
+      connectionHealth: "healthy",
+      realmId: "9130354997998",
+      companyName: "Sandbox Co",
+      accessTokenEncrypted: encMod.encryptString("AT"),
+      refreshTokenEncrypted: encMod.encryptString("RT"),
+      tokenExpiresAt: new Date(Date.now() + 24 * 3600_000),
+      refreshTokenExpiresAt: new Date(Date.now() + 30 * 86_400_000),
+      lastTokenRefreshAt: new Date(),
+      defaultPayableAccountId: "33",
+      defaultPayableAccountName: "Accounts Payable (A/P)",
+    })
+    .where(eq(qboConnectionTable.orgId, orgId));
+  await db.insert(qboAccountsCacheTable).values([
+    { orgId, qboAccountId: "13", name: "Meals", fullyQualifiedName: "Meals", accountType: "Expense", accountSubType: null, classification: "Expense", active: true },
+    { orgId, qboAccountId: "33", name: "AP", fullyQualifiedName: "AP", accountType: "Accounts Payable", accountSubType: "AccountsPayable", classification: "Liability", active: true },
+  ]);
+  await db.insert(glMappingsTable).values({
+    orgId,
+    code: "Meals & Entertainment",
+    qboAccount: "Meals",
+    qboAccountId: "13",
+  });
+  const [dept] = await db
+    .insert(departmentsTable)
+    .values({ orgId, name: "D" })
+    .returning();
+  async function makeReport(suffix: string) {
+    const [r] = await db
+      .insert(expenseReportsTable)
+      .values({
+        orgId,
+        employeeId: userId,
+        departmentId: dept.id,
+        title: `Real-mode AP entity create ${suffix}`,
+        status: "Finance Approved",
+        displayCode: `AP2-${randomUUID().slice(0, 6).toUpperCase()}`,
+      })
+      .returning();
+    await db.insert(lineItemsTable).values({
+      reportId: r.id,
+      occurredOn: "2026-05-10",
+      merchant: "M",
+      description: "x",
+      category: "Meals & Entertainment",
+      amount: "100.00",
+      paymentMethod: "Personal Card",
+    });
+    return r;
+  }
+
+  let createCalls = 0;
+  let queryCalls = 0;
+  const fetchMock = (async (url: string, init: RequestInit) => {
+    const u = String(url);
+    if (u.includes("/query?") && /Vendor/i.test(decodeURIComponent(u))) {
+      queryCalls += 1;
+      // First post: lookup misses (empty QueryResponse). Subsequent
+      // posts must short-circuit on the cache and never hit query
+      // again — assert that below.
+      return new Response(JSON.stringify({ QueryResponse: {} }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (u.includes("/vendor?") && init?.method === "POST") {
+      createCalls += 1;
+      const body = JSON.parse(String(init.body));
+      assert.equal(body.DisplayName, "QBO Test Admin");
+      assert.ok(body.PrimaryEmailAddr?.Address, "must send the submitter's email");
+      return new Response(
+        JSON.stringify({ Vendor: { Id: "777", SyncToken: "0", DisplayName: body.DisplayName } }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    if (u.includes("/journalentry?")) {
+      return new Response(
+        JSON.stringify({ JournalEntry: { Id: `JE-${randomUUID().slice(0, 6)}`, SyncToken: "0" } }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    throw new Error(`unexpected fetch in AP-create test: ${u}`);
+  }) as unknown as typeof fetch;
+
+  const r1 = await makeReport("first");
+  const result1 = await postReportToQbo(r1, { fetchFn: fetchMock });
+  assert.equal(result1.status, "posted");
+  assert.equal(queryCalls, 1, "first post must query for the vendor");
+  assert.equal(createCalls, 1, "first post must create the vendor when missing");
+
+  const cached = await db
+    .select()
+    .from(qboVendorCacheTable)
+    .where(
+      and(
+        eq(qboVendorCacheTable.orgId, orgId),
+        eq(qboVendorCacheTable.userId, userId),
+      ),
+    );
+  assert.equal(cached.length, 1);
+  assert.equal(cached[0].qboVendorId, "777");
+
+  // Second post: cache hit — neither query nor create may run again.
+  const r2 = await makeReport("second");
+  const result2 = await postReportToQbo(r2, { fetchFn: fetchMock });
+  assert.equal(result2.status, "posted");
+  assert.equal(queryCalls, 1, "second post must reuse cached vendor (no extra query)");
+  assert.equal(createCalls, 1, "second post must reuse cached vendor (no extra create)");
+});
+
 await test("postReportToQbo on stub mode emits a payload without a Tag header even when tags are assigned", async () => {
   const { db: dbMod, qboTagsTable, qboTagAssignmentsTable } = await import(
     "@workspace/db"
