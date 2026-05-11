@@ -1,17 +1,46 @@
-import { Check, X as XIcon, RotateCcw, Ban } from "lucide-react";
+import { Check, X as XIcon, RotateCcw, Ban, AlertTriangle } from "lucide-react";
 import { WORKFLOW_ORDER, type WorkflowStatus } from "@/lib/types";
 
 type OffRamp = {
-  status: Extract<WorkflowStatus, "Changes Requested" | "Rejected" | "Voided">;
+  status: Extract<
+    WorkflowStatus,
+    "Changes Requested" | "Rejected" | "Voided" | "Sync Error"
+  >;
   fromStep: WorkflowStatus;
   tone: "warning" | "danger" | "muted";
   Icon: typeof Check;
+  pausedCopy: string;
 };
 
 const OFFRAMPS: OffRamp[] = [
-  { status: "Changes Requested", fromStep: "Manager Review", tone: "warning", Icon: RotateCcw },
-  { status: "Rejected", fromStep: "Manager Review", tone: "danger", Icon: XIcon },
-  { status: "Voided", fromStep: "Submitted", tone: "muted", Icon: Ban },
+  {
+    status: "Changes Requested",
+    fromStep: "Manager Review",
+    tone: "warning",
+    Icon: RotateCcw,
+    pausedCopy: "Paused — awaiting employee revision",
+  },
+  {
+    status: "Rejected",
+    fromStep: "Manager Review",
+    tone: "danger",
+    Icon: XIcon,
+    pausedCopy: "Paused — rejected by approver",
+  },
+  {
+    status: "Voided",
+    fromStep: "Submitted",
+    tone: "muted",
+    Icon: Ban,
+    pausedCopy: "Paused — report voided",
+  },
+  {
+    status: "Sync Error",
+    fromStep: "Finance Approved",
+    tone: "danger",
+    Icon: AlertTriangle,
+    pausedCopy: "Paused — QuickBooks sync failed, retry available",
+  },
 ];
 
 const TONE_COLOR: Record<
@@ -218,16 +247,21 @@ export function StatusTracker({
               >
                 {step}
               </div>
-              {paused && (
+              {paused && offRamp && (
                 <div
                   style={{
                     fontSize: 11,
-                    color: "var(--ht-warning)",
+                    color:
+                      offRamp.tone === "danger"
+                        ? "var(--ht-danger)"
+                        : offRamp.tone === "warning"
+                          ? "var(--ht-warning)"
+                          : "var(--ht-ink-3)",
                     fontWeight: 500,
                     marginTop: 2,
                   }}
                 >
-                  Paused — awaiting employee revision
+                  {offRamp.pausedCopy}
                 </div>
               )}
               {branches.length > 0 && (
