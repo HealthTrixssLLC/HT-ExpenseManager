@@ -1350,15 +1350,26 @@ function buildAccountRef(line: GlPreviewLine): Record<string, string> {
   return { name: line.account };
 }
 
-function buildJournalEntryPayload(
+export function buildJournalEntryPayload(
   preview: GlPreview,
   tagNames: string[],
 ): Record<string, unknown> {
+  // Intuit's JournalEntry schema does not define a `Tag` property at the
+  // entry header — sending one causes validation error 6000 ("invalid or
+  // unsupported property") and the whole post is rejected. To keep tag
+  // context visible inside QuickBooks without sending an unsupported field,
+  // we append the tag names to the PrivateNote. The internal
+  // `qbo_posting_events.tagsSent` column still records the tags we
+  // associated with the post for our own audit/reporting purposes.
+  const privateNote =
+    tagNames.length > 0
+      ? `${preview.memo} — Tags: ${tagNames.join(", ")}`
+      : preview.memo;
   return {
     JournalEntry: {
       DocNumber: preview.displayCode,
       TxnDate: preview.journalDate,
-      PrivateNote: preview.memo,
+      PrivateNote: privateNote,
       Line: [
         ...preview.debits.map((d, idx) => ({
           Id: String(idx + 1),
@@ -1383,9 +1394,6 @@ function buildJournalEntryPayload(
       ],
       CurrencyRef: { value: preview.currency },
       TotalAmt: parseFloat(preview.totalDebits),
-      // Intuit uses a free-form `Tag` association on the entry header to
-      // allow finance to filter journal entries by tag.
-      ...(tagNames.length > 0 ? { Tag: tagNames.join(",") } : {}),
     },
   };
 }

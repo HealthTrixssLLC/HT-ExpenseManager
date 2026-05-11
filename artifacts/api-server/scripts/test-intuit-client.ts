@@ -309,6 +309,81 @@ await test("createIntuitAccountingClient retries on 5xx with backoff", async () 
   assert.ok(calls >= 3, "should have retried at least twice");
 });
 
+await test("postJournalEntry strips the JournalEntry wrapper before sending the body", async () => {
+  // Regression guard for task #89 follow-up: Intuit's create endpoint
+  // rejects bodies wrapped under a top-level `JournalEntry` key with the
+  // generic "invalid or unsupported property" error. Our internal payload
+  // shape (and the qbo_posting_events.payload audit row) keeps the
+  // wrapper for symmetry with Intuit's response shape, so the client
+  // must strip it at the wire boundary.
+  let capturedBody: string | null = null;
+  const fetchMock = makeFetchMock(async (_url, init) => {
+    capturedBody = String(init.body);
+    return new Response(
+      JSON.stringify({ JournalEntry: { Id: "JE-7", SyncToken: "0" } }),
+      { status: 200 },
+    );
+  });
+  const client = createIntuitAccountingClient({
+    environment: "sandbox",
+    clientId: "id",
+    clientSecret: "secret",
+    realmId: "1234",
+    accessToken: "AT",
+    refreshToken: null,
+    fetchFn: fetchMock,
+  });
+  const wrapped = {
+    JournalEntry: {
+      DocNumber: "TEST-001",
+      Line: [
+        {
+          Amount: 1,
+          DetailType: "JournalEntryLineDetail",
+          JournalEntryLineDetail: {
+            PostingType: "Debit",
+            AccountRef: { value: "1" },
+          },
+        },
+      ],
+    },
+  };
+  const result = await client.postJournalEntry(wrapped, "k-wrap");
+  assert.equal(result.Id, "JE-7");
+  assert.ok(capturedBody, "expected the client to send a request body");
+  const parsed = JSON.parse(capturedBody!) as Record<string, unknown>;
+  assert.ok(
+    !("JournalEntry" in parsed),
+    "wire body must not include the JournalEntry wrapper",
+  );
+  assert.equal(parsed.DocNumber, "TEST-001");
+  assert.ok(Array.isArray(parsed.Line));
+});
+
+await test("postJournalEntry passes through an already-unwrapped body unchanged", async () => {
+  let capturedBody: string | null = null;
+  const fetchMock = makeFetchMock(async (_url, init) => {
+    capturedBody = String(init.body);
+    return new Response(
+      JSON.stringify({ JournalEntry: { Id: "JE-8", SyncToken: "0" } }),
+      { status: 200 },
+    );
+  });
+  const client = createIntuitAccountingClient({
+    environment: "sandbox",
+    clientId: "id",
+    clientSecret: "secret",
+    realmId: "1234",
+    accessToken: "AT",
+    refreshToken: null,
+    fetchFn: fetchMock,
+  });
+  const unwrapped = { DocNumber: "TEST-002", Line: [] };
+  await client.postJournalEntry(unwrapped, "k-flat");
+  const parsed = JSON.parse(capturedBody!) as Record<string, unknown>;
+  assert.equal(parsed.DocNumber, "TEST-002");
+});
+
 await test("postJournalEntry surfaces Intuit Fault errors", async () => {
   const fetchMock = makeFetchMock(async () =>
     new Response(

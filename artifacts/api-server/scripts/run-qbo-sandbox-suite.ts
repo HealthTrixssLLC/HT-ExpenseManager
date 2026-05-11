@@ -21,6 +21,13 @@
  *                          Prints the report id + display code.
  *   post-report <reportId>
  *                        - Call postReportToQbo() and print the result.
+ *   post-tagged-scenario - Regression guard for the "invalid Tag property"
+ *                          bug (task #89): create a Finance-Approved report
+ *                          with the "Project Alpha" tag assigned, post it
+ *                          end-to-end against the live Intuit sandbox, and
+ *                          assert (a) the post succeeds, (b) the persisted
+ *                          payload has no `Tag` property on JournalEntry,
+ *                          and (c) the PrivateNote carries the tag names.
  *
  * Per-scenario drivers (S2, S15, etc.) live in the companion one-shot
  * scripts referenced from docs/qbo-sandbox-je-test-results.md
@@ -307,7 +314,7 @@ async function makeReport(
       );
     if (tags.length > 0) {
       await db.insert(qboTagAssignmentsTable).values(
-        tags.map((t) => ({ reportId: report.id, tagId: t.id })),
+        tags.map((t) => ({ orgId: ORG_ID, reportId: report.id, tagId: t.id })),
       );
     }
   }
@@ -428,6 +435,57 @@ try {
       const id = arg(1);
       if (!id) throw new Error("usage: post-report <reportId>");
       await postReportCmd(id);
+      break;
+    }
+    case "post-tagged-scenario": {
+      // Regression guard for task #89: posting a tagged report used to
+      // crash with "Request has invalid or unsupported property" because
+      // the JE payload included a top-level `Tag` field that Intuit's
+      // JournalEntry schema does not define. We now drop the Tag header
+      // and append tag names to PrivateNote instead. Validate that the
+      // post succeeds end-to-end against the live sandbox AND that the
+      // persisted payload reflects the new shape.
+      const tagName = "Project Alpha";
+      const employeeId = await loadEmployeeUser();
+      const { reportId, displayCode } = await makeReport(
+        "Tagged JE Regression (task #89)",
+        employeeId,
+        [tagName],
+      );
+      console.log(`Created tagged report ${displayCode} (${reportId})`);
+      const [report] = await db
+        .select()
+        .from(expenseReportsTable)
+        .where(eq(expenseReportsTable.id, reportId));
+      const result = await qbo.postReportToQbo(report);
+      console.log(JSON.stringify(result, null, 2));
+      assert.notEqual(
+        result.status,
+        "error",
+        `Tagged JE post failed: ${
+          result.status === "error" ? result.errorMessage : ""
+        }`,
+      );
+      const events = await db
+        .select()
+        .from(qboPostingEventsTable)
+        .where(eq(qboPostingEventsTable.reportId, reportId));
+      assert.equal(events.length, 1, "expected exactly one posting event");
+      const payload = events[0].payload as {
+        JournalEntry: Record<string, unknown>;
+      };
+      assert.ok(
+        !("Tag" in payload.JournalEntry),
+        "JournalEntry payload must not include a Tag property",
+      );
+      assert.ok(
+        String(payload.JournalEntry.PrivateNote ?? "").includes(tagName),
+        `PrivateNote should include the tag name '${tagName}'`,
+      );
+      assert.deepEqual(events[0].tagsSent, [tagName]);
+      console.log(
+        "PASS: tagged JE posted to sandbox; payload has no Tag header; PrivateNote carries tags.",
+      );
       break;
     }
     default:

@@ -53,6 +53,7 @@ const {
   getConnectionHealth,
   postReportToQbo,
   runQboPreflight,
+  buildJournalEntryPayload,
 } = qboMod;
 
 const encMod = await import("../src/lib/encryption.js");
@@ -168,6 +169,112 @@ await test("postReportToQbo on stub mode writes a posting_event with sandbox env
   // should be a non-null nanoid string (not the connection's *current*
   // realmId — that's the whole point of snapshotting).
   assert.equal(typeof events[0].realmId, "string");
+});
+
+await test("buildJournalEntryPayload never includes a top-level Tag property", () => {
+  type GlPreview = Parameters<typeof buildJournalEntryPayload>[0];
+  const preview: GlPreview = {
+    displayCode: "EXP-TEST-001",
+    journalDate: "2026-05-10",
+    memo: "Test memo",
+    currency: "USD",
+    totalDebits: "100.00",
+    totalCredits: "100.00",
+    debits: [
+      {
+        category: "Travel",
+        account: "Travel Expense",
+        accountId: "42",
+        amount: "100.00",
+      },
+    ],
+    credits: [
+      {
+        category: "Payable",
+        account: "Loan Payable",
+        accountId: "99",
+        amount: "100.00",
+      },
+    ],
+  } as GlPreview;
+  for (const tagNames of [
+    [],
+    ["Project Alpha"],
+    ["Project Alpha", "Q2", "Travel"],
+  ]) {
+    const out = buildJournalEntryPayload(preview, tagNames) as {
+      JournalEntry: Record<string, unknown>;
+    };
+    assert.ok(
+      !("Tag" in out.JournalEntry),
+      `JournalEntry must not have a Tag property (tagNames=${JSON.stringify(tagNames)})`,
+    );
+    if (tagNames.length > 0) {
+      assert.match(
+        String(out.JournalEntry.PrivateNote),
+        /Tags: /,
+        "PrivateNote should mention tags when tags are present",
+      );
+      for (const t of tagNames) {
+        assert.ok(
+          String(out.JournalEntry.PrivateNote).includes(t),
+          `PrivateNote should include tag '${t}'`,
+        );
+      }
+    } else {
+      assert.equal(out.JournalEntry.PrivateNote, "Test memo");
+    }
+  }
+});
+
+await test("postReportToQbo on stub mode emits a payload without a Tag header even when tags are assigned", async () => {
+  const { db: dbMod, qboTagsTable, qboTagAssignmentsTable } = await import(
+    "@workspace/db"
+  );
+  const { orgId, userId } = await makeOrg("stubPostTagged");
+  await connectQboStub(orgId);
+  const [dept] = await dbMod
+    .insert(departmentsTable)
+    .values({ orgId, name: "Test Dept" })
+    .returning();
+  const [report] = await dbMod
+    .insert(expenseReportsTable)
+    .values({
+      orgId,
+      employeeId: userId,
+      departmentId: dept.id,
+      title: "Tagged Stub Posting Test",
+      status: "Finance Approved",
+      displayCode: `TAG-${randomUUID().slice(0, 6).toUpperCase()}`,
+    })
+    .returning();
+  const [tag] = await dbMod
+    .insert(qboTagsTable)
+    .values({ orgId, name: "Project Alpha" })
+    .returning();
+  await dbMod
+    .insert(qboTagAssignmentsTable)
+    .values({ orgId, reportId: report.id, tagId: tag.id });
+  const result = await postReportToQbo(report);
+  assert.notEqual(result.status, "error");
+  const events = await db
+    .select()
+    .from(qboPostingEventsTable)
+    .where(eq(qboPostingEventsTable.reportId, report.id));
+  assert.equal(events.length, 1);
+  const payload = events[0].payload as {
+    JournalEntry: Record<string, unknown>;
+  };
+  assert.ok(
+    !("Tag" in payload.JournalEntry),
+    "Stub-mode payload must not include a Tag property on JournalEntry",
+  );
+  assert.match(
+    String(payload.JournalEntry.PrivateNote),
+    /Project Alpha/,
+    "Stub-mode payload should record the tag in PrivateNote",
+  );
+  assert.deepEqual(events[0].tagsSent, ["Project Alpha"]);
 });
 
 await test("handleQboOauthCallback rejects unknown state", async () => {

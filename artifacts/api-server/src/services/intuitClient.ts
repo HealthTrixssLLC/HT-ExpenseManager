@@ -338,12 +338,26 @@ export function createIntuitAccountingClient(
     },
     async postJournalEntry(payload, idempotencyKey) {
       const url = `${baseUrl}/journalentry?minorversion=70&requestid=${encodeURIComponent(idempotencyKey)}`;
+      // Intuit's create endpoint expects the JournalEntry object as the
+      // top-level JSON body, NOT wrapped under a `JournalEntry` key. If
+      // we send `{ JournalEntry: {...} }` Intuit rejects with error 2010
+      // ("Property Name:failed to parse json object; a property specified
+      // is unsupported or invalid"). Our internal payload shape (and the
+      // audit row written to qbo_posting_events.payload) keeps the wrapper
+      // for symmetry with Intuit's response shape, so we strip it here at
+      // the wire boundary only.
+      const requestBody =
+        payload &&
+        typeof payload === "object" &&
+        "JournalEntry" in (payload as Record<string, unknown>)
+          ? (payload as { JournalEntry: unknown }).JournalEntry
+          : payload;
       const result = await jsonRequest<{ JournalEntry: { Id: string; SyncToken: string } }>(
         url,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(requestBody),
         },
       );
       return {
