@@ -173,7 +173,9 @@ export async function buildGlPreview(
   const cachedAccounts = await db
     .select({
       qboAccountId: qboAccountsCacheTable.qboAccountId,
+      name: qboAccountsCacheTable.name,
       accountType: qboAccountsCacheTable.accountType,
+      active: qboAccountsCacheTable.active,
     })
     .from(qboAccountsCacheTable)
     .where(eq(qboAccountsCacheTable.orgId, report.orgId));
@@ -215,9 +217,22 @@ export async function buildGlPreview(
       };
     });
 
-  const payableName =
-    conn?.defaultPayableAccountName ?? PAYABLE_ACCOUNT;
-  const payableId = conn?.defaultPayableAccountId ?? null;
+  // Resolve the payable (credit) account. If the connection has no
+  // defaultPayableAccountId set yet, fall back to the org's first active
+  // Accounts Payable account from the cached chart of accounts. This makes
+  // GL preview deterministic for newly-connected orgs that haven't picked
+  // a default in the admin UI yet, and is the read-side mirror of the
+  // auto-resolve-and-persist step that postReportToQboReal performs before
+  // posting (so the credit line on the wire always carries an Account Id).
+  let payableName = conn?.defaultPayableAccountName ?? PAYABLE_ACCOUNT;
+  let payableId = conn?.defaultPayableAccountId ?? null;
+  if (!payableId) {
+    const fallback = pickDefaultPayableFromCachedAccounts(cachedAccounts);
+    if (fallback) {
+      payableId = fallback.qboAccountId;
+      payableName = fallback.name;
+    }
+  }
 
   const credits: GlPreviewLine[] = [
     {
@@ -423,7 +438,7 @@ export type SavePostingPreferencesInput = {
 export async function savePostingPreferences(
   args: SavePostingPreferencesInput,
 ): Promise<QboConnection> {
-  await ensureConnectionRow(args.orgId);
+  const before = await ensureConnectionRow(args.orgId);
   const updates: Partial<typeof qboConnectionTable.$inferInsert> = {};
   if (args.autoPostOnApproval !== undefined) {
     updates.autoPostOnApproval = args.autoPostOnApproval;
@@ -442,6 +457,26 @@ export async function savePostingPreferences(
     .set(updates)
     .where(eq(qboConnectionTable.orgId, args.orgId))
     .returning();
+  // When the default payable account is set or changed, eagerly refresh
+  // the cached chart of accounts so its accountType is known on the very
+  // first post after configuration. Without this, the cold-cache window
+  // could hide the AP classification, and AP/AR detection would silently
+  // skip attaching the required Entity block — reproducing the
+  // "Required param missing" Fault from Intuit.
+  const payableChanged =
+    args.defaultPayableAccountId !== undefined &&
+    args.defaultPayableAccountId !== null &&
+    args.defaultPayableAccountId !== before.defaultPayableAccountId;
+  if (payableChanged && isRealConnected(updated)) {
+    try {
+      await listChartOfAccounts({ orgId: args.orgId, forceRefresh: true });
+    } catch (err) {
+      logger.warn(
+        { err, orgId: args.orgId },
+        "Failed to refresh QBO chart of accounts after default payable account change; cache will refresh on next post",
+      );
+    }
+  }
   return updated;
 }
 
@@ -1227,6 +1262,29 @@ async function postReportToQboReal(
   conn: QboConnection,
   options: PostOptions,
 ): Promise<PostResult> {
+  // Auto-resolve a default payable account if the org hasn't picked one
+  // in admin yet. Without this, buildGlPreview falls back to a hardcoded
+  // "Employee Reimbursement Payable" name with no QBO Account Id, the
+  // credit AccountRef ships without a `value`, and Intuit rejects the
+  // JournalEntry with the generic "Required param missing, need to
+  // supply the required value for the API" Fault — exactly the recurring
+  // failure on reports posted right after a fresh QBO connect. Pick the
+  // first active "Accounts Payable" account from the cached chart of
+  // accounts (refreshing the cache from QBO if it doesn't have one yet),
+  // persist it on the connection, and continue with the resolved value.
+  if (!conn.defaultPayableAccountId) {
+    const resolved = await autoResolveAndPersistDefaultPayableAccount({
+      orgId: report.orgId,
+      ...(options.fetchFn ? { fetchFn: options.fetchFn } : {}),
+    });
+    if (resolved) {
+      conn = {
+        ...conn,
+        defaultPayableAccountId: resolved.qboAccountId,
+        defaultPayableAccountName: resolved.name,
+      };
+    }
+  }
   const preview = await buildGlPreview(report);
   const tags = await listTagsForReport(report.id);
   const tagNames = tags.map((t) => t.name);
@@ -1308,11 +1366,42 @@ async function postReportToQboReal(
   // evaluating Entity attachment — otherwise an AP/AR line could ship
   // without its required Entity block and we'd reproduce the original
   // "Required param missing" Fault from report 2222ff05.
-  await ensureAccountTypesForLines({
+  const accountTypeResult = await ensureAccountTypesForLines({
     orgId: report.orgId,
     client,
     lines: [...preview.debits, ...preview.credits],
   });
+  // If any line still has no resolved AccountType after the cache-then-
+  // live-lookup pass, AP/AR detection is not authoritative — posting
+  // anyway risks shipping an Accounts Payable / Accounts Receivable line
+  // without its required Entity block, which Intuit rejects with the
+  // generic "Required param missing, need to supply the required value
+  // for the API" Fault. Fail fast with an actionable local error so the
+  // org can refresh their chart of accounts (or fix QBO connectivity)
+  // instead of seeing the opaque Intuit message and a stuck report.
+  if (accountTypeResult.unresolvedAccountIds.length > 0) {
+    const idsList = accountTypeResult.unresolvedAccountIds.join(", ");
+    const why = accountTypeResult.liveLookupError
+      ? ` Live lookup failed: ${accountTypeResult.liveLookupError.message}.`
+      : "";
+    const errorMessage =
+      `Cannot post to QuickBooks: could not determine the QuickBooks AccountType ` +
+      `for one or more accounts on this report (Account Id(s): ${idsList}). ` +
+      `Without an authoritative AccountType, Accounts Payable / Accounts Receivable ` +
+      `lines would be sent without their required Entity reference and QuickBooks ` +
+      `would reject the entire entry with "Required param missing".${why} ` +
+      `Refresh the QuickBooks chart of accounts in admin and try again. ` +
+      `(Blocked by local validation — no JournalEntry was sent to QuickBooks.)`;
+    const payload = buildJournalEntryPayload(preview, tagNames);
+    await persistPostingFailure(
+      report,
+      liveConn,
+      payload,
+      tagNames,
+      errorMessage,
+    );
+    return { status: "error", errorMessage, payload };
+  }
 
   const entityRequired =
     preview.debits.some(lineRequiresEntity) ||
@@ -1925,6 +2014,94 @@ export async function resolveSubmitterVendor(args: {
 }
 
 /**
+ * Pick a default payable account from a list of cached chart-of-accounts
+ * rows. Returns the first active row whose accountType is exactly
+ * "Accounts Payable" (Intuit's canonical AccountType for an A/P account),
+ * or null if none exists yet. Sorted by qboAccountId so the choice is
+ * deterministic across calls and inserts.
+ *
+ * Used by both `buildGlPreview` (read-side fallback so the GL preview UI
+ * shows a real account name) and `autoResolveAndPersistDefaultPayableAccount`
+ * (write-side persistence before posting).
+ */
+function pickDefaultPayableFromCachedAccounts<
+  T extends { qboAccountId: string; name: string; accountType: string; active: boolean },
+>(rows: readonly T[]): T | null {
+  const candidates = rows
+    .filter((r) => r.active && ENTITY_REQUIRED_ACCOUNT_TYPES.has(r.accountType))
+    .filter((r) => r.accountType === "Accounts Payable")
+    .sort((a, b) => a.qboAccountId.localeCompare(b.qboAccountId));
+  return candidates[0] ?? null;
+}
+
+/**
+ * Resolve and persist a default payable account on the org's qbo_connection
+ * row when one isn't set yet. Tries the cached chart of accounts first; if
+ * the cache has no Accounts Payable row, force-refreshes the chart from
+ * QBO and tries again. Returns the resolved account, or null if QBO has no
+ * Accounts Payable account at all (in which case the caller will surface
+ * the existing actionable "missing Account Id" error from the pre-flight).
+ *
+ * This is the durable fix for the "Required param missing" Fault Intuit
+ * returns on JE posts whose credit AccountRef has no `value` — without a
+ * defaultPayableAccountId, the credit line shipped a name-only AccountRef
+ * and Intuit rejected the entire entry.
+ */
+async function autoResolveAndPersistDefaultPayableAccount(args: {
+  orgId: string;
+  fetchFn?: typeof fetch;
+}): Promise<{ qboAccountId: string; name: string } | null> {
+  const cached = await db
+    .select({
+      qboAccountId: qboAccountsCacheTable.qboAccountId,
+      name: qboAccountsCacheTable.name,
+      accountType: qboAccountsCacheTable.accountType,
+      active: qboAccountsCacheTable.active,
+    })
+    .from(qboAccountsCacheTable)
+    .where(eq(qboAccountsCacheTable.orgId, args.orgId));
+  let pick = pickDefaultPayableFromCachedAccounts(cached);
+  if (!pick) {
+    // Cache has no AP row yet; refresh from QBO and try again. Best-effort:
+    // if the live fetch fails the caller will fall through to the existing
+    // "no QuickBooks Account Id" pre-flight error.
+    try {
+      const fresh = await listChartOfAccounts({
+        orgId: args.orgId,
+        forceRefresh: true,
+        ...(args.fetchFn ? { fetchFn: args.fetchFn } : {}),
+      });
+      pick = pickDefaultPayableFromCachedAccounts(
+        fresh.map((a) => ({
+          qboAccountId: a.id,
+          name: a.name,
+          accountType: a.accountType,
+          active: a.active,
+        })),
+      );
+    } catch (err) {
+      logger.warn(
+        { err, orgId: args.orgId },
+        "Failed to refresh QBO chart of accounts while auto-resolving default payable account",
+      );
+    }
+  }
+  if (!pick) return null;
+  await db
+    .update(qboConnectionTable)
+    .set({
+      defaultPayableAccountId: pick.qboAccountId,
+      defaultPayableAccountName: pick.name,
+    })
+    .where(eq(qboConnectionTable.orgId, args.orgId));
+  logger.info(
+    { orgId: args.orgId, qboAccountId: pick.qboAccountId, name: pick.name },
+    "Auto-selected default payable account from QBO chart of accounts",
+  );
+  return { qboAccountId: pick.qboAccountId, name: pick.name };
+}
+
+/**
  * Mutates `lines` in place: for any line whose `accountId` is set but whose
  * `accountType` is null (cache miss/stale), live-query Intuit for the
  * AccountType and patch both the line and `qbo_accounts_cache`. Used by
@@ -1937,7 +2114,10 @@ export async function ensureAccountTypesForLines(args: {
   orgId: string;
   client: IntuitAccountingClient;
   lines: GlPreviewLine[];
-}): Promise<void> {
+}): Promise<{
+  unresolvedAccountIds: string[];
+  liveLookupError: Error | null;
+}> {
   const missingIds = Array.from(
     new Set(
       args.lines
@@ -1945,7 +2125,9 @@ export async function ensureAccountTypesForLines(args: {
         .map((l) => l.accountId as string),
     ),
   );
-  if (missingIds.length === 0) return;
+  if (missingIds.length === 0) {
+    return { unresolvedAccountIds: [], liveLookupError: null };
+  }
 
   // Try the cache once more in case a concurrent path warmed it.
   const cached = await db
@@ -1971,6 +2153,7 @@ export async function ensureAccountTypesForLines(args: {
       active: boolean;
     }
   >();
+  let liveLookupError: Error | null = null;
   if (stillMissing.length > 0) {
     const inList = stillMissing.map((id) => `'${id.replace(/'/g, "''")}'`).join(",");
     try {
@@ -1999,9 +2182,10 @@ export async function ensureAccountTypesForLines(args: {
         known.set(a.Id, a.AccountType);
       }
     } catch (err) {
+      liveLookupError = err instanceof Error ? err : new Error(String(err));
       logger.warn(
         { err, orgId: args.orgId, accountIds: stillMissing },
-        "Failed to resolve QBO account types for posting; AP/AR detection may be incomplete",
+        "Failed to resolve QBO account types for posting; caller must abort to avoid shipping AP/AR lines without Entity",
       );
     }
     if (fetched.size > 0) {
@@ -2040,6 +2224,14 @@ export async function ensureAccountTypesForLines(args: {
       if (t) line.accountType = t;
     }
   }
+  const unresolvedAccountIds = Array.from(
+    new Set(
+      args.lines
+        .filter((l) => l.accountId && !l.accountType)
+        .map((l) => l.accountId as string),
+    ),
+  );
+  return { unresolvedAccountIds, liveLookupError };
 }
 
 function toCachedAccountDto(

@@ -325,9 +325,24 @@ await test("postReportToQbo on real mode aborts before calling Intuit when payab
     amount: "300.00",
     paymentMethod: "Personal Card",
   });
-  let fetchCalls = 0;
-  const fetchMock = (async () => {
-    fetchCalls += 1;
+  // The auto-resolve path is allowed to ask QBO for the chart of accounts
+  // exactly once while trying to pick a default payable. What it must NOT
+  // do is post a JournalEntry — that's the call that would surface
+  // Intuit's opaque "Required param missing" Fault back to the user.
+  let journalEntryCalls = 0;
+  let accountQueryCalls = 0;
+  const fetchMock = (async (url: string) => {
+    const u = String(url);
+    if (u.includes("/query?") && /FROM\s+Account/i.test(decodeURIComponent(u))) {
+      accountQueryCalls += 1;
+      return new Response(JSON.stringify({ QueryResponse: {} }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (u.includes("/journalentry?")) {
+      journalEntryCalls += 1;
+    }
     return new Response("{}", { status: 200 });
   }) as unknown as typeof fetch;
 
@@ -342,7 +357,15 @@ await test("postReportToQbo on real mode aborts before calling Intuit when payab
       "must not surface the opaque Intuit fault when we never called Intuit",
     );
   }
-  assert.equal(fetchCalls, 0, "must not call Intuit when preflight blocks");
+  assert.equal(
+    journalEntryCalls,
+    0,
+    "must not POST a JournalEntry when preflight blocks",
+  );
+  assert.ok(
+    accountQueryCalls <= 1,
+    "auto-resolve should make at most one chart-of-accounts fetch",
+  );
   const events = await db
     .select()
     .from(qboPostingEventsTable)
@@ -353,7 +376,7 @@ await test("postReportToQbo on real mode aborts before calling Intuit when payab
 });
 
 await test("postReportToQbo on real mode posts successfully when every line has an Account Id (asserts persisted journal id)", async () => {
-  const { glMappingsTable, lineItemsTable } = await import("@workspace/db");
+  const { glMappingsTable, lineItemsTable, qboAccountsCacheTable } = await import("@workspace/db");
   const { orgId, userId } = await makeOrg("realPreflightOk");
   await saveQboCredentials({
     orgId,
@@ -378,6 +401,13 @@ await test("postReportToQbo on real mode posts successfully when every line has 
       defaultPayableAccountName: "Loan Payable",
     })
     .where(eq(qboConnectionTable.orgId, orgId));
+  // Seed the chart-of-accounts cache so AP/AR detection is authoritative
+  // without a live Account lookup. Posting must abort if it can't pin
+  // down AccountType for a line — see the regression test below.
+  await db.insert(qboAccountsCacheTable).values([
+    { orgId, qboAccountId: "13", name: "Meals", fullyQualifiedName: "Meals", accountType: "Expense", accountSubType: null, classification: "Expense", active: true },
+    { orgId, qboAccountId: "43", name: "Loan Payable", fullyQualifiedName: "Loan Payable", accountType: "Long Term Liability", accountSubType: null, classification: "Liability", active: true },
+  ]);
   await db.insert(glMappingsTable).values({
     orgId,
     code: "Meals & Entertainment",
@@ -638,6 +668,280 @@ await test("postReportToQbo on real mode attaches Vendor Entity on AP credit lin
     );
   assert.equal(cached.length, 1);
   assert.equal(cached[0].qboVendorId, "58");
+});
+
+await test("postReportToQbo on real mode aborts with an actionable local error (no JE post) when QBO Account live-lookup fails and AccountType cannot be authoritatively resolved (regression: task #99 — must not ship AP/AR lines without Entity due to silent cache miss)", async () => {
+  const { glMappingsTable, lineItemsTable } = await import("@workspace/db");
+  const { orgId, userId } = await makeOrg("realApUnresolvedType");
+  await saveQboCredentials({
+    orgId,
+    clientId: "C",
+    clientSecret: "S",
+    environment: "sandbox",
+  });
+  await db
+    .update(qboConnectionTable)
+    .set({
+      mode: "real",
+      status: "connected",
+      connectionHealth: "healthy",
+      realmId: "9130354997998",
+      companyName: "Sandbox Co",
+      accessTokenEncrypted: encMod.encryptString("AT"),
+      refreshTokenEncrypted: encMod.encryptString("RT"),
+      tokenExpiresAt: new Date(Date.now() + 24 * 3600_000),
+      refreshTokenExpiresAt: new Date(Date.now() + 30 * 86_400_000),
+      lastTokenRefreshAt: new Date(),
+      // Default payable is set so the auto-resolve step short-circuits;
+      // we want this test to isolate the AccountType resolution failure.
+      defaultPayableAccountId: "33",
+      defaultPayableAccountName: "Accounts Payable (A/P)",
+    })
+    .where(eq(qboConnectionTable.orgId, orgId));
+  // No qbo_accounts_cache rows seeded — the cache is cold for both
+  // accounts. Combined with the live Account lookup returning empty,
+  // ensureAccountTypesForLines will not be able to pin down an
+  // AccountType for any line, and posting must abort.
+  await db.insert(glMappingsTable).values({
+    orgId,
+    code: "Meals & Entertainment",
+    qboAccount: "Meals",
+    qboAccountId: "13",
+  });
+  const [dept] = await db
+    .insert(departmentsTable)
+    .values({ orgId, name: "D" })
+    .returning();
+  const [report] = await db
+    .insert(expenseReportsTable)
+    .values({
+      orgId,
+      employeeId: userId,
+      departmentId: dept.id,
+      title: "Unresolved AccountType",
+      status: "Finance Approved",
+      displayCode: `UAT-${randomUUID().slice(0, 6).toUpperCase()}`,
+    })
+    .returning();
+  await db.insert(lineItemsTable).values({
+    reportId: report.id,
+    occurredOn: "2026-05-10",
+    merchant: "M",
+    description: "x",
+    category: "Meals & Entertainment",
+    amount: "60.00",
+    paymentMethod: "Personal Card",
+  });
+
+  let journalEntryCalls = 0;
+  const fetchMock = (async (url: string) => {
+    const u = String(url);
+    if (u.includes("/query?") && /FROM\s+Account/i.test(decodeURIComponent(u))) {
+      // Live lookup returns no rows for these account ids — Intuit truly
+      // doesn't know about them, so AccountType cannot be determined.
+      return new Response(JSON.stringify({ QueryResponse: {} }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (u.includes("/journalentry?")) {
+      journalEntryCalls += 1;
+      return new Response(
+        JSON.stringify({ JournalEntry: { Id: "X", SyncToken: "0" } }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    return new Response("{}", { status: 200 });
+  }) as unknown as typeof fetch;
+
+  const result = await postReportToQbo(report, { fetchFn: fetchMock });
+  assert.equal(
+    result.status,
+    "error",
+    `expected error, got: ${JSON.stringify(result)}`,
+  );
+  if (result.status === "error") {
+    assert.match(
+      result.errorMessage,
+      /could not determine the QuickBooks AccountType/i,
+      "error must explain the AccountType could not be resolved",
+    );
+    assert.match(
+      result.errorMessage,
+      /local validation/i,
+      "error must mark itself as a local validation block",
+    );
+    assert.doesNotMatch(
+      result.errorMessage,
+      /unsupported property/i,
+      "must not surface the opaque Intuit fault when we never called the JE endpoint",
+    );
+  }
+  assert.equal(
+    journalEntryCalls,
+    0,
+    "must not POST a JournalEntry when AccountType resolution fails",
+  );
+  const events = await db
+    .select()
+    .from(qboPostingEventsTable)
+    .where(eq(qboPostingEventsTable.reportId, report.id));
+  assert.equal(events.length, 1);
+  assert.equal(events[0].status, "error");
+  assert.equal(events[0].qboJournalId, null);
+});
+
+await test("postReportToQbo on real mode auto-resolves a default payable account from cached chart of accounts when none is configured, persists it on the connection, and ships the credit AccountRef with a value (regression: task #99 — Required param missing on JE post)", async () => {
+  const { glMappingsTable, lineItemsTable, qboAccountsCacheTable } = await import(
+    "@workspace/db"
+  );
+  const { orgId, userId } = await makeOrg("realApAutoResolve");
+  await saveQboCredentials({
+    orgId,
+    clientId: "C",
+    clientSecret: "S",
+    environment: "sandbox",
+  });
+  // Connection is real-connected but the admin never picked a default
+  // payable account — the exact production state that produced Intuit's
+  // "Required param missing" Fault on every post. The cached chart of
+  // accounts already contains an Accounts Payable row (typical: the org
+  // refreshed accounts after connecting), so the auto-resolve should
+  // pick it without a live fetch.
+  await db
+    .update(qboConnectionTable)
+    .set({
+      mode: "real",
+      status: "connected",
+      connectionHealth: "healthy",
+      realmId: "9130354997998",
+      companyName: "Sandbox Co",
+      accessTokenEncrypted: encMod.encryptString("AT"),
+      refreshTokenEncrypted: encMod.encryptString("RT"),
+      tokenExpiresAt: new Date(Date.now() + 24 * 3600_000),
+      refreshTokenExpiresAt: new Date(Date.now() + 30 * 86_400_000),
+      lastTokenRefreshAt: new Date(),
+      defaultPayableAccountId: null,
+      defaultPayableAccountName: null,
+    })
+    .where(eq(qboConnectionTable.orgId, orgId));
+  await db.insert(qboAccountsCacheTable).values([
+    { orgId, qboAccountId: "13", name: "Meals", fullyQualifiedName: "Meals", accountType: "Expense", accountSubType: null, classification: "Expense", active: true },
+    { orgId, qboAccountId: "33", name: "Accounts Payable (A/P)", fullyQualifiedName: "Accounts Payable (A/P)", accountType: "Accounts Payable", accountSubType: "AccountsPayable", classification: "Liability", active: true },
+  ]);
+  await db.insert(glMappingsTable).values({
+    orgId,
+    code: "Meals & Entertainment",
+    qboAccount: "Meals",
+    qboAccountId: "13",
+  });
+  const [dept] = await db
+    .insert(departmentsTable)
+    .values({ orgId, name: "D" })
+    .returning();
+  const [report] = await db
+    .insert(expenseReportsTable)
+    .values({
+      orgId,
+      employeeId: userId,
+      departmentId: dept.id,
+      title: "Auto-resolve AP",
+      status: "Finance Approved",
+      displayCode: `AR-${randomUUID().slice(0, 6).toUpperCase()}`,
+    })
+    .returning();
+  await db.insert(lineItemsTable).values({
+    reportId: report.id,
+    occurredOn: "2026-05-10",
+    merchant: "M",
+    description: "x",
+    category: "Meals & Entertainment",
+    amount: "50.00",
+    paymentMethod: "Personal Card",
+  });
+
+  let postedBody: unknown = null;
+  let accountQueryCount = 0;
+  const fetchMock = (async (url: string, init: RequestInit) => {
+    const u = String(url);
+    if (u.includes("/query?")) {
+      const decoded = decodeURIComponent(u);
+      if (/FROM Account/i.test(decoded)) {
+        accountQueryCount += 1;
+        return new Response(JSON.stringify({ QueryResponse: {} }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (/FROM Vendor/i.test(decoded)) {
+        return new Response(
+          JSON.stringify({ QueryResponse: { Vendor: [{ Id: "58", DisplayName: "QBO Test Admin" }] } }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+    }
+    if (u.includes("/journalentry?")) {
+      postedBody = JSON.parse(String(init.body));
+      return new Response(
+        JSON.stringify({ JournalEntry: { Id: "888", SyncToken: "0" } }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    throw new Error(`unexpected fetch in auto-resolve test: ${u}`);
+  }) as unknown as typeof fetch;
+
+  const result = await postReportToQbo(report, { fetchFn: fetchMock });
+  assert.equal(
+    result.status,
+    "posted",
+    `expected posted, got: ${JSON.stringify(result)}`,
+  );
+  assert.equal(
+    accountQueryCount,
+    0,
+    "warm cache must not trigger a live chart-of-accounts fetch",
+  );
+
+  // The credit (AP) line MUST carry a non-empty AccountRef.value — the
+  // exact field whose absence produced Intuit's "Required param missing"
+  // error. Before this fix, the credit AccountRef shipped without `value`
+  // because PAYABLE_ACCOUNT name-only fallback had no QBO Id attached.
+  const sent = postedBody as {
+    Line: Array<{
+      JournalEntryLineDetail: {
+        PostingType: string;
+        AccountRef: { value?: string; name?: string };
+        Entity?: { Type: string; EntityRef: { value: string } };
+      };
+    }>;
+  };
+  const apLine = sent.Line.find(
+    (l) => l.JournalEntryLineDetail.PostingType === "Credit",
+  );
+  assert.ok(apLine, "expected an AP credit line");
+  assert.equal(
+    apLine!.JournalEntryLineDetail.AccountRef.value,
+    "33",
+    "credit AccountRef must carry the resolved AP account Id (not just a name)",
+  );
+  assert.ok(
+    apLine!.JournalEntryLineDetail.Entity,
+    "auto-resolved AP credit line must still carry Entity",
+  );
+
+  // Side effect: the connection row should now persist the auto-selected
+  // default so subsequent posts (and the GL preview UI) reuse it without
+  // re-resolving.
+  const [conn] = await db
+    .select()
+    .from(qboConnectionTable)
+    .where(eq(qboConnectionTable.orgId, orgId));
+  assert.equal(
+    conn.defaultPayableAccountId,
+    "33",
+    "auto-resolve must persist the chosen AP account on qbo_connection",
+  );
+  assert.equal(conn.defaultPayableAccountName, "Accounts Payable (A/P)");
 });
 
 await test("postReportToQbo on real mode resolves AP account type from QBO when qbo_accounts_cache is cold and still attaches Entity (regression: cold-cache must not silently drop Entity)", async () => {
