@@ -54,6 +54,7 @@ const {
   postReportToQbo,
   runQboPreflight,
   buildJournalEntryPayload,
+  describeMissingAccountIds,
 } = qboMod;
 
 const encMod = await import("../src/lib/encryption.js");
@@ -225,6 +226,226 @@ await test("buildJournalEntryPayload never includes a top-level Tag property", (
       assert.equal(out.JournalEntry.PrivateNote, "Test memo");
     }
   }
+});
+
+await test("describeMissingAccountIds flags missing accountId on credit/debit lines (real-mode pre-flight)", () => {
+  type GlPreview = Parameters<typeof buildJournalEntryPayload>[0];
+  const ok: GlPreview = {
+    displayCode: "EXP-OK-001",
+    journalDate: "2026-05-10",
+    memo: "ok",
+    currency: "USD",
+    totalDebits: "100.00",
+    totalCredits: "100.00",
+    debits: [{ category: "Travel", account: "Travel Expense", accountId: "42", amount: "100.00" }],
+    credits: [{ category: "Payable", account: "Loan Payable", accountId: "43", amount: "100.00" }],
+  } as GlPreview;
+  assert.equal(describeMissingAccountIds(ok), null);
+
+  // Mirrors the failure mode hit on report 2222ff05 — Finance had set
+  // GL mappings for every category but the org's defaultPayableAccountId
+  // was null, so the credit line shipped to Intuit with only `name`
+  // and Intuit returned the generic "Request has invalid or unsupported
+  // property" Fault. Pre-flight must catch this and produce an
+  // actionable message instead of calling Intuit.
+  const missingCredit: GlPreview = {
+    ...ok,
+    credits: [{ category: "Payable", account: "Employee Reimbursement Payable", accountId: null, amount: "100.00" }],
+  } as GlPreview;
+  const cMsg = describeMissingAccountIds(missingCredit);
+  assert.ok(cMsg && cMsg.includes("Employee Reimbursement Payable"), `expected credit message, got: ${cMsg}`);
+  assert.ok(cMsg && cMsg.includes("credit"), `expected message to mention 'credit', got: ${cMsg}`);
+
+  const missingDebit: GlPreview = {
+    ...ok,
+    debits: [{ category: "Travel", account: "Travel Expense", accountId: null, amount: "100.00" }],
+  } as GlPreview;
+  const dMsg = describeMissingAccountIds(missingDebit);
+  assert.ok(dMsg && dMsg.includes("Travel Expense"), `expected debit message, got: ${dMsg}`);
+  assert.ok(dMsg && dMsg.includes("Travel"), `expected debit category in message, got: ${dMsg}`);
+});
+
+await test("postReportToQbo on real mode aborts before calling Intuit when payable Account Id is missing (regression for report 2222ff05)", async () => {
+  const { glMappingsTable, lineItemsTable } = await import("@workspace/db");
+  const { orgId, userId } = await makeOrg("realPreflightMissingPayable");
+  await saveQboCredentials({
+    orgId,
+    clientId: "C",
+    clientSecret: "S",
+    environment: "sandbox",
+  });
+  // Promote to a fully-connected real connection with no
+  // default_payable_account_id — exactly the failing 2222ff05 shape.
+  await db
+    .update(qboConnectionTable)
+    .set({
+      mode: "real",
+      status: "connected",
+      connectionHealth: "healthy",
+      realmId: "9130354997998",
+      companyName: "Sandbox Co",
+      accessTokenEncrypted: encMod.encryptString("AT"),
+      refreshTokenEncrypted: encMod.encryptString("RT"),
+      tokenExpiresAt: new Date(Date.now() + 24 * 3600_000),
+      refreshTokenExpiresAt: new Date(Date.now() + 30 * 86_400_000),
+      lastTokenRefreshAt: new Date(),
+      defaultPayableAccountId: null,
+      defaultPayableAccountName: null,
+    })
+    .where(eq(qboConnectionTable.orgId, orgId));
+  // Map the debit category to an Account Id so the only missing one
+  // is the credit (payable) — isolates the failure to the exact field.
+  await db.insert(glMappingsTable).values({
+    orgId,
+    code: "Meals & Entertainment",
+    qboAccount: "Meals and Entertainment",
+    qboAccountId: "13",
+  });
+  const [dept] = await db
+    .insert(departmentsTable)
+    .values({ orgId, name: "Test Dept" })
+    .returning();
+  const [report] = await db
+    .insert(expenseReportsTable)
+    .values({
+      orgId,
+      employeeId: userId,
+      departmentId: dept.id,
+      title: "Real-mode missing payable preflight",
+      status: "Finance Approved",
+      displayCode: `RP1-${randomUUID().slice(0, 6).toUpperCase()}`,
+    })
+    .returning();
+  await db.insert(lineItemsTable).values({
+    reportId: report.id,
+    occurredOn: "2026-05-10",
+    merchant: "Coffee shop",
+    description: "Client lunch",
+    category: "Meals & Entertainment",
+    amount: "300.00",
+    paymentMethod: "Personal Card",
+  });
+  let fetchCalls = 0;
+  const fetchMock = (async () => {
+    fetchCalls += 1;
+    return new Response("{}", { status: 200 });
+  }) as unknown as typeof fetch;
+
+  const result = await postReportToQbo(report, { fetchFn: fetchMock });
+  assert.equal(result.status, "error");
+  if (result.status === "error") {
+    assert.match(result.errorMessage, /no QuickBooks Account Id/i);
+    assert.match(result.errorMessage, /local validation/i);
+    assert.doesNotMatch(
+      result.errorMessage,
+      /unsupported property/i,
+      "must not surface the opaque Intuit fault when we never called Intuit",
+    );
+  }
+  assert.equal(fetchCalls, 0, "must not call Intuit when preflight blocks");
+  const events = await db
+    .select()
+    .from(qboPostingEventsTable)
+    .where(eq(qboPostingEventsTable.reportId, report.id));
+  assert.equal(events.length, 1);
+  assert.equal(events[0].status, "error");
+  assert.equal(events[0].qboJournalId, null);
+});
+
+await test("postReportToQbo on real mode posts successfully when every line has an Account Id (asserts persisted journal id)", async () => {
+  const { glMappingsTable, lineItemsTable } = await import("@workspace/db");
+  const { orgId, userId } = await makeOrg("realPreflightOk");
+  await saveQboCredentials({
+    orgId,
+    clientId: "C",
+    clientSecret: "S",
+    environment: "sandbox",
+  });
+  await db
+    .update(qboConnectionTable)
+    .set({
+      mode: "real",
+      status: "connected",
+      connectionHealth: "healthy",
+      realmId: "9130354997998",
+      companyName: "Sandbox Co",
+      accessTokenEncrypted: encMod.encryptString("AT"),
+      refreshTokenEncrypted: encMod.encryptString("RT"),
+      tokenExpiresAt: new Date(Date.now() + 24 * 3600_000),
+      refreshTokenExpiresAt: new Date(Date.now() + 30 * 86_400_000),
+      lastTokenRefreshAt: new Date(),
+      defaultPayableAccountId: "43",
+      defaultPayableAccountName: "Loan Payable",
+    })
+    .where(eq(qboConnectionTable.orgId, orgId));
+  await db.insert(glMappingsTable).values({
+    orgId,
+    code: "Meals & Entertainment",
+    qboAccount: "Meals and Entertainment",
+    qboAccountId: "13",
+  });
+  const [dept] = await db
+    .insert(departmentsTable)
+    .values({ orgId, name: "Test Dept" })
+    .returning();
+  const [report] = await db
+    .insert(expenseReportsTable)
+    .values({
+      orgId,
+      employeeId: userId,
+      departmentId: dept.id,
+      title: "Real-mode happy-path posting",
+      status: "Finance Approved",
+      displayCode: `RP2-${randomUUID().slice(0, 6).toUpperCase()}`,
+    })
+    .returning();
+  await db.insert(lineItemsTable).values({
+    reportId: report.id,
+    occurredOn: "2026-05-10",
+    merchant: "Coffee shop",
+    description: "Client lunch",
+    category: "Meals & Entertainment",
+    amount: "300.00",
+    paymentMethod: "Personal Card",
+  });
+
+  let postedBody: unknown = null;
+  const fetchMock = (async (url: string, init: RequestInit) => {
+    const u = String(url);
+    if (u.includes("/journalentry?")) {
+      postedBody = JSON.parse(String(init.body));
+      return new Response(
+        JSON.stringify({ JournalEntry: { Id: "9999", SyncToken: "0" } }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    throw new Error(`unexpected fetch in real-mode happy-path test: ${u}`);
+  }) as unknown as typeof fetch;
+
+  const result = await postReportToQbo(report, { fetchFn: fetchMock });
+  assert.equal(result.status, "posted");
+  if (result.status === "posted" || result.status === "retried") {
+    assert.equal(result.qboJournalId, "9999");
+  }
+  // Verify the wire payload Intuit received: every AccountRef has a value
+  // (the bug pre-fix sent name-only refs, which Intuit rejected).
+  const sent = postedBody as { Line: Array<{ JournalEntryLineDetail: { AccountRef: { value?: string; name?: string } } }> };
+  assert.ok(sent && Array.isArray(sent.Line), "expected wire body to be a JournalEntry");
+  for (const line of sent.Line) {
+    assert.ok(
+      line.JournalEntryLineDetail.AccountRef.value,
+      `every AccountRef must include value (got: ${JSON.stringify(line.JournalEntryLineDetail.AccountRef)})`,
+    );
+  }
+  // And the persisted posting event reflects the success.
+  const events = await db
+    .select()
+    .from(qboPostingEventsTable)
+    .where(eq(qboPostingEventsTable.reportId, report.id));
+  assert.equal(events.length, 1);
+  assert.equal(events[0].status, "posted");
+  assert.equal(events[0].qboJournalId, "9999");
+  assert.equal(events[0].errorMessage, null);
 });
 
 await test("postReportToQbo on stub mode emits a payload without a Tag header even when tags are assigned", async () => {

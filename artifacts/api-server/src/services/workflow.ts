@@ -232,9 +232,36 @@ export type TransitionResult = {
   action: ApprovalAction;
 };
 
+// Test-only seam: lets the route-level test suite simulate a
+// post-QBO auto-advance failure (e.g. an illegal transition caused
+// by a concurrent edit) without having to mock a frozen ESM export
+// or wire a fake DB trigger. The hook returns an Error to throw, or
+// null to fall through to normal behavior. Production code never
+// touches this — `__setTestApplyTransitionHook(null)` resets it.
+type ApplyTransitionTestHook = (input: ApplyTransitionInput) => Error | null;
+let _testApplyTransitionHook: ApplyTransitionTestHook | null = null;
+export function __setTestApplyTransitionHook(
+  hook: ApplyTransitionTestHook | null,
+): void {
+  // Hard guard: never allow installing the hook in production. Even
+  // though no production code path calls this, this is defense in
+  // depth so a stray import can't accidentally short-circuit the
+  // workflow engine in a deployed environment.
+  if (process.env["NODE_ENV"] === "production") {
+    throw new Error(
+      "__setTestApplyTransitionHook is a test-only seam and must not be used in production",
+    );
+  }
+  _testApplyTransitionHook = hook;
+}
+
 export async function applyTransition(
   input: ApplyTransitionInput,
 ): Promise<TransitionResult> {
+  if (_testApplyTransitionHook) {
+    const forced = _testApplyTransitionHook(input);
+    if (forced) throw forced;
+  }
   const { report, actor, transition, comment, metadata, allowSelf, tx: ambientTx } = input;
   const candidates = TRANSITIONS[transition];
 

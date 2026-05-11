@@ -1169,6 +1169,24 @@ async function postReportToQboReal(
   const tags = await listTagsForReport(report.id);
   const tagNames = tags.map((t) => t.name);
   const payload = buildJournalEntryPayload(preview, tagNames);
+  // Pre-flight: every line must have a QBO Account Id. Intuit's
+  // JournalEntry API requires AccountRef.value (the durable Account Id)
+  // — sending only the human name returns the generic
+  // "Request has invalid or unsupported property" Fault and the post
+  // is rejected. We previously fell through to the wire with name-only
+  // refs, which surfaced as the same opaque Intuit error to finance
+  // users with no actionable hint. Detect this case here and persist
+  // a clear, actionable error instead of calling Intuit.
+  const missingAccount = describeMissingAccountIds(preview);
+  if (missingAccount) {
+    const errorMessage =
+      `Cannot post to QuickBooks: ${missingAccount}. ` +
+      `Open QuickBooks settings and either set a default payable account ` +
+      `or link the affected category to a Chart-of-Accounts entry, then retry. ` +
+      `(No request was sent to QuickBooks — this is a local validation failure.)`;
+    await persistPostingFailure(report, conn, payload, tagNames, errorMessage);
+    return { status: "error", errorMessage, payload };
+  }
   // Refresh tokens if near-expired before posting.
   const fresh = await refreshOrgTokensIfNeeded({
     orgId: report.orgId,
@@ -1343,6 +1361,25 @@ async function uploadReceiptsAsAttachables(args: {
  * In stub mode (no real QBO connection, accountId is null) we fall back to
  * AccountRef-by-name, which the stub posting path tolerates.
  */
+/**
+ * Returns a human-readable description of the first preview line missing
+ * a QBO Account Id, or null if every line has one. Used as a pre-flight
+ * before posting to a real Intuit connection — see postReportToQboReal.
+ */
+export function describeMissingAccountIds(preview: GlPreview): string | null {
+  for (const d of preview.debits) {
+    if (!d.accountId) {
+      return `debit account "${d.account}" (category "${d.category}") has no QuickBooks Account Id`;
+    }
+  }
+  for (const c of preview.credits) {
+    if (!c.accountId) {
+      return `credit account "${c.account}" has no QuickBooks Account Id`;
+    }
+  }
+  return null;
+}
+
 function buildAccountRef(line: GlPreviewLine): Record<string, string> {
   if (line.accountId) {
     return { value: line.accountId, name: line.account };

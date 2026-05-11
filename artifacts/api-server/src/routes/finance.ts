@@ -23,6 +23,7 @@ import {
 } from "../lib/reports";
 import { applyTransition, type TransitionName } from "../services/workflow";
 import { buildGlPreview, ensureConnectionRow, postReportToQbo } from "../services/qbo";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
@@ -189,16 +190,33 @@ router.post(
         comment: typeof req.body?.comment === "string" ? req.body.comment : null,
         metadata: JSON.stringify({ journalId: post.journalId }),
       });
-      // Auto-advance to Ready for Payroll Reimbursement so payroll queue picks it up.
-      const advanced = await applyTransition({
-        report: result.report,
-        actor: { id: req.auth!.user.id, roles: req.auth!.user.roles },
-        transition: "readyForPayroll",
-        metadata: JSON.stringify({ journalId: post.journalId }),
-      });
+      // Auto-advance to Ready for Payroll Reimbursement so the payroll
+      // queue picks it up. This is a convenience step — the QBO post
+      // already succeeded and the journal entry exists in QuickBooks.
+      // If the auto-advance throws (illegal transition from a concurrent
+      // edit, validation, etc.) we MUST NOT 5xx the request: that would
+      // surface as "push failed" in the UI even though Intuit accepted
+      // the entry. Degrade gracefully — leave the report at "Posted to
+      // QuickBooks", log a warning, and still return success with the
+      // journal id so finance can send to payroll manually.
+      let final = result.report;
+      try {
+        const advanced = await applyTransition({
+          report: result.report,
+          actor: { id: req.auth!.user.id, roles: req.auth!.user.roles },
+          transition: "readyForPayroll",
+          metadata: JSON.stringify({ journalId: post.journalId }),
+        });
+        final = advanced.report;
+      } catch (advanceErr) {
+        logger.warn(
+          { err: advanceErr, reportId: report.id, journalId: post.journalId },
+          "QBO post succeeded but auto-advance to Ready for Payroll Reimbursement failed; leaving report at Posted to QuickBooks",
+        );
+      }
       res.json(
         PostToQuickbooksResponse.parse({
-          report: await loadFullReport(advanced.report),
+          report: await loadFullReport(final),
           journalId: post.journalId,
           status: "posted",
           errorMessage: null,
@@ -253,14 +271,25 @@ router.post(
       transition: "retryQbo",
       metadata: JSON.stringify({ journalId: post.journalId }),
     });
-    const advanced = await applyTransition({
-      report: result.report,
-      actor: { id: req.auth!.user.id, roles: req.auth!.user.roles },
-      transition: "readyForPayroll",
-    });
+    // Same auto-advance decoupling as post-to-qbo above: don't 5xx
+    // a successful retry just because the convenience advance throws.
+    let final = result.report;
+    try {
+      const advanced = await applyTransition({
+        report: result.report,
+        actor: { id: req.auth!.user.id, roles: req.auth!.user.roles },
+        transition: "readyForPayroll",
+      });
+      final = advanced.report;
+    } catch (advanceErr) {
+      logger.warn(
+        { err: advanceErr, reportId: report.id, journalId: post.journalId },
+        "QBO retry succeeded but auto-advance to Ready for Payroll Reimbursement failed; leaving report at Posted to QuickBooks",
+      );
+    }
     res.json(
       PostToQuickbooksResponse.parse({
-        report: await loadFullReport(advanced.report),
+        report: await loadFullReport(final),
         journalId: post.journalId,
         status: "posted",
         errorMessage: null,
