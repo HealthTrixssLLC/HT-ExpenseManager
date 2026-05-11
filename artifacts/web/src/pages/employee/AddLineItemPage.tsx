@@ -5,6 +5,11 @@ import {
   useCreateLineItem,
   useListCategories,
   getListCategoriesQueryKey,
+  getListLineItemsQueryKey,
+  getGetReportQueryKey,
+  getGetReportTimelineQueryKey,
+  getListReceiptsQueryKey,
+  getListReportsQueryKey,
   PaymentMethod,
 } from "@workspace/api-client-react";
 import { HtCard } from "@/components/brand/Card";
@@ -104,6 +109,16 @@ export function AddLineItemPage({ id }: { id: string }) {
       }
     }, {
       onSuccess: () => {
+        // Refresh everything that displays the new line item or values
+        // derived from it — the report's totals/aging in the header, the
+        // line items table, the audit timeline, the receipts page (the
+        // attach-to-line dropdown lists every line item), and the report
+        // listings (My Reports, queues) that show the running total.
+        qc.invalidateQueries({ queryKey: getListLineItemsQueryKey(id) });
+        qc.invalidateQueries({ queryKey: getGetReportQueryKey(id) });
+        qc.invalidateQueries({ queryKey: getGetReportTimelineQueryKey(id) });
+        qc.invalidateQueries({ queryKey: getListReceiptsQueryKey(id) });
+        qc.invalidateQueries({ queryKey: getListReportsQueryKey() });
         notifySuccess("Line item added");
         setLocation(`/reports/${id}`);
       }

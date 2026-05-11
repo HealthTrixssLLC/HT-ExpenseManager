@@ -73,6 +73,17 @@ export const queryClient = new QueryClient({
     queries: {
       staleTime: 30_000,
       refetchOnWindowFocus: false,
+      // Pages that the user routinely navigates away from and back to (My
+      // Reports, Manager Queue, Finance Review, Admin lists, etc.) need to
+      // reflect changes made elsewhere — including by mutations that ran
+      // on a different screen — without making the user hit browser
+      // refresh. With staleTime at 30s, react-query would otherwise serve
+      // a cached snapshot for that window. Setting `refetchOnMount` to
+      // "always" keeps the cached snapshot visible instantly (no flash
+      // of loading state) while triggering a background refetch on every
+      // mount, so the on-screen data is brought up to date as soon as the
+      // network responds.
+      refetchOnMount: "always",
       retry: (failureCount, err) => {
         // Don't retry auth/permission errors, only transient server errors.
         if (err instanceof ApiError) {

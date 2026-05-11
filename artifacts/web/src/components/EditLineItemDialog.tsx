@@ -7,6 +7,7 @@ import {
   getListLineItemsQueryKey,
   getGetReportQueryKey,
   getGetReportTimelineQueryKey,
+  getListReportsQueryKey,
   PaymentMethod,
   type LineItem,
 } from "@workspace/api-client-react";
@@ -127,6 +128,9 @@ export function EditLineItemDialog({
           qc.invalidateQueries({
             queryKey: getGetReportTimelineQueryKey(reportId),
           });
+          // Report totals shown on My Reports / Manager / Finance / Payroll
+          // listings are derived from line items; refresh those listings.
+          qc.invalidateQueries({ queryKey: getListReportsQueryKey() });
           notifySuccess("Line item updated");
           onOpenChange(false);
         },

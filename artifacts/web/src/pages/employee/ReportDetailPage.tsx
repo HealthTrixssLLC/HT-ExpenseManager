@@ -14,6 +14,7 @@ import {
   useDeleteLineItem,
   useGetReportTimeline,
   getGetReportTimelineQueryKey,
+  getListReportsQueryKey,
   type LineItem,
 } from "@workspace/api-client-react";
 import { formatMoney, formatDate } from "@/lib/format";
@@ -111,6 +112,12 @@ export function ReportDetailPage({ id }: { id: string }) {
     qc.invalidateQueries({ queryKey: getListLineItemsQueryKey(id) });
     qc.invalidateQueries({ queryKey: getListReceiptsQueryKey(id) });
     qc.invalidateQueries({ queryKey: getGetReportTimelineQueryKey(id) });
+    // Status / total / aging shown on the various list pages (My Reports,
+    // Manager Queue, Finance Review, Payroll Queue) all key off mutations
+    // happening on this detail page (submit, recall, line item edits,
+    // delete-line, etc.). Invalidate the parent listings so they reflect
+    // those changes immediately on next mount.
+    qc.invalidateQueries({ queryKey: getListReportsQueryKey() });
   };
 
   const handleSubmit = () => {
@@ -136,6 +143,15 @@ export function ReportDetailPage({ id }: { id: string }) {
       const code = report?.displayCode;
       deleteReport.mutate({ id }, {
         onSuccess: () => {
+          // Drop this report from any cached listings (My Reports, queues)
+          // so it doesn't reappear momentarily after the navigation. Drop
+          // the per-report caches too — they're useless now and would only
+          // re-toast a 404 if anything refetched them.
+          qc.invalidateQueries({ queryKey: getListReportsQueryKey() });
+          qc.removeQueries({ queryKey: getGetReportQueryKey(id) });
+          qc.removeQueries({ queryKey: getListLineItemsQueryKey(id) });
+          qc.removeQueries({ queryKey: getListReceiptsQueryKey(id) });
+          qc.removeQueries({ queryKey: getGetReportTimelineQueryKey(id) });
           notifySuccess("Report deleted", code);
           setLocation("/my-reports");
         }

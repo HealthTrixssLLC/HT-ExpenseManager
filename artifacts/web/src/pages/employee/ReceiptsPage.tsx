@@ -11,7 +11,8 @@ import {
   useListLineItems,
   getListLineItemsQueryKey,
   useAttachReceiptToLine,
-  useDeleteReceipt
+  useDeleteReceipt,
+  getListReportsQueryKey,
 } from "@workspace/api-client-react";
 import { HtCard } from "@/components/brand/Card";
 import { ReceiptThumb } from "@/components/brand/ReceiptThumb";
@@ -110,7 +111,17 @@ export function ReceiptsPage({ id }: { id: string }) {
       }
       setIsUploading(false);
       setProgress(null);
+      // Refresh the receipts list, plus anything that displays receipt
+      // counts / "missing receipts" derived from it: the report header
+      // (audit fields, missingReceiptCount), the line items table (each
+      // row reports its own attached state), and the report listings
+      // (queue rows surface a missing-receipt indicator).
       qc.invalidateQueries({ queryKey: getListReceiptsQueryKey(id) });
+      qc.invalidateQueries({ queryKey: getGetReportQueryKey(id) });
+      qc.invalidateQueries({ queryKey: getListLineItemsQueryKey(id) });
+      // Queue / My Reports rows surface a missing-receipt indicator that
+      // depends on receipt presence; refresh the listings too.
+      qc.invalidateQueries({ queryKey: getListReportsQueryKey() });
       if (fileInputRef.current) fileInputRef.current.value = "";
       if (ok > 0) {
         notifySuccess(
@@ -163,6 +174,8 @@ export function ReceiptsPage({ id }: { id: string }) {
       onSuccess: () => {
         qc.invalidateQueries({ queryKey: getListReceiptsQueryKey(id) });
         qc.invalidateQueries({ queryKey: getGetReportQueryKey(id) });
+        qc.invalidateQueries({ queryKey: getListLineItemsQueryKey(id) });
+        qc.invalidateQueries({ queryKey: getListReportsQueryKey() });
         notifySuccess("Receipt deleted", filename);
       },
       // Errors are surfaced globally by queryClient's mutationCache.onError
@@ -198,6 +211,8 @@ export function ReceiptsPage({ id }: { id: string }) {
       onSuccess: () => {
         qc.invalidateQueries({ queryKey: getListReceiptsQueryKey(id) });
         qc.invalidateQueries({ queryKey: getListLineItemsQueryKey(id) });
+        qc.invalidateQueries({ queryKey: getGetReportQueryKey(id) });
+        qc.invalidateQueries({ queryKey: getListReportsQueryKey() });
         notifySuccess("Receipt attached");
       }
     });

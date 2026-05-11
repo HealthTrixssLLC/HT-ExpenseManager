@@ -4,7 +4,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   useCreateReport,
   useListDepartments,
-  getListDepartmentsQueryKey
+  getListDepartmentsQueryKey,
+  getListReportsQueryKey,
 } from "@workspace/api-client-react";
 import { HtCard } from "@/components/brand/Card";
 import { Button } from "@/components/ui/button";
@@ -122,6 +123,9 @@ export function CreateReportPage() {
       }
     }, {
       onSuccess: (newReport) => {
+        // Invalidate the reports list so when the user navigates back to
+        // "My Reports" the new entry is visible without a manual refresh.
+        qc.invalidateQueries({ queryKey: getListReportsQueryKey() });
         notifySuccess("Report created", newReport.displayCode);
         setLocation(`/reports/${newReport.id}`);
       }

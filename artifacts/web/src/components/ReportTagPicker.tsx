@@ -6,6 +6,8 @@ import {
   useSetReportTags,
   useListActiveQboTags,
   getListActiveQboTagsQueryKey,
+  getGetReportQueryKey,
+  getGetReportTimelineQueryKey,
   type ExpenseReport,
   type QboTag,
 } from "@workspace/api-client-react";
@@ -95,6 +97,13 @@ export function ReportTagPicker({ report }: { report: ExpenseReport }) {
           setEditing(false);
           qc.invalidateQueries({
             queryKey: getListReportTagsQueryKey(reportId),
+          });
+          // Tag changes after approval flip `editedSinceLastApproval` and
+          // append a timeline event server-side; refresh the report header
+          // and audit timeline so the UI reflects both immediately.
+          qc.invalidateQueries({ queryKey: getGetReportQueryKey(reportId) });
+          qc.invalidateQueries({
+            queryKey: getGetReportTimelineQueryKey(reportId),
           });
         },
       },
