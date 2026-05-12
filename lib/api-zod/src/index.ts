@@ -1,6 +1,6 @@
-export * from "./generated/api";
-export * from "./generated/types";
-r server uses.
+// Zod schemas generated from the OpenAPI spec. These are the runtime
+// validators (and inferred types) that both the api client and the API
+// server uses.
 // The names also act as TS types when used with `z.infer<typeof X>` or directly
 // (zod schemas have an inferred output type).
 export * from "./generated/api";
