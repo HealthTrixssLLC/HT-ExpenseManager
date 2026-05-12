@@ -1,6 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { runTokenRefreshSweep } from "./services/qbo";
+import { logMicrosoftAuthStartup } from "./lib/microsoftAuth";
 
 const rawPort = process.env["PORT"];
 
@@ -23,6 +24,7 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
+  logMicrosoftAuthStartup();
 
   // Background QBO token-refresh sweep. Runs every 15 minutes and refreshes
   // any org whose Intuit access token is within an hour of expiring. Skipped

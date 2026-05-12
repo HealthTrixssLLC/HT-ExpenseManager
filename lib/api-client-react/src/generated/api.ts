@@ -25,6 +25,7 @@ import type {
   AdminListQboPostingHistoryParams,
   AdminRenameDepartmentBody,
   ApprovalActionBody,
+  AuthConfig,
   AuthSession,
   BootstrapBody,
   BootstrapStatus,
@@ -48,6 +49,7 @@ import type {
   LineItem,
   ListReportsParams,
   LoginBody,
+  LogoutResult,
   ManagerDelegation,
   ManagerOption,
   PatchPolicyRuleBody,
@@ -586,8 +588,10 @@ export const getLogoutUrl = () => {
   return `/api/auth/logout`;
 };
 
-export const logout = async (options?: RequestInit): Promise<void> => {
-  return customFetch<void>(getLogoutUrl(), {
+export const logout = async (
+  options?: RequestInit,
+): Promise<LogoutResult | void> => {
+  return customFetch<LogoutResult | void>(getLogoutUrl(), {
     ...options,
     method: "POST",
   });
@@ -657,6 +661,241 @@ export const useLogout = <
 > => {
   return useMutation(getLogoutMutationOptions(options));
 };
+
+/**
+ * @summary Public auth feature configuration (used by the login page)
+ */
+export const getGetAuthConfigUrl = () => {
+  return `/api/auth/config`;
+};
+
+export const getAuthConfig = async (
+  options?: RequestInit,
+): Promise<AuthConfig> => {
+  return customFetch<AuthConfig>(getGetAuthConfigUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetAuthConfigQueryKey = () => {
+  return [`/api/auth/config`] as const;
+};
+
+export const getGetAuthConfigQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAuthConfig>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getAuthConfig>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetAuthConfigQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getAuthConfig>>> = ({
+    signal,
+  }) => getAuthConfig({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAuthConfig>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAuthConfigQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAuthConfig>>
+>;
+export type GetAuthConfigQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Public auth feature configuration (used by the login page)
+ */
+
+export function useGetAuthConfig<
+  TData = Awaited<ReturnType<typeof getAuthConfig>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getAuthConfig>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAuthConfigQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Top-level browser redirect that sends the user to Microsoft's
+login page. Generates PKCE + state + nonce and stores them in a
+short-lived signed cookie. Returns 503 when Microsoft sign-in is
+not configured on this server.
+
+ * @summary Begin the Microsoft Entra OIDC authorization-code flow
+ */
+export const getMicrosoftAuthStartUrl = () => {
+  return `/api/auth/microsoft/start`;
+};
+
+export const microsoftAuthStart = async (
+  options?: RequestInit,
+): Promise<unknown> => {
+  return customFetch<unknown>(getMicrosoftAuthStartUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getMicrosoftAuthStartQueryKey = () => {
+  return [`/api/auth/microsoft/start`] as const;
+};
+
+export const getMicrosoftAuthStartQueryOptions = <
+  TData = Awaited<ReturnType<typeof microsoftAuthStart>>,
+  TError = ErrorType<void | Problem>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof microsoftAuthStart>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getMicrosoftAuthStartQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof microsoftAuthStart>>
+  > = ({ signal }) => microsoftAuthStart({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof microsoftAuthStart>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type MicrosoftAuthStartQueryResult = NonNullable<
+  Awaited<ReturnType<typeof microsoftAuthStart>>
+>;
+export type MicrosoftAuthStartQueryError = ErrorType<void | Problem>;
+
+/**
+ * @summary Begin the Microsoft Entra OIDC authorization-code flow
+ */
+
+export function useMicrosoftAuthStart<
+  TData = Awaited<ReturnType<typeof microsoftAuthStart>>,
+  TError = ErrorType<void | Problem>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof microsoftAuthStart>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getMicrosoftAuthStartQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Top-level browser redirect from Microsoft's authorize endpoint.
+Validates state + PKCE + ID token signature/issuer/audience/nonce,
+looks up or creates the matching user (by `oid` then by email),
+issues a normal `ht_session`, and lands the user on the SPA root.
+
+ * @summary Microsoft Entra OIDC callback
+ */
+export const getMicrosoftAuthCallbackUrl = () => {
+  return `/api/auth/microsoft/callback`;
+};
+
+export const microsoftAuthCallback = async (
+  options?: RequestInit,
+): Promise<unknown> => {
+  return customFetch<unknown>(getMicrosoftAuthCallbackUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getMicrosoftAuthCallbackQueryKey = () => {
+  return [`/api/auth/microsoft/callback`] as const;
+};
+
+export const getMicrosoftAuthCallbackQueryOptions = <
+  TData = Awaited<ReturnType<typeof microsoftAuthCallback>>,
+  TError = ErrorType<void>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof microsoftAuthCallback>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getMicrosoftAuthCallbackQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof microsoftAuthCallback>>
+  > = ({ signal }) => microsoftAuthCallback({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof microsoftAuthCallback>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type MicrosoftAuthCallbackQueryResult = NonNullable<
+  Awaited<ReturnType<typeof microsoftAuthCallback>>
+>;
+export type MicrosoftAuthCallbackQueryError = ErrorType<void>;
+
+/**
+ * @summary Microsoft Entra OIDC callback
+ */
+
+export function useMicrosoftAuthCallback<
+  TData = Awaited<ReturnType<typeof microsoftAuthCallback>>,
+  TError = ErrorType<void>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof microsoftAuthCallback>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getMicrosoftAuthCallbackQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * @summary Current user + CSRF token

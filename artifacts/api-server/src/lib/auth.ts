@@ -84,6 +84,7 @@ export async function createSession(
   userId: string,
   ip: string | null,
   userAgent: string | null,
+  authMethod: "password" | "microsoft" = "password",
 ): Promise<CreatedSession> {
   const rawToken = generateToken(32);
   const csrfToken = generateToken(24);
@@ -100,6 +101,7 @@ export async function createSession(
       userAgent,
       lastUsedAt: now,
       expiresAt,
+      authMethod,
     })
     .returning();
 

@@ -15,7 +15,8 @@ import { useAuth } from "@/lib/auth-context";
 import { describeApiError } from "@/lib/api";
 
 export function LoginPage() {
-  const { login, bootstrap, loginPending, bootstrapPending } = useAuth();
+  const { login, bootstrap, loginPending, bootstrapPending, microsoftAuthEnabled } =
+    useAuth();
   const bootstrapStatus = useGetBootstrapStatus({
     query: {
       queryKey: getGetBootstrapStatusQueryKey(),
@@ -37,6 +38,31 @@ export function LoginPage() {
   const [orgName, setOrgName] = useState("");
   const [fullName, setFullName] = useState("");
   const [err, setErr] = useState<string | null>(null);
+
+  // The Microsoft callback redirects back to "/" with `?msAuthError=...` on
+  // any auth failure (state mismatch, disabled account, etc.). Surface it
+  // once on the login form, then strip it from the URL so a refresh doesn't
+  // keep the banner around.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const msErr = params.get("msAuthError");
+    if (msErr) {
+      setErr(msErr);
+      params.delete("msAuthError");
+      const qs = params.toString();
+      const newUrl =
+        window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash;
+      window.history.replaceState({}, "", newUrl);
+    }
+  }, []);
+
+  function startMicrosoftSignIn() {
+    // Top-level navigation (NOT fetch) so cookies follow the redirects to
+    // Microsoft's authorize endpoint and back. BASE_URL has a trailing slash.
+    const base = import.meta.env.BASE_URL;
+    window.location.assign(`${base}api/auth/microsoft/start`);
+  }
 
   async function onLogin(e: FormEvent) {
     e.preventDefault();
@@ -227,6 +253,8 @@ export function LoginPage() {
               eulaAccepted={eulaAccepted}
               onToggleEula={(v) => setEulaAccepted(v)}
               onOpenEula={() => setEulaOpen(true)}
+              microsoftAuthEnabled={microsoftAuthEnabled}
+              onMicrosoftSignIn={startMicrosoftSignIn}
             />
           )}
         </div>
@@ -330,6 +358,8 @@ function LoginForm(props: {
   eulaAccepted: boolean;
   onToggleEula: (v: boolean) => void;
   onOpenEula: () => void;
+  microsoftAuthEnabled: boolean;
+  onMicrosoftSignIn: () => void;
 }) {
   return (
     <form onSubmit={props.onSubmit}>
@@ -392,8 +422,84 @@ function LoginForm(props: {
       >
         {props.busy ? "Signing in…" : "Sign in"}
       </button>
+      {props.microsoftAuthEnabled && (
+        <>
+          <div
+            aria-hidden
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              margin: "18px 0 14px",
+              color: "var(--ht-ink-3)",
+              fontSize: 11,
+              letterSpacing: 0.4,
+              textTransform: "uppercase",
+            }}
+          >
+            <span style={{ flex: 1, height: 1, background: "var(--ht-border)" }} />
+            or
+            <span style={{ flex: 1, height: 1, background: "var(--ht-border)" }} />
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              if (!props.eulaAccepted) return;
+              props.onMicrosoftSignIn();
+            }}
+            disabled={!props.eulaAccepted}
+            data-testid="button-login-microsoft"
+            title={
+              props.eulaAccepted
+                ? "Sign in with your Microsoft work or school account"
+                : "Acknowledge the End User Agreement first"
+            }
+            style={microsoftButtonStyle(!props.eulaAccepted)}
+          >
+            <MicrosoftLogo />
+            <span>Sign in with Microsoft</span>
+          </button>
+        </>
+      )}
     </form>
   );
+}
+
+function MicrosoftLogo() {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 21 21"
+      aria-hidden="true"
+      style={{ flexShrink: 0 }}
+    >
+      <rect x="1" y="1" width="9" height="9" fill="#F25022" />
+      <rect x="11" y="1" width="9" height="9" fill="#7FBA00" />
+      <rect x="1" y="11" width="9" height="9" fill="#00A4EF" />
+      <rect x="11" y="11" width="9" height="9" fill="#FFB900" />
+    </svg>
+  );
+}
+
+function microsoftButtonStyle(disabled: boolean): React.CSSProperties {
+  return {
+    width: "100%",
+    height: 44,
+    background: "white",
+    color: "#1F1F1F",
+    border: "1px solid var(--ht-border)",
+    borderRadius: 10,
+    fontSize: 14,
+    fontWeight: 600,
+    letterSpacing: 0.1,
+    cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled ? 0.55 : 1,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  };
 }
 
 function BootstrapForm(props: {

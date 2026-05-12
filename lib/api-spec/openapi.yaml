@@ -152,8 +152,61 @@ paths:
       tags: [auth]
       summary: Destroy the current session
       responses:
+        "200":
+          description: |
+            Logged out. When the current user authenticated via Microsoft,
+            the response carries an end-session URL the SPA must redirect
+            to in order to complete the federated sign-out at the IdP.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LogoutResult" }
         "204":
-          description: Logged out
+          description: Logged out (no federated sign-out required)
+
+  /auth/config:
+    get:
+      operationId: getAuthConfig
+      tags: [auth]
+      summary: Public auth feature configuration (used by the login page)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthConfig" }
+
+  /auth/microsoft/start:
+    get:
+      operationId: microsoftAuthStart
+      tags: [auth]
+      summary: Begin the Microsoft Entra OIDC authorization-code flow
+      description: |
+        Top-level browser redirect that sends the user to Microsoft's
+        login page. Generates PKCE + state + nonce and stores them in a
+        short-lived signed cookie. Returns 503 when Microsoft sign-in is
+        not configured on this server.
+      responses:
+        "302":
+          description: Redirect to Microsoft authorize endpoint
+        "503":
+          description: Microsoft sign-in is not configured
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /auth/microsoft/callback:
+    get:
+      operationId: microsoftAuthCallback
+      tags: [auth]
+      summary: Microsoft Entra OIDC callback
+      description: |
+        Top-level browser redirect from Microsoft's authorize endpoint.
+        Validates state + PKCE + ID token signature/issuer/audience/nonce,
+        looks up or creates the matching user (by `oid` then by email),
+        issues a normal `ht_session`, and lands the user on the SPA root.
+      responses:
+        "302":
+          description: Redirect back to the SPA (success or error banner)
 
   /auth/me:
     get:
@@ -1562,6 +1615,26 @@ components:
           description: Only returned when client header indicates a non-cookie client (iOS).
       required: [user, csrfToken, sessionExpiresAt]
 
+    AuthConfig:
+      type: object
+      properties:
+        microsoftAuthEnabled:
+          type: boolean
+          description: Whether the API server has the env vars needed for Microsoft sign-in.
+      required: [microsoftAuthEnabled]
+
+    LogoutResult:
+      type: object
+      properties:
+        microsoftLogoutUrl:
+          type: ["string", "null"]
+          description: |
+            When present, the SPA should redirect the browser to this URL
+            to complete the federated sign-out at Microsoft. Otherwise the
+            local session has already been destroyed and no further action
+            is required.
+      required: [microsoftLogoutUrl]
+
     Role:
       type: string
       enum:
@@ -1611,6 +1684,9 @@ components:
         departmentName: { type: ["string", "null"] }
         managerId: { type: ["string", "null"], format: uuid }
         managerName: { type: ["string", "null"] }
+        authProvider:
+          type: ["string", "null"]
+          description: How the user authenticates (e.g. "password", "microsoft").
         createdAt: { type: string, format: date-time }
       required:
         - id

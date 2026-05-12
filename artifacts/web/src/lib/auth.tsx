@@ -23,7 +23,9 @@ import {
   useLogin,
   useLogout,
   useBootstrapAdmin,
+  useGetAuthConfig,
   getGetMeQueryKey,
+  getGetAuthConfigQueryKey,
   type AuthSession,
   ApiError,
 } from "@workspace/api-client-react";
@@ -47,6 +49,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loginMut = useLogin();
   const logoutMut = useLogout();
   const bootstrapMut = useBootstrapAdmin();
+  const authConfigQuery = useGetAuthConfig({
+    query: {
+      queryKey: getGetAuthConfigQueryKey(),
+      // Microsoft enabled-ness is derived from server env vars and cannot
+      // change at runtime — fetch once and cache for the SPA's lifetime.
+      staleTime: Infinity,
+      retry: false,
+    },
+  });
+  const microsoftAuthEnabled = authConfigQuery.data?.microsoftAuthEnabled === true;
 
   // Keep the in-memory CSRF token in sync with whatever the server most
   // recently issued. This handles login, bootstrap, and the refresh that
@@ -92,14 +104,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback<AuthCtx["logout"]>(async () => {
+    let microsoftLogoutUrl: string | null = null;
     try {
-      await logoutMut.mutateAsync();
+      const result = await logoutMut.mutateAsync();
+      // The server returns `{ microsoftLogoutUrl }` for federated sessions.
+      // For password sessions (or older clients) it may return 204 or a body
+      // with `microsoftLogoutUrl: null` — both are fine.
+      microsoftLogoutUrl =
+        (result as { microsoftLogoutUrl?: string | null } | null | undefined)
+          ?.microsoftLogoutUrl ?? null;
     } catch {
       // Logging out is best-effort: we always clear local state below.
     }
     setCsrfToken(null);
     setPendingSession(null);
     qc.clear();
+    if (microsoftLogoutUrl) {
+      // Top-level navigation to Microsoft's end-session endpoint completes
+      // the federated sign-out; the IdP then redirects back to our
+      // post_logout_redirect_uri (the SPA root).
+      window.location.assign(microsoftLogoutUrl);
+    }
   }, [logoutMut, qc]);
 
   const bootstrap = useCallback<AuthCtx["bootstrap"]>(
@@ -129,6 +154,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       refresh,
       loginPending: loginMut.isPending,
       bootstrapPending: bootstrapMut.isPending,
+      microsoftAuthEnabled,
     }),
     [
       status,
@@ -141,6 +167,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       refresh,
       loginMut.isPending,
       bootstrapMut.isPending,
+      microsoftAuthEnabled,
     ],
   );
 

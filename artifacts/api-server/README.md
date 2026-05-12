@@ -37,6 +37,56 @@ src/
     qbo.ts             # QuickBooks posting + reconciliation helpers
 ```
 
+## Microsoft Entra (Azure AD) sign-in
+
+The API supports an optional second sign-in path: OIDC Authorization Code
++ PKCE against Microsoft Entra ID. It activates automatically when **all
+four** of the following env vars are present, and is hidden from the SPA
+otherwise:
+
+| Variable | Purpose |
+| --- | --- |
+| `MS_CLIENT_ID` | Application (client) ID from the Entra app registration |
+| `MS_CLIENT_SECRET` | Client secret value (NOT the secret ID) |
+| `MS_TENANT_ID` | Directory (tenant) ID |
+| `PUBLIC_BASE_URL` | Origin the SPA is served from, e.g. `https://expense.example.com` |
+
+### One-time Entra app registration
+
+1. Azure portal → **Entra ID → App registrations → New registration**.
+2. Set a name (e.g. "Healthtrix Expense"), pick **Single tenant** (or
+   multi-tenant if you really need it), leave the redirect URI blank for
+   now, and create.
+3. **Authentication → Add a platform → Web** and paste **every** redirect
+   URI the API server prints at startup under
+   `Microsoft sign-in enabled. Register EVERY redirect URI above…`. There
+   are typically two: the production `PUBLIC_BASE_URL` callback and the
+   active Replit dev domain callback. Both end in
+   `/api/auth/microsoft/callback`.
+4. **Authentication → Implicit grant and hybrid flows**: tick **ID tokens
+   (used for implicit and hybrid flows)** so the authorize endpoint will
+   issue ID tokens to the Web platform. **Front-channel logout URL**:
+   leave blank — we use the end-session endpoint via top-level
+   navigation, not front-channel.
+5. **Certificates & secrets → New client secret** → copy the *Value* (not
+   the *Secret ID*) and set it as `MS_CLIENT_SECRET`.
+6. **Token configuration → Add optional claim → ID → email**. (Microsoft
+   may not include `email` by default for personal accounts.)
+7. **API permissions** already include `User.Read` by default; that's
+   enough — we only need `openid profile email offline_access`.
+
+### Matching policy
+
+On callback we look the user up by Microsoft `oid` first (stable across
+email changes), then by lowercased `email`. If the email matches more
+than one organization the sign-in is refused. New users are
+self-provisioned with **no roles** — a System Admin must grant a role
+before they can do anything in the app.
+
+Sessions issued via Microsoft set `users.auth_provider = 'microsoft'`.
+The sign-out endpoint detects this and returns a federated end-session
+URL the SPA navigates to so the user is signed out at the IdP too.
+
 ## Authentication & CSRF
 
 - Session tokens are opaque base64url secrets; only the SHA-256 hash is

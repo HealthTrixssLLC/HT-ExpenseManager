@@ -21,6 +21,11 @@ export const sessionsTable = pgTable(
     csrfToken: text("csrf_token").notNull(),
     ip: text("ip"),
     userAgent: text("user_agent"),
+    // How this session was created — "password" for local sign-in,
+    // "microsoft" for federated. Drives whether sign-out hits the IdP's
+    // end-session endpoint. Stored on the session (not the user) so that
+    // alternating sign-in methods on the same account behave correctly.
+    authMethod: text("auth_method").notNull().default("password"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

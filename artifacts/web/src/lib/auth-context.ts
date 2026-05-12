@@ -31,6 +31,11 @@ export interface AuthCtx {
   refresh: () => Promise<void>;
   loginPending: boolean;
   bootstrapPending: boolean;
+  /**
+   * Whether the API server has Microsoft Entra SSO configured. When false,
+   * the LoginPage hides the "Sign in with Microsoft" button.
+   */
+  microsoftAuthEnabled: boolean;
 }
 
 export const AuthContext = createContext<AuthCtx | null>(null);

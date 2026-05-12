@@ -81,6 +81,11 @@ export interface User {
   managerId?: string | null;
   /** @nullable */
   managerName?: string | null;
+  /**
+   * How the user authenticates (e.g. "password", "microsoft").
+   * @nullable
+   */
+  authProvider?: string | null;
   createdAt: string;
 }
 
@@ -93,6 +98,23 @@ export interface AuthSession {
    * @nullable
    */
   sessionToken?: string | null;
+}
+
+export interface AuthConfig {
+  /** Whether the API server has the env vars needed for Microsoft sign-in. */
+  microsoftAuthEnabled: boolean;
+}
+
+export interface LogoutResult {
+  /**
+   * When present, the SPA should redirect the browser to this URL
+to complete the federated sign-out at Microsoft. Otherwise the
+local session has already been destroyed and no further action
+is required.
+
+   * @nullable
+   */
+  microsoftLogoutUrl: string | null;
 }
 
 export type WorkflowStatus =

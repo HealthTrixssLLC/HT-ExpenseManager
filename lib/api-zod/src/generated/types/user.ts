@@ -25,5 +25,10 @@ export interface User {
   managerId?: string | null;
   /** @nullable */
   managerName?: string | null;
+  /**
+   * How the user authenticates (e.g. "password", "microsoft").
+   * @nullable
+   */
+  authProvider?: string | null;
   createdAt: Date;
 }

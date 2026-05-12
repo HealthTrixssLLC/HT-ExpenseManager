@@ -108,6 +108,12 @@ export const LoginResponse = zod.object({
     departmentName: zod.string().nullish(),
     managerId: zod.string().uuid().nullish(),
     managerName: zod.string().nullish(),
+    authProvider: zod
+      .string()
+      .nullish()
+      .describe(
+        'How the user authenticates (e.g. \"password\", \"microsoft\").',
+      ),
     createdAt: zod.coerce.date(),
   }),
   csrfToken: zod.string(),
@@ -117,6 +123,29 @@ export const LoginResponse = zod.object({
     .nullish()
     .describe(
       "Only returned when client header indicates a non-cookie client (iOS).",
+    ),
+});
+
+/**
+ * @summary Destroy the current session
+ */
+export const LogoutResponse = zod.object({
+  microsoftLogoutUrl: zod
+    .string()
+    .nullable()
+    .describe(
+      "When present, the SPA should redirect the browser to this URL\nto complete the federated sign-out at Microsoft. Otherwise the\nlocal session has already been destroyed and no further action\nis required.\n",
+    ),
+});
+
+/**
+ * @summary Public auth feature configuration (used by the login page)
+ */
+export const GetAuthConfigResponse = zod.object({
+  microsoftAuthEnabled: zod
+    .boolean()
+    .describe(
+      "Whether the API server has the env vars needed for Microsoft sign-in.",
     ),
 });
 
@@ -147,6 +176,12 @@ export const GetMeResponse = zod.object({
     departmentName: zod.string().nullish(),
     managerId: zod.string().uuid().nullish(),
     managerName: zod.string().nullish(),
+    authProvider: zod
+      .string()
+      .nullish()
+      .describe(
+        'How the user authenticates (e.g. \"password\", \"microsoft\").',
+      ),
     createdAt: zod.coerce.date(),
   }),
   csrfToken: zod.string(),
@@ -237,6 +272,10 @@ export const AdminListUsersResponseItem = zod.object({
   departmentName: zod.string().nullish(),
   managerId: zod.string().uuid().nullish(),
   managerName: zod.string().nullish(),
+  authProvider: zod
+    .string()
+    .nullish()
+    .describe('How the user authenticates (e.g. \"password\", \"microsoft\").'),
   createdAt: zod.coerce.date(),
 });
 export const AdminListUsersResponse = zod.array(AdminListUsersResponseItem);
@@ -321,6 +360,10 @@ export const AdminUpdateUserResponse = zod.object({
   departmentName: zod.string().nullish(),
   managerId: zod.string().uuid().nullish(),
   managerName: zod.string().nullish(),
+  authProvider: zod
+    .string()
+    .nullish()
+    .describe('How the user authenticates (e.g. \"password\", \"microsoft\").'),
   createdAt: zod.coerce.date(),
 });
 

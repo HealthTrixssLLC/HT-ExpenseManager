@@ -34,6 +34,7 @@
     "jszip": "^3.10.1",
     "multer": "^2.1.1",
     "nanoid": "^5.1.9",
+    "openid-client": "^6.8.4",
     "pino": "^9",
     "pino-http": "^10"
   },

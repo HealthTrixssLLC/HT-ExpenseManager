@@ -38,6 +38,7 @@ export type UserDto = {
   departmentName: string | null;
   managerId: string | null;
   managerName: string | null;
+  authProvider: string | null;
   createdAt: string;
 };
 
@@ -165,6 +166,7 @@ export function toUserDto(
     departmentName: department?.name ?? null,
     managerId: manager?.id ?? null,
     managerName: manager?.fullName ?? null,
+    authProvider: user.authProvider ?? null,
     createdAt: user.createdAt.toISOString(),
   };
 }

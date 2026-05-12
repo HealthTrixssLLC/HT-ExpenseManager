@@ -26,6 +26,12 @@ import { sendProblem } from "../lib/problem";
 import { requireAuth, requireRole } from "../middlewares/session";
 import { toUserDto } from "../lib/serializers";
 import { departmentsTable, defaultDepartmentsFor } from "@workspace/db";
+import * as oidcClient from "openid-client";
+import {
+  microsoftAuthEnabled,
+  getMicrosoftAuthConfig,
+  getOidcConfiguration,
+} from "../lib/microsoftAuth";
 
 const ADMIN_ROLES = ["Accounting Admin", "System Admin"];
 
@@ -227,7 +233,9 @@ router.post("/auth/login", async (req, res): Promise<void> => {
     sendProblem(res, 401, "Invalid Credentials");
     return;
   }
-  const ok = await verifyPassword(parsed.data.password, user.passwordHash);
+  const ok = user.passwordHash
+    ? await verifyPassword(parsed.data.password, user.passwordHash)
+    : false;
   if (!ok) {
     await recordAttempt(email, ip, false);
     sendProblem(res, 401, "Invalid Credentials");
@@ -254,8 +262,36 @@ router.post("/auth/login", async (req, res): Promise<void> => {
   );
 });
 
+router.get("/auth/config", async (_req, res): Promise<void> => {
+  res.json({ microsoftAuthEnabled });
+});
+
 router.post("/auth/logout", async (req, res): Promise<void> => {
+  // Capture how the current user authenticated *before* tearing down the
+  // session — once we delete it we lose `req.auth`. When the user signed in
+  // via Microsoft, build the federated end-session URL so the SPA can
+  // redirect the browser there to fully sign the user out at the IdP.
+  let microsoftLogoutUrl: string | null = null;
   if (req.auth) {
+    // Decide federated logout per *session*, not per user. A user who has
+    // a Microsoft link but is currently signed in via password should not
+    // be bounced through Microsoft's end-session endpoint, and vice versa.
+    if (
+      req.auth.session.authMethod === "microsoft" &&
+      microsoftAuthEnabled
+    ) {
+      try {
+        const cfg = getMicrosoftAuthConfig();
+        const config = await getOidcConfiguration();
+        const url = oidcClient.buildEndSessionUrl(config, {
+          post_logout_redirect_uri: cfg.postLogoutRedirectUri,
+          client_id: cfg.clientId,
+        });
+        microsoftLogoutUrl = url.toString();
+      } catch (err) {
+        req.log.warn({ err }, "Failed to build Microsoft end-session URL");
+      }
+    }
     await db
       .delete(sessionsTable)
       .where(eq(sessionsTable.id, req.auth.session.id));
@@ -263,7 +299,7 @@ router.post("/auth/logout", async (req, res): Promise<void> => {
   if (!req.isIosClient) {
     clearSessionCookies(res);
   }
-  res.status(204).end();
+  res.json({ microsoftLogoutUrl });
 });
 
 router.get("/auth/me", requireAuth, async (req: Request, res: Response): Promise<void> => {
