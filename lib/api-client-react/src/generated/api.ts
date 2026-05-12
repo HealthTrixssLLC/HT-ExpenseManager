@@ -40,6 +40,8 @@ import type {
   DetailedHealthStatus,
   ExpenseReport,
   ExpenseReportSummary,
+  GetGlEntryValidationParams,
+  GlEntryValidationResult,
   GlMapping,
   GlPreview,
   HealthStatus,
@@ -6255,6 +6257,134 @@ export function useGetGlPreview<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetGlPreviewQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Validate the JournalEntry payload for a report against Intuit's
+JournalEntry API requirements (https://developer.intuit.com/app/developer/qbapi/docs/api/accounting/journalentry).
+When `postingEventId` is supplied, returns the persisted payload
+from `qbo_posting_events`. Otherwise builds the payload on the
+fly via `buildGlPreview` + `buildJournalEntryPayload` so the
+validation reflects what would be sent on the next post.
+
+ */
+export const getGetGlEntryValidationUrl = (
+  id: string,
+  params?: GetGlEntryValidationParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/reports/${id}/gl-entry-validation?${stringifiedParams}`
+    : `/api/reports/${id}/gl-entry-validation`;
+};
+
+export const getGlEntryValidation = async (
+  id: string,
+  params?: GetGlEntryValidationParams,
+  options?: RequestInit,
+): Promise<GlEntryValidationResult> => {
+  return customFetch<GlEntryValidationResult>(
+    getGetGlEntryValidationUrl(id, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetGlEntryValidationQueryKey = (
+  id: string,
+  params?: GetGlEntryValidationParams,
+) => {
+  return [
+    `/api/reports/${id}/gl-entry-validation`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetGlEntryValidationQueryOptions = <
+  TData = Awaited<ReturnType<typeof getGlEntryValidation>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  params?: GetGlEntryValidationParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getGlEntryValidation>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetGlEntryValidationQueryKey(id, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getGlEntryValidation>>
+  > = ({ signal }) =>
+    getGlEntryValidation(id, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getGlEntryValidation>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetGlEntryValidationQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getGlEntryValidation>>
+>;
+export type GetGlEntryValidationQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Validate the JournalEntry payload for a report against Intuit's
+JournalEntry API requirements (https://developer.intuit.com/app/developer/qbapi/docs/api/accounting/journalentry).
+When `postingEventId` is supplied, returns the persisted payload
+from `qbo_posting_events`. Otherwise builds the payload on the
+fly via `buildGlPreview` + `buildJournalEntryPayload` so the
+validation reflects what would be sent on the next post.
+
+ */
+
+export function useGetGlEntryValidation<
+  TData = Awaited<ReturnType<typeof getGlEntryValidation>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  params?: GetGlEntryValidationParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getGlEntryValidation>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetGlEntryValidationQueryOptions(id, params, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

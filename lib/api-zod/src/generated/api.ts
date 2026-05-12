@@ -2754,6 +2754,73 @@ export const GetGlPreviewResponse = zod.object({
 });
 
 /**
+ * @summary Validate the JournalEntry payload for a report against Intuit's
+JournalEntry API requirements (https://developer.intuit.com/app/developer/qbapi/docs/api/accounting/journalentry).
+When `postingEventId` is supplied, returns the persisted payload
+from `qbo_posting_events`. Otherwise builds the payload on the
+fly via `buildGlPreview` + `buildJournalEntryPayload` so the
+validation reflects what would be sent on the next post.
+
+ */
+export const GetGlEntryValidationParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+export const GetGlEntryValidationQueryParams = zod.object({
+  postingEventId: zod.coerce.string().uuid().optional(),
+});
+
+export const GetGlEntryValidationResponse = zod
+  .object({
+    reportId: zod.string().uuid(),
+    reportDisplayCode: zod.string(),
+    journalDate: zod.string(),
+    memo: zod.string(),
+    currency: zod.string(),
+    environment: zod.enum(["sandbox", "production"]),
+    realmId: zod.string().nullish(),
+    journalId: zod.string().nullish(),
+    qboJournalId: zod.string().nullish(),
+    postingEventId: zod.string().uuid().nullish(),
+    source: zod
+      .enum(["posting_event", "live_build"])
+      .describe(
+        '\"posting_event\" = payload pulled from a persisted\nqbo_posting_events row (an actual past attempt). \"live_build\"\n= payload was reconstructed via buildGlPreview +\nbuildJournalEntryPayload because no posting attempt exists yet.\n',
+      ),
+    lines: zod.array(
+      zod.object({
+        postingType: zod.enum(["Debit", "Credit"]),
+        account: zod.string(),
+        accountId: zod.string().nullish(),
+        accountType: zod.string().nullish(),
+        entityType: zod.string().nullish(),
+        entityRefValue: zod.string().nullish(),
+        entityRefName: zod.string().nullish(),
+        amount: zod.string(),
+      }),
+    ),
+    totalDebits: zod.string(),
+    totalCredits: zod.string(),
+    balanced: zod.boolean(),
+    checks: zod.array(
+      zod
+        .object({
+          id: zod.string(),
+          label: zod.string(),
+          status: zod.enum(["pass", "warn", "fail"]),
+          detail: zod.string().nullish(),
+        })
+        .describe(
+          "A single validation check against Intuit's JournalEntry API contract\n(https:\/\/developer.intuit.com\/app\/developer\/qbapi\/docs\/api\/accounting\/journalentry).\n",
+        ),
+    ),
+    rawPayload: zod.record(zod.string(), zod.unknown()),
+  })
+  .describe(
+    'JournalEntry payload + structured validation checks for a single\nreport. Reused by the QBO admin Posting History and the Payroll\nqueue\/batches \"Validate\" affordances.\n',
+  );
+
+/**
  * @summary Post an Approved report to QuickBooks (stub)
  */
 export const PostToQuickbooksParams = zod.object({

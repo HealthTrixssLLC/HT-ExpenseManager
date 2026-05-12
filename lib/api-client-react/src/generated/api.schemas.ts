@@ -884,6 +884,112 @@ export interface GlPreviewLine {
   amount: string;
 }
 
+export type GlEntryValidationCheckStatus =
+  (typeof GlEntryValidationCheckStatus)[keyof typeof GlEntryValidationCheckStatus];
+
+export const GlEntryValidationCheckStatus = {
+  pass: "pass",
+  warn: "warn",
+  fail: "fail",
+} as const;
+
+/**
+ * A single validation check against Intuit's JournalEntry API contract
+(https://developer.intuit.com/app/developer/qbapi/docs/api/accounting/journalentry).
+
+ */
+export interface GlEntryValidationCheck {
+  id: string;
+  label: string;
+  status: GlEntryValidationCheckStatus;
+  /** @nullable */
+  detail?: string | null;
+}
+
+export type GlEntryValidationLinePostingType =
+  (typeof GlEntryValidationLinePostingType)[keyof typeof GlEntryValidationLinePostingType];
+
+export const GlEntryValidationLinePostingType = {
+  Debit: "Debit",
+  Credit: "Credit",
+} as const;
+
+export interface GlEntryValidationLine {
+  postingType: GlEntryValidationLinePostingType;
+  account: string;
+  /** @nullable */
+  accountId?: string | null;
+  /** @nullable */
+  accountType?: string | null;
+  /** @nullable */
+  entityType?: string | null;
+  /** @nullable */
+  entityRefValue?: string | null;
+  /** @nullable */
+  entityRefName?: string | null;
+  amount: string;
+}
+
+export type GlEntryValidationResultEnvironment =
+  (typeof GlEntryValidationResultEnvironment)[keyof typeof GlEntryValidationResultEnvironment];
+
+export const GlEntryValidationResultEnvironment = {
+  sandbox: "sandbox",
+  production: "production",
+} as const;
+
+/**
+ * "posting_event" = payload pulled from a persisted
+qbo_posting_events row (an actual past attempt). "live_build"
+= payload was reconstructed via buildGlPreview +
+buildJournalEntryPayload because no posting attempt exists yet.
+
+ */
+export type GlEntryValidationResultSource =
+  (typeof GlEntryValidationResultSource)[keyof typeof GlEntryValidationResultSource];
+
+export const GlEntryValidationResultSource = {
+  posting_event: "posting_event",
+  live_build: "live_build",
+} as const;
+
+export type GlEntryValidationResultRawPayload = { [key: string]: unknown };
+
+/**
+ * JournalEntry payload + structured validation checks for a single
+report. Reused by the QBO admin Posting History and the Payroll
+queue/batches "Validate" affordances.
+
+ */
+export interface GlEntryValidationResult {
+  reportId: string;
+  reportDisplayCode: string;
+  journalDate: string;
+  memo: string;
+  currency: string;
+  environment: GlEntryValidationResultEnvironment;
+  /** @nullable */
+  realmId?: string | null;
+  /** @nullable */
+  journalId?: string | null;
+  /** @nullable */
+  qboJournalId?: string | null;
+  /** @nullable */
+  postingEventId?: string | null;
+  /** "posting_event" = payload pulled from a persisted
+qbo_posting_events row (an actual past attempt). "live_build"
+= payload was reconstructed via buildGlPreview +
+buildJournalEntryPayload because no posting attempt exists yet.
+ */
+  source: GlEntryValidationResultSource;
+  lines: GlEntryValidationLine[];
+  totalDebits: string;
+  totalCredits: string;
+  balanced: boolean;
+  checks: GlEntryValidationCheck[];
+  rawPayload: GlEntryValidationResultRawPayload;
+}
+
 export interface GlPreview {
   reportId: string;
   displayCode: string;
@@ -1041,3 +1147,7 @@ export const ListReportsScope = {
   payroll: "payroll",
   all: "all",
 } as const;
+
+export type GetGlEntryValidationParams = {
+  postingEventId?: string;
+};

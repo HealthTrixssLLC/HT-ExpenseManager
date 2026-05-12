@@ -10,6 +10,7 @@ import {
   GetReportResponse as ExpenseReportResponse,
   FinanceQueueResponse,
   GetGlPreviewResponse,
+  GetGlEntryValidationResponse,
   PostToQuickbooksResponse,
 } from "@workspace/api-zod";
 import { db, expenseReportsTable } from "../lib/db";
@@ -22,7 +23,15 @@ import {
   loadReportSummaries,
 } from "../lib/reports";
 import { applyTransition, type TransitionName } from "../services/workflow";
-import { buildGlPreview, ensureConnectionRow, postReportToQbo } from "../services/qbo";
+import {
+  buildGlPreview,
+  buildLiveJournalEntryForReport,
+  ensureConnectionRow,
+  loadAccountTypeMap,
+  loadPostingEventForReport,
+  postReportToQbo,
+  validateJournalEntryPayload,
+} from "../services/qbo";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -163,6 +172,124 @@ router.get(
       return;
     }
     res.json(GetGlPreviewResponse.parse(await buildGlPreview(report)));
+  },
+);
+
+// GET /reports/:id/gl-entry-validation — validate the JournalEntry
+// payload that the system would (or did) POST to Intuit's
+// /v3/company/{realmId}/journalentry endpoint. When a postingEventId is
+// supplied the persisted payload from qbo_posting_events is returned;
+// otherwise the payload is rebuilt on the fly via buildGlPreview +
+// buildJournalEntryPayload so the validation reflects what would be
+// sent on the next post. Available to finance + accounting/system admins
+// (the latter two are members of FINANCE_ROLES) so the QBO admin
+// Posting History panel can reuse the same modal.
+router.get(
+  "/reports/:id/gl-entry-validation",
+  requireRole(...FINANCE_ROLES),
+  async (req, res): Promise<void> => {
+    const id = pathId(req, "id");
+    const orgId = req.auth!.user.orgId;
+    const report = await fetchReportOrThrow(id, orgId);
+    if (!(await canView(report, req.auth!.user))) {
+      sendProblem(res, 403, "Forbidden");
+      return;
+    }
+    const postingEventId =
+      typeof req.query["postingEventId"] === "string"
+        ? req.query["postingEventId"]
+        : undefined;
+
+    const conn = await ensureConnectionRow(orgId);
+
+    let payload: Record<string, unknown>;
+    let source: "posting_event" | "live_build";
+    let environment = conn.environment;
+    let realmId: string | null = conn.realmId ?? null;
+    let journalId: string | null = null;
+    let qboJournalId: string | null = null;
+    let resolvedPostingEventId: string | null = null;
+
+    if (postingEventId) {
+      const event = await loadPostingEventForReport({
+        postingEventId,
+        reportId: report.id,
+      });
+      if (!event) {
+        sendProblem(res, 404, "Not Found", "Posting event not found for this report.");
+        return;
+      }
+      payload = (event.payload ?? {}) as Record<string, unknown>;
+      source = "posting_event";
+      environment = event.environment;
+      realmId = event.realmId ?? null;
+      journalId = event.journalId;
+      qboJournalId = event.qboJournalId;
+      resolvedPostingEventId = event.id;
+    } else {
+      // Live-build path: run the same pre-send pipeline the poster
+      // would run (account-type resolution + Vendor attachment for
+      // AP/AR lines), so the validator's checklist matches what would
+      // actually be sent to Intuit on the next post.
+      const live = await buildLiveJournalEntryForReport(report);
+      payload = live.payload;
+      source = "live_build";
+      if (!live.enriched && live.enrichmentSkippedReason) {
+        // Surface the reason as a server-side log; the validator's own
+        // ap-ar-entity check downgrades to "warn" when account types
+        // are unknown, which is the right UX-level signal.
+        logger.info(
+          { reportId: report.id, reason: live.enrichmentSkippedReason },
+          "Live JournalEntry validation: enrichment skipped",
+        );
+      }
+    }
+
+    // The account-type cache may have been warmed by the live-build
+    // path above; re-read it after enrichment so the validator sees
+    // any freshly-fetched AccountType values.
+    const accountTypeById = await loadAccountTypeMap(orgId);
+    const validated = validateJournalEntryPayload(payload, accountTypeById);
+
+    // Pull the JournalEntry header back out of the (possibly persisted)
+    // payload so the modal header info reflects what Intuit would see —
+    // not what buildGlPreview *now* would compute (the cached payload
+    // is the source of truth for past attempts).
+    const je = (payload["JournalEntry"] ?? {}) as Record<string, unknown>;
+    const journalDate =
+      typeof je["TxnDate"] === "string" ? (je["TxnDate"] as string) : "";
+    const memo =
+      typeof je["PrivateNote"] === "string" ? (je["PrivateNote"] as string) : "";
+    const currencyRef =
+      je["CurrencyRef"] && typeof je["CurrencyRef"] === "object"
+        ? (je["CurrencyRef"] as Record<string, unknown>)
+        : {};
+    const currency =
+      typeof currencyRef["value"] === "string"
+        ? (currencyRef["value"] as string)
+        : "USD";
+
+    res.json(
+      GetGlEntryValidationResponse.parse({
+        reportId: report.id,
+        reportDisplayCode: report.displayCode,
+        journalDate,
+        memo,
+        currency,
+        environment,
+        realmId,
+        journalId,
+        qboJournalId,
+        postingEventId: resolvedPostingEventId,
+        source,
+        lines: validated.lines,
+        totalDebits: validated.totalDebits,
+        totalCredits: validated.totalCredits,
+        balanced: validated.balanced,
+        checks: validated.checks,
+        rawPayload: payload,
+      }),
+    );
   },
 );
 

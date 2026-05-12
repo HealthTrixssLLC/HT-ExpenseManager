@@ -792,8 +792,15 @@ export const HELP_TOPICS: HelpTopic[] = [
         text:
           "Only reports that are Ready for Payroll Reimbursement are eligible. Reports paid via company card never enter this queue.",
       },
+      {
+        type: "callout",
+        tone: "info",
+        title: "Validate GL entry",
+        text:
+          "Each report in the Queue and inside an expanded Batch row has a Validate GL entry action. It opens the same modal used on the QBO admin Posting History panel, showing the JournalEntry payload Healthtrix would post and a checklist of Intuit's API rules — useful when you want to spot-check an entry before posting or before marking the batch paid.",
+      },
     ],
-    related: ["mark-paid", "reconcile"],
+    related: ["mark-paid", "reconcile", "admin-qbo-posting-history"],
   },
   {
     id: "mark-paid",
@@ -1052,6 +1059,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         items: [
           "Successful rows let you click through to the report and into QuickBooks to verify the entry.",
           "Error rows surface Intuit's full error text so you can identify schema, permission, or mapping issues.",
+          "Validate GL entry — opens a modal showing the JournalEntry payload that was sent (or would be sent), with a checklist confirming Intuit's API rules: balanced debits/credits, AccountRef.value on every line, Entity attached to A/P or A/R lines, valid TxnDate + CurrencyRef, and the 4000-char PrivateNote limit. Use this when an Error row is unclear or before re-trying a sync.",
           "Use the Audit Log (Admin → Audit log, filter by category=qbo) to see who triggered each post and connection change.",
         ],
       },

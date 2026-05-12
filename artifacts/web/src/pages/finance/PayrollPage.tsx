@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import { Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -24,12 +24,33 @@ import {
 } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { CheckCircle } from "lucide-react";
+import { CheckCircle, ChevronDown, ChevronRight, ShieldCheck } from "lucide-react";
+import { GlEntryValidationDialog } from "@/components/qbo/GlEntryValidationDialog";
+
+type ValidateState = {
+  reportId: string;
+  reportLabel: string;
+};
 
 export function PayrollPage() {
   const qc = useQueryClient();
   const [selectedReports, setSelectedReports] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState("queue");
+  const [validateState, setValidateState] = useState<ValidateState | null>(null);
+  // Track which batches are expanded to show their per-report items.
+  // Each batch row gets a chevron toggle that reveals a nested table of
+  // the included reports with a Validate GL entry action per row.
+  const [expandedBatches, setExpandedBatches] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const toggleBatchExpanded = (id: string) => {
+    setExpandedBatches((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const { data: queue = [], isLoading: queueLoading } = usePayrollQueue({
     query: { queryKey: getPayrollQueueQueryKey() }
@@ -88,6 +109,14 @@ export function PayrollPage() {
 
   return (
     <div className="space-y-6" data-testid="page-payroll">
+      <GlEntryValidationDialog
+        open={validateState !== null}
+        onOpenChange={(next) => {
+          if (!next) setValidateState(null);
+        }}
+        reportId={validateState?.reportId ?? null}
+        reportLabel={validateState?.reportLabel ?? null}
+      />
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-[var(--ht-ink)]">
@@ -144,6 +173,7 @@ export function PayrollPage() {
                     <TableHead>Department</TableHead>
                     <TableHead>Approved On</TableHead>
                     <TableHead className="text-right">Total</TableHead>
+                    <TableHead className="text-right">Validate</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -174,6 +204,21 @@ export function PayrollPage() {
                       <TableCell className="text-right font-medium">
                         {formatMoney(Number(report.total))}
                       </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            setValidateState({
+                              reportId: report.id,
+                              reportLabel: report.displayCode,
+                            })
+                          }
+                          data-testid={`btn-validate-gl-queue-${report.id}`}
+                        >
+                          <ShieldCheck className="mr-1 h-3 w-3" /> Validate GL
+                        </Button>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -194,6 +239,7 @@ export function PayrollPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-8"></TableHead>
                     <TableHead>Batch ID</TableHead>
                     <TableHead>Created</TableHead>
                     <TableHead>Reports</TableHead>
@@ -203,8 +249,26 @@ export function PayrollPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {batches.map((batch) => (
-                    <TableRow key={batch.id}>
+                  {batches.map((batch) => {
+                    const expanded = expandedBatches.has(batch.id);
+                    return (
+                  <React.Fragment key={batch.id}>
+                    <TableRow>
+                      <TableCell>
+                        <button
+                          type="button"
+                          onClick={() => toggleBatchExpanded(batch.id)}
+                          className="text-[var(--ht-ink-3)] hover:text-[var(--ht-ink)]"
+                          aria-label={expanded ? "Collapse batch" : "Expand batch"}
+                          data-testid={`btn-batch-expand-${batch.id}`}
+                        >
+                          {expanded ? (
+                            <ChevronDown className="h-4 w-4" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4" />
+                          )}
+                        </button>
+                      </TableCell>
                       <TableCell className="font-mono text-sm">{batch.id}</TableCell>
                       <TableCell className="text-sm text-[var(--ht-ink-2)]">
                         {formatDateTime(batch.createdAt)}
@@ -242,7 +306,70 @@ export function PayrollPage() {
                         )}
                       </TableCell>
                     </TableRow>
-                  ))}
+                    {expanded ? (
+                      <TableRow key={`${batch.id}-items`} data-testid={`row-batch-items-${batch.id}`}>
+                        <TableCell />
+                        <TableCell colSpan={6} className="bg-[var(--ht-surface-2)]">
+                          {batch.items.length === 0 ? (
+                            <div className="py-2 text-xs text-[var(--ht-ink-3)]">
+                              No reports in this batch.
+                            </div>
+                          ) : (
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead>Report</TableHead>
+                                  <TableHead>Employee</TableHead>
+                                  <TableHead className="text-right">Amount</TableHead>
+                                  <TableHead className="text-right">Validate</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {batch.items.map((item) => (
+                                  <TableRow key={item.id}>
+                                    <TableCell>
+                                      <Link
+                                        href={`/finance/queue/${item.reportId}`}
+                                        className="text-[var(--ht-primary)] hover:underline"
+                                      >
+                                        {item.report.title}
+                                      </Link>
+                                      <div className="text-xs font-mono text-[var(--ht-ink-3)]">
+                                        {item.report.displayCode}
+                                      </div>
+                                    </TableCell>
+                                    <TableCell className="text-sm">
+                                      {item.report.employee?.fullName ?? "—"}
+                                    </TableCell>
+                                    <TableCell className="text-right font-medium">
+                                      {formatMoney(Number(item.amount))}
+                                    </TableCell>
+                                    <TableCell className="text-right">
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() =>
+                                          setValidateState({
+                                            reportId: item.reportId,
+                                            reportLabel: item.report.displayCode,
+                                          })
+                                        }
+                                        data-testid={`btn-validate-gl-batch-${item.id}`}
+                                      >
+                                        <ShieldCheck className="mr-1 h-3 w-3" /> Validate GL
+                                      </Button>
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ) : null}
+                  </React.Fragment>
+                    );
+                  })}
                 </TableBody>
               </Table>
             )}

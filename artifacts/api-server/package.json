@@ -16,7 +16,8 @@
     "test:finance-post-qbo": "tsx ./scripts/test-finance-post-qbo.ts",
     "test:system-reset": "tsx ./scripts/test-system-reset.ts",
     "test:tag-permissions": "tsx ./scripts/test-tag-permissions.ts",
-    "test": "pnpm run test:encryption && pnpm run test:intuit && pnpm run test:qbo-redirect && pnpm run test:qbo-oauth-start && pnpm run test:qbo-services && pnpm run test:finance-post-qbo && pnpm run test:system-reset && pnpm run test:tag-permissions",
+    "test:gl-entry-validation": "tsx ./scripts/test-gl-entry-validation.ts",
+    "test": "pnpm run test:encryption && pnpm run test:intuit && pnpm run test:qbo-redirect && pnpm run test:qbo-oauth-start && pnpm run test:qbo-services && pnpm run test:finance-post-qbo && pnpm run test:system-reset && pnpm run test:tag-permissions && pnpm run test:gl-entry-validation",
     "seed": "pnpm --filter @workspace/scripts run seed",
     "smoke": "pnpm --filter @workspace/scripts run smoke"
   },

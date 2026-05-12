@@ -1662,6 +1662,574 @@ export function buildJournalEntryPayload(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Live JournalEntry preview (used by validation, mirrors poster pipeline)
+// ---------------------------------------------------------------------------
+//
+// Builds the exact JournalEntry payload that postReportToQboReal would
+// send to Intuit on the next attempt for `report`, running the same
+// pre-send enrichment steps:
+//   1. autoResolveAndPersistDefaultPayableAccount (if missing)
+//   2. buildGlPreview + listTagsForReport
+//   3. ensureAccountTypesForLines (cache, then live lookup if needed)
+//   4. resolveSubmitterVendor + lineRequiresEntity attachment
+//
+// Does not call postJournalEntry and never persists qbo_posting_events
+// failure rows. It can still write the same persistent side effects the
+// poster's pre-send pipeline produces — namely
+// autoResolveAndPersistDefaultPayableAccount (sets a default A/P account
+// on the QBO connection when missing), refreshOrgTokensIfNeeded (rotates
+// stored OAuth tokens when near expiry), warming the AccountType cache
+// via ensureAccountTypesForLines, and caching a resolved Vendor row on
+// first lookup. These are all idempotent and exactly what the next post
+// would do anyway, so running validation never diverges state from a
+// subsequent real post. Returns whatever payload would otherwise be sent
+// (even when enrichment is skipped because the org isn't real-connected
+// or live lookup failed) so the validator can flag the resulting issue.
+// Keeping this in one place means /reports/:id/gl-entry-validation and
+// the poster stay in sync — the modal won't claim "ap-ar-entity: fail"
+// for a payload that would actually post fine after enrichment, and
+// won't claim "ap-ar-entity: pass" for a payload that the poster would
+// fail to enrich.
+
+export type LiveJournalEntryPreview = {
+  payload: Record<string, unknown>;
+  /** Whether the live-mode enrichment pipeline ran end to end. */
+  enriched: boolean;
+  /** When `enriched` is false, why we skipped (for the validator's UI). */
+  enrichmentSkippedReason: string | null;
+};
+
+export async function buildLiveJournalEntryForReport(
+  report: ExpenseReport,
+  options: { fetchFn?: typeof fetch } = {},
+): Promise<LiveJournalEntryPreview> {
+  let conn = await ensureConnectionRow(report.orgId);
+
+  // Step 1: auto-resolve a default payable account when missing — same as
+  // postReportToQboReal does. This avoids the "AccountRef.value missing"
+  // false positive on freshly-connected orgs.
+  if (!conn.defaultPayableAccountId && hasRealCredentials(conn)) {
+    const resolved = await autoResolveAndPersistDefaultPayableAccount({
+      orgId: report.orgId,
+      ...(options.fetchFn ? { fetchFn: options.fetchFn } : {}),
+    });
+    if (resolved) {
+      conn = {
+        ...conn,
+        defaultPayableAccountId: resolved.qboAccountId,
+        defaultPayableAccountName: resolved.name,
+      };
+    }
+  }
+
+  const preview = await buildGlPreview(report);
+  const tags = await listTagsForReport(report.id);
+  const tagNames = tags.map((t) => t.name);
+
+  // Skip enrichment for stub-mode / non-real-connected orgs. The
+  // validator surfaces ap-ar-entity as "warn" when account types are
+  // unknown (which is the correct read for stub mode — there's no real
+  // QBO behind it).
+  if (!isRealConnected(conn)) {
+    return {
+      payload: buildJournalEntryPayload(preview, tagNames),
+      enriched: false,
+      enrichmentSkippedReason:
+        "QuickBooks is not real-connected for this org; live AccountType + Vendor enrichment skipped.",
+    };
+  }
+
+  // Step 2: refresh tokens if near-expired (poster does this).
+  let liveConn: QboConnection;
+  try {
+    const fresh = await refreshOrgTokensIfNeeded({
+      orgId: report.orgId,
+      ...(options.fetchFn ? { fetchFn: options.fetchFn } : {}),
+    });
+    liveConn = fresh.accessTokenEncrypted ? fresh : conn;
+  } catch (err) {
+    return {
+      payload: buildJournalEntryPayload(preview, tagNames),
+      enriched: false,
+      enrichmentSkippedReason: `Token refresh failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    };
+  }
+  if (
+    !liveConn.accessTokenEncrypted ||
+    !liveConn.refreshTokenEncrypted ||
+    !liveConn.clientIdEncrypted ||
+    !liveConn.clientSecretEncrypted ||
+    !liveConn.realmId
+  ) {
+    return {
+      payload: buildJournalEntryPayload(preview, tagNames),
+      enriched: false,
+      enrichmentSkippedReason:
+        "QuickBooks connection is incomplete; reconnect required.",
+    };
+  }
+
+  const client = createIntuitAccountingClient({
+    environment: liveConn.environment,
+    clientId: decryptString(liveConn.clientIdEncrypted),
+    clientSecret: decryptString(liveConn.clientSecretEncrypted),
+    realmId: liveConn.realmId,
+    accessToken: decryptString(liveConn.accessTokenEncrypted),
+    refreshToken: decryptString(liveConn.refreshTokenEncrypted),
+    ...(options.fetchFn ? { fetchFn: options.fetchFn } : {}),
+  });
+
+  // Step 3: ensure AccountType for every line (cache miss → live query).
+  let accountTypeResult: Awaited<ReturnType<typeof ensureAccountTypesForLines>>;
+  try {
+    accountTypeResult = await ensureAccountTypesForLines({
+      orgId: report.orgId,
+      client,
+      lines: [...preview.debits, ...preview.credits],
+    });
+  } catch (err) {
+    return {
+      payload: buildJournalEntryPayload(preview, tagNames),
+      enriched: false,
+      enrichmentSkippedReason: `Account-type lookup failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    };
+  }
+  if (accountTypeResult.unresolvedAccountIds.length > 0) {
+    return {
+      payload: buildJournalEntryPayload(preview, tagNames),
+      enriched: false,
+      enrichmentSkippedReason:
+        `Could not resolve AccountType for: ${accountTypeResult.unresolvedAccountIds.join(", ")}.` +
+        (accountTypeResult.liveLookupError
+          ? ` Live lookup failed: ${accountTypeResult.liveLookupError.message}.`
+          : ""),
+    };
+  }
+  // Re-read the cache after enrichment so subsequent line.accountType
+  // reads pick up freshly-fetched values.
+  const accountTypeById = await loadAccountTypeMap(report.orgId);
+  const fillType = (line: GlPreviewLine): GlPreviewLine =>
+    line.accountId && !line.accountType
+      ? { ...line, accountType: accountTypeById.get(line.accountId) ?? null }
+      : line;
+  preview.debits = preview.debits.map(fillType);
+  preview.credits = preview.credits.map(fillType);
+
+  // Step 4: attach a Vendor Entity to AP/AR lines (same rule the poster
+  // uses via lineRequiresEntity). We don't *create* a Vendor on a
+  // read-only path — if lookup succeeds we attach, otherwise we surface
+  // the failure to the validator.
+  const entityRequired =
+    preview.debits.some(lineRequiresEntity) ||
+    preview.credits.some(lineRequiresEntity);
+  if (entityRequired) {
+    try {
+      const vendor = await resolveSubmitterVendor({
+        orgId: report.orgId,
+        userId: report.employeeId,
+        client,
+      });
+      const attach = (line: GlPreviewLine): GlPreviewLine =>
+        lineRequiresEntity(line)
+          ? {
+              ...line,
+              entity: {
+                type: "Vendor",
+                refValue: vendor.qboVendorId,
+                refName: vendor.displayName,
+              },
+            }
+          : line;
+      preview.debits = preview.debits.map(attach);
+      preview.credits = preview.credits.map(attach);
+    } catch (err) {
+      return {
+        payload: buildJournalEntryPayload(preview, tagNames),
+        enriched: false,
+        enrichmentSkippedReason: `Vendor resolution for AP/AR lines failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      };
+    }
+  }
+
+  return {
+    payload: buildJournalEntryPayload(preview, tagNames),
+    enriched: true,
+    enrichmentSkippedReason: null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// JournalEntry payload validation
+// ---------------------------------------------------------------------------
+//
+// All checks below trace back to Intuit's JournalEntry endpoint contract:
+//   https://developer.intuit.com/app/developer/qbapi/docs/api/accounting/journalentry
+//
+// They mirror the rules enforced by the posting code path
+// (postReportToQboReal): debits == credits, AccountRef.value required on
+// every line, Entity required on A/P and A/R lines, PrivateNote (memo)
+// limit, valid TxnDate, CurrencyRef, and at least one of each posting
+// type. Keeping them in one place means the Validate UI surfaces the
+// exact same rules the poster enforces.
+
+export type GlEntryValidationCheckStatus = "pass" | "warn" | "fail";
+
+export type GlEntryValidationCheck = {
+  id: string;
+  label: string;
+  status: GlEntryValidationCheckStatus;
+  detail: string | null;
+};
+
+export type GlEntryValidationLine = {
+  postingType: "Debit" | "Credit";
+  account: string;
+  accountId: string | null;
+  accountType: string | null;
+  entityType: string | null;
+  entityRefValue: string | null;
+  entityRefName: string | null;
+  amount: string;
+};
+
+/**
+ * Per Intuit, PrivateNote (which we use for the memo + tag suffix) is
+ * limited to 4000 characters.
+ */
+export const QBO_PRIVATE_NOTE_MAX_LENGTH = 4000;
+
+/**
+ * The "Uncategorized" placeholder name we used to fall back to when no
+ * GL mapping was set up. Intuit's API matches AccountRef by `value`
+ * (Id), not name, so any line that ends up with this fallback shipped
+ * without an AccountRef.value and is rejected by Intuit.
+ */
+const FALLBACK_ACCOUNT_PLACEHOLDERS = new Set([FALLBACK_ACCOUNT, "Uncategorized"]);
+
+function asRecord(v: unknown): Record<string, unknown> | null {
+  return v && typeof v === "object" && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : null;
+}
+
+function asString(v: unknown): string | null {
+  return typeof v === "string" ? v : null;
+}
+
+function isValidIsoDate(s: string): boolean {
+  // Intuit's TxnDate is strict YYYY-MM-DD. Reject calendar-invalid
+  // dates (e.g. 2025-02-30, 2025-13-01) by re-serialising and
+  // comparing — `Date.parse` alone overflows silently.
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) return false;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const d = new Date(Date.UTC(year, month - 1, day));
+  return (
+    d.getUTCFullYear() === year &&
+    d.getUTCMonth() === month - 1 &&
+    d.getUTCDate() === day
+  );
+}
+
+function centsFromDecimal(s: string): number {
+  const n = Number(s);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n * 100);
+}
+
+/**
+ * Extract a structured Line[] view from a stored or freshly-built
+ * JournalEntry payload. Tolerant of partially-malformed payloads — any
+ * field we can't read is reported as null and surfaces as a fail/warn
+ * in the validation checks instead of crashing the endpoint.
+ */
+export function extractValidationLines(
+  payload: Record<string, unknown>,
+  accountTypeById?: Map<string, string | null>,
+): GlEntryValidationLine[] {
+  const je = asRecord(payload["JournalEntry"]);
+  if (!je) return [];
+  const lineList = Array.isArray(je["Line"]) ? je["Line"] : [];
+  const out: GlEntryValidationLine[] = [];
+  for (const raw of lineList) {
+    const line = asRecord(raw);
+    if (!line) continue;
+    const detail = asRecord(line["JournalEntryLineDetail"]);
+    if (!detail) continue;
+    const postingTypeRaw = asString(detail["PostingType"]);
+    const postingType =
+      postingTypeRaw === "Debit" || postingTypeRaw === "Credit"
+        ? postingTypeRaw
+        : null;
+    if (!postingType) continue;
+    const accountRef = asRecord(detail["AccountRef"]);
+    const accountId = accountRef ? asString(accountRef["value"]) : null;
+    const accountName =
+      (accountRef ? asString(accountRef["name"]) : null) ?? "(unknown account)";
+    const entity = asRecord(detail["Entity"]);
+    const entityRef = entity ? asRecord(entity["EntityRef"]) : null;
+    const entityType = entity ? asString(entity["Type"]) : null;
+    const entityRefValue = entityRef ? asString(entityRef["value"]) : null;
+    const entityRefName = entityRef ? asString(entityRef["name"]) : null;
+    const amountRaw = line["Amount"];
+    const amountNum =
+      typeof amountRaw === "number"
+        ? amountRaw
+        : typeof amountRaw === "string"
+          ? Number(amountRaw)
+          : NaN;
+    const amount = Number.isFinite(amountNum)
+      ? centsToDecimal(Math.round(amountNum * 100))
+      : "0.00";
+    out.push({
+      postingType,
+      account: accountName,
+      accountId,
+      accountType:
+        accountId && accountTypeById
+          ? accountTypeById.get(accountId) ?? null
+          : null,
+      entityType,
+      entityRefValue,
+      entityRefName,
+      amount,
+    });
+  }
+  return out;
+}
+
+export type ValidatedJournalEntry = {
+  lines: GlEntryValidationLine[];
+  totalDebits: string;
+  totalCredits: string;
+  balanced: boolean;
+  checks: GlEntryValidationCheck[];
+};
+
+export function validateJournalEntryPayload(
+  payload: Record<string, unknown>,
+  accountTypeById?: Map<string, string | null>,
+): ValidatedJournalEntry {
+  const je = asRecord(payload["JournalEntry"]) ?? {};
+  const lines = extractValidationLines(payload, accountTypeById);
+  const debits = lines.filter((l) => l.postingType === "Debit");
+  const credits = lines.filter((l) => l.postingType === "Credit");
+  const debitCents = debits.reduce(
+    (acc, l) => acc + centsFromDecimal(l.amount),
+    0,
+  );
+  const creditCents = credits.reduce(
+    (acc, l) => acc + centsFromDecimal(l.amount),
+    0,
+  );
+  const balanced = debitCents === creditCents;
+  const checks: GlEntryValidationCheck[] = [];
+
+  // 1. At least one debit AND one credit. Intuit requires a JournalEntry
+  //    to have at least two lines, with at least one Debit and one Credit.
+  if (debits.length === 0 || credits.length === 0) {
+    checks.push({
+      id: "lines-present",
+      label: "At least one Debit line and one Credit line",
+      status: "fail",
+      detail: `Found ${debits.length} debit line(s) and ${credits.length} credit line(s). Intuit rejects a JournalEntry that doesn't have at least one of each.`,
+    });
+  } else {
+    checks.push({
+      id: "lines-present",
+      label: "At least one Debit line and one Credit line",
+      status: "pass",
+      detail: `${debits.length} debit line(s) and ${credits.length} credit line(s).`,
+    });
+  }
+
+  // 2. Debits == Credits (balanced JournalEntry). Per Intuit, the sum of
+  //    all Debit amounts must equal the sum of all Credit amounts; an
+  //    unbalanced entry is rejected.
+  if (balanced) {
+    checks.push({
+      id: "balanced",
+      label: "Debits equal credits (balanced JournalEntry)",
+      status: "pass",
+      detail: `Debits ${centsToDecimal(debitCents)} = Credits ${centsToDecimal(creditCents)}.`,
+    });
+  } else {
+    checks.push({
+      id: "balanced",
+      label: "Debits equal credits (balanced JournalEntry)",
+      status: "fail",
+      detail: `Debits ${centsToDecimal(debitCents)} ≠ Credits ${centsToDecimal(creditCents)} (variance ${centsToDecimal(debitCents - creditCents)}).`,
+    });
+  }
+
+  // 3. Every line has an AccountRef value. Intuit matches AccountRef by
+  //    `value` (the durable Account Id); a line without it (or with the
+  //    "Uncategorized" placeholder name and no Id) is rejected.
+  const missingAccountId = lines.filter(
+    (l) => !l.accountId || FALLBACK_ACCOUNT_PLACEHOLDERS.has(l.account),
+  );
+  if (missingAccountId.length === 0) {
+    checks.push({
+      id: "account-ref",
+      label: "Every line has an AccountRef value (no fallback accounts)",
+      status: "pass",
+      detail: null,
+    });
+  } else {
+    const summary = missingAccountId
+      .map(
+        (l) =>
+          `${l.postingType} "${l.account}" (${centsToDecimal(centsFromDecimal(l.amount))})`,
+      )
+      .join("; ");
+    checks.push({
+      id: "account-ref",
+      label: "Every line has an AccountRef value (no fallback accounts)",
+      status: "fail",
+      detail: `Missing AccountRef.value on ${missingAccountId.length} line(s): ${summary}. Link the affected GL mapping to a real Chart-of-Accounts entry, or set a default payable account in QBO admin.`,
+    });
+  }
+
+  // 4. Every AP/AR line carries an Entity reference. Intuit's
+  //    JournalEntryLineDetail.Entity is required on every line whose
+  //    AccountRef targets an Accounts Payable or Accounts Receivable
+  //    account; sending it without an Entity returns the generic
+  //    "Required param missing" Fault and the entire JE is rejected.
+  const apArLines = lines.filter(
+    (l) => l.accountType && ENTITY_REQUIRED_ACCOUNT_TYPES.has(l.accountType),
+  );
+  const apArMissingEntity = apArLines.filter(
+    (l) => !l.entityRefValue || !l.entityType,
+  );
+  if (apArLines.length === 0) {
+    // No AP/AR lines after AccountType resolution. We can't say the
+    // contract is "passed" because we don't know whether the resolution
+    // is complete; use a warn so the UI doesn't claim a pass it can't
+    // back up. (This is the typical state for a freshly-built payload
+    // that hasn't been enriched by ensureAccountTypesForLines yet.)
+    if (lines.length > 0 && lines.every((l) => !l.accountType)) {
+      checks.push({
+        id: "ap-ar-entity",
+        label: "Every A/P or A/R line carries an Entity reference",
+        status: "warn",
+        detail:
+          "AccountType is unknown for these lines locally — the poster will resolve it from QuickBooks (and attach a Vendor Entity to any A/P or A/R line) before sending the JournalEntry.",
+      });
+    } else {
+      checks.push({
+        id: "ap-ar-entity",
+        label: "Every A/P or A/R line carries an Entity reference",
+        status: "pass",
+        detail: "No Accounts Payable or Accounts Receivable lines on this entry.",
+      });
+    }
+  } else if (apArMissingEntity.length === 0) {
+    checks.push({
+      id: "ap-ar-entity",
+      label: "Every A/P or A/R line carries an Entity reference",
+      status: "pass",
+      detail: `${apArLines.length} A/P or A/R line(s); each carries a Vendor or Employee EntityRef.`,
+    });
+  } else {
+    const summary = apArMissingEntity
+      .map((l) => `${l.postingType} "${l.account}" [${l.accountType}]`)
+      .join("; ");
+    checks.push({
+      id: "ap-ar-entity",
+      label: "Every A/P or A/R line carries an Entity reference",
+      status: "fail",
+      detail: `Missing Entity reference on ${apArMissingEntity.length} A/P or A/R line(s): ${summary}. The poster attaches the report submitter's Vendor at post time; this gap means that step has not run yet (or could not resolve a Vendor).`,
+    });
+  }
+
+  // 5. Memo (PrivateNote) is present and within Intuit's 4000-char limit.
+  const privateNote = asString(je["PrivateNote"]) ?? "";
+  if (!privateNote.trim()) {
+    checks.push({
+      id: "memo-present",
+      label: "Memo (PrivateNote) is present",
+      status: "warn",
+      detail: "No PrivateNote on the JournalEntry. QuickBooks will accept the post but reviewers won't see the report context inside QBO.",
+    });
+  } else if (privateNote.length > QBO_PRIVATE_NOTE_MAX_LENGTH) {
+    checks.push({
+      id: "memo-present",
+      label: `Memo (PrivateNote) is within Intuit's ${QBO_PRIVATE_NOTE_MAX_LENGTH}-char limit`,
+      status: "fail",
+      detail: `PrivateNote is ${privateNote.length} characters; Intuit rejects values longer than ${QBO_PRIVATE_NOTE_MAX_LENGTH}.`,
+    });
+  } else {
+    checks.push({
+      id: "memo-present",
+      label: `Memo (PrivateNote) is present and within Intuit's ${QBO_PRIVATE_NOTE_MAX_LENGTH}-char limit`,
+      status: "pass",
+      detail: `${privateNote.length}/${QBO_PRIVATE_NOTE_MAX_LENGTH} characters.`,
+    });
+  }
+
+  // 6. TxnDate (JournalDate) is a valid ISO date.
+  const txnDate = asString(je["TxnDate"]) ?? "";
+  if (!txnDate) {
+    checks.push({
+      id: "journal-date",
+      label: "JournalDate (TxnDate) is set",
+      status: "fail",
+      detail: "No TxnDate on the JournalEntry. Intuit requires a valid ISO date.",
+    });
+  } else if (!isValidIsoDate(txnDate)) {
+    checks.push({
+      id: "journal-date",
+      label: "JournalDate (TxnDate) is a valid ISO date",
+      status: "fail",
+      detail: `"${txnDate}" is not a valid ISO date (expected YYYY-MM-DD).`,
+    });
+  } else {
+    checks.push({
+      id: "journal-date",
+      label: "JournalDate (TxnDate) is a valid ISO date",
+      status: "pass",
+      detail: txnDate,
+    });
+  }
+
+  // 7. CurrencyRef is set. Intuit requires CurrencyRef.value on the JE.
+  const currencyRef = asRecord(je["CurrencyRef"]);
+  const currencyValue = currencyRef ? asString(currencyRef["value"]) : null;
+  if (!currencyValue) {
+    checks.push({
+      id: "currency",
+      label: "CurrencyRef is set (USD by default)",
+      status: "fail",
+      detail: "Missing CurrencyRef.value on the JournalEntry.",
+    });
+  } else {
+    checks.push({
+      id: "currency",
+      label: "CurrencyRef is set (USD by default)",
+      status: "pass",
+      detail: currencyValue,
+    });
+  }
+
+  return {
+    lines,
+    totalDebits: centsToDecimal(debitCents),
+    totalCredits: centsToDecimal(creditCents),
+    balanced,
+    checks,
+  };
+}
+
 function hashFailureBucket(s: string): number {
   let h = 0;
   for (const ch of s) {
@@ -2376,6 +2944,50 @@ export async function listPostingHistory(args: {
 // ---------------------------------------------------------------------------
 // Loose query helpers used by routes.
 // ---------------------------------------------------------------------------
+
+/**
+ * Fetch a single posting event by id, scoped to the report (caller must
+ * have already authorized access to the report). Used by the GL entry
+ * validation endpoint to surface a specific historical attempt.
+ */
+export async function loadPostingEventForReport(args: {
+  postingEventId: string;
+  reportId: string;
+}): Promise<typeof qboPostingEventsTable.$inferSelect | null> {
+  const rows = await db
+    .select()
+    .from(qboPostingEventsTable)
+    .where(
+      and(
+        eq(qboPostingEventsTable.id, args.postingEventId),
+        eq(qboPostingEventsTable.reportId, args.reportId),
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/**
+ * Build a Map<accountId, accountType|null> from the org's
+ * `qbo_accounts_cache`. Used by validateJournalEntryPayload to enrich
+ * lines extracted from a raw payload (which only carries AccountRef.value
+ * + name) with the AccountType needed to evaluate the A/P-or-A/R Entity
+ * rule. We do not force-refresh from QBO here — validation is read-only
+ * and must work even if the cache is empty (the related check downgrades
+ * to a "warn" in that case).
+ */
+export async function loadAccountTypeMap(
+  orgId: string,
+): Promise<Map<string, string | null>> {
+  const rows = await db
+    .select({
+      qboAccountId: qboAccountsCacheTable.qboAccountId,
+      accountType: qboAccountsCacheTable.accountType,
+    })
+    .from(qboAccountsCacheTable)
+    .where(eq(qboAccountsCacheTable.orgId, orgId));
+  return new Map(rows.map((r) => [r.qboAccountId, r.accountType] as const));
+}
 
 export async function loadLastPostingEvent(
   reportId: string,

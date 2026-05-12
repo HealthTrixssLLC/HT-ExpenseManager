@@ -1339,6 +1339,34 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/GlPreview" }
 
+  /reports/{id}/gl-entry-validation:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getGlEntryValidation
+      tags: [finance]
+      summary: |
+        Validate the JournalEntry payload for a report against Intuit's
+        JournalEntry API requirements (https://developer.intuit.com/app/developer/qbapi/docs/api/accounting/journalentry).
+        When `postingEventId` is supplied, returns the persisted payload
+        from `qbo_posting_events`. Otherwise builds the payload on the
+        fly via `buildGlPreview` + `buildJournalEntryPayload` so the
+        validation reflects what would be sent on the next post.
+      parameters:
+        - in: query
+          name: postingEventId
+          required: false
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GlEntryValidationResult" }
+
   /reports/{id}/post-to-qbo:
     parameters:
       - in: path
@@ -2404,6 +2432,90 @@ components:
         category: { type: string }
         amount: { type: string }
       required: [account, category, amount]
+
+    GlEntryValidationCheck:
+      type: object
+      description: |
+        A single validation check against Intuit's JournalEntry API contract
+        (https://developer.intuit.com/app/developer/qbapi/docs/api/accounting/journalentry).
+      properties:
+        id: { type: string }
+        label: { type: string }
+        status:
+          type: string
+          enum: [pass, warn, fail]
+        detail:
+          type: ["string", "null"]
+      required: [id, label, status]
+
+    GlEntryValidationLine:
+      type: object
+      properties:
+        postingType:
+          type: string
+          enum: [Debit, Credit]
+        account: { type: string }
+        accountId: { type: ["string", "null"] }
+        accountType: { type: ["string", "null"] }
+        entityType: { type: ["string", "null"] }
+        entityRefValue: { type: ["string", "null"] }
+        entityRefName: { type: ["string", "null"] }
+        amount: { type: string }
+      required: [postingType, account, amount]
+
+    GlEntryValidationResult:
+      type: object
+      description: |
+        JournalEntry payload + structured validation checks for a single
+        report. Reused by the QBO admin Posting History and the Payroll
+        queue/batches "Validate" affordances.
+      properties:
+        reportId: { type: string, format: uuid }
+        reportDisplayCode: { type: string }
+        journalDate: { type: string }
+        memo: { type: string }
+        currency: { type: string }
+        environment:
+          type: string
+          enum: [sandbox, production]
+        realmId: { type: ["string", "null"] }
+        journalId: { type: ["string", "null"] }
+        qboJournalId: { type: ["string", "null"] }
+        postingEventId: { type: ["string", "null"], format: uuid }
+        source:
+          type: string
+          enum: [posting_event, live_build]
+          description: |
+            "posting_event" = payload pulled from a persisted
+            qbo_posting_events row (an actual past attempt). "live_build"
+            = payload was reconstructed via buildGlPreview +
+            buildJournalEntryPayload because no posting attempt exists yet.
+        lines:
+          type: array
+          items: { $ref: "#/components/schemas/GlEntryValidationLine" }
+        totalDebits: { type: string }
+        totalCredits: { type: string }
+        balanced: { type: boolean }
+        checks:
+          type: array
+          items: { $ref: "#/components/schemas/GlEntryValidationCheck" }
+        rawPayload:
+          type: object
+          additionalProperties: true
+      required:
+        - reportId
+        - reportDisplayCode
+        - journalDate
+        - memo
+        - currency
+        - environment
+        - source
+        - lines
+        - totalDebits
+        - totalCredits
+        - balanced
+        - checks
+        - rawPayload
 
     GlPreview:
       type: object

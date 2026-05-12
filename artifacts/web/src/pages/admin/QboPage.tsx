@@ -55,6 +55,7 @@ import {
   Zap,
 } from "lucide-react";
 import { formatDateTime } from "@/lib/format";
+import { GlEntryValidationDialog } from "@/components/qbo/GlEntryValidationDialog";
 
 // Compute the OAuth redirect URI we will register on Intuit. Mirrors
 // resolveQboRedirectUri on the server — same algorithm so the value shown to
@@ -927,10 +928,27 @@ function PostingHistoryCard() {
     { limit: 25 },
     { query: { queryKey: getAdminListQboPostingHistoryQueryKey({ limit: 25 }) } },
   );
+  // Validate-GL modal state. We track both the report and posting event
+  // ids so the modal can fetch the persisted payload for that specific
+  // attempt (rather than rebuilding live).
+  const [validateState, setValidateState] = useState<{
+    reportId: string;
+    postingEventId: string;
+    reportLabel: string;
+  } | null>(null);
 
   return (
     <HtCard data-testid="card-qbo-posting-history">
       <HtCardHeader title="Posting history" right={<HelpLink topicId="admin-qbo-posting-history" />} />
+      <GlEntryValidationDialog
+        open={validateState !== null}
+        onOpenChange={(next) => {
+          if (!next) setValidateState(null);
+        }}
+        reportId={validateState?.reportId ?? null}
+        postingEventId={validateState?.postingEventId ?? null}
+        reportLabel={validateState?.reportLabel ?? null}
+      />
       {isLoading ? (
         <div className="p-6 text-sm text-[var(--ht-ink-3)]">Loading…</div>
       ) : rows.length === 0 ? (
@@ -949,6 +967,7 @@ function PostingHistoryCard() {
               <TableHead>Attachments</TableHead>
               <TableHead>Tags</TableHead>
               <TableHead>Detail</TableHead>
+              <TableHead>Validate</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -1009,6 +1028,22 @@ function PostingHistoryCard() {
                 </TableCell>
                 <TableCell className="max-w-xs truncate text-xs text-[var(--ht-ink-3)]">
                   {r.errorMessage ?? r.journalId}
+                </TableCell>
+                <TableCell>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      setValidateState({
+                        reportId: r.reportId,
+                        postingEventId: r.id,
+                        reportLabel: r.reportDisplayCode,
+                      })
+                    }
+                    data-testid={`btn-validate-gl-${r.id}`}
+                  >
+                    <ShieldCheck className="mr-1 h-3 w-3" /> Validate GL entry
+                  </Button>
                 </TableCell>
               </TableRow>
             ))}
