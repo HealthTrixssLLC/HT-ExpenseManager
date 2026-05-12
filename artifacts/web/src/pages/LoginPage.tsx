@@ -305,6 +305,14 @@ function EulaAcknowledgement({
         >
           Open page
         </Link>
+        {" · "}
+        <Link
+          href="/legal/privacy"
+          data-testid="login-privacy-page-link"
+          style={{ color: "var(--ht-ink-3)" }}
+        >
+          Privacy Policy
+        </Link>
         .
       </span>
     </div>

@@ -11,6 +11,7 @@ import { AppShell, ProtectedRoute } from "@/components/AppShell";
 import { LoginPage } from "@/pages/LoginPage";
 import { ForbiddenPage } from "@/pages/ForbiddenPage";
 import { EulaPage } from "@/pages/legal/EulaPage";
+import { PrivacyPage } from "@/pages/legal/PrivacyPage";
 import NotFound from "@/pages/not-found";
 import {
   roleCanFinanceReview,
@@ -186,6 +187,7 @@ function AuthedRoutes() {
 
         {/* Legal */}
         <Route path="/legal/eula" component={EulaPage} />
+        <Route path="/legal/privacy" component={PrivacyPage} />
 
         <Route path="/forbidden" component={ForbiddenPage} />
         <Route component={NotFound} />
@@ -206,6 +208,7 @@ function Root() {
     return (
       <Switch>
         <Route path="/legal/eula" component={EulaPage} />
+        <Route path="/legal/privacy" component={PrivacyPage} />
         <Route component={LoginPage} />
       </Switch>
     );
