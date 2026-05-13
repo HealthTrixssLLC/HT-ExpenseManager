@@ -201,8 +201,85 @@ export function QboPage() {
         )}
       </div>
 
+      <ProductionAppUrlsCard />
+
       <PostingHistoryCard />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Production app URLs — read-only values to paste into Intuit's developer
+// dashboard "Add your app's host domain, launch URL, disconnect URL, and
+// connect/reconnect URL" form for the production app listing.
+// ---------------------------------------------------------------------------
+function ProductionAppUrlsCard() {
+  const PROD_HOST = "HT-expense-management.replit.app";
+  const PROD_BASE = `https://${PROD_HOST}`;
+  const items: { id: string; label: string; value: string }[] = [
+    { id: "host", label: "Host domain", value: PROD_HOST },
+    { id: "launch", label: "Launch URL", value: `${PROD_BASE}/web/admin/qbo` },
+    {
+      id: "disconnect",
+      label: "Disconnect URL",
+      value: `${PROD_BASE}/api/admin/qbo-connection/oauth/callback`,
+    },
+    {
+      id: "connect",
+      label: "Connect/Reconnect URL",
+      value: `${PROD_BASE}/api/admin/qbo-connection/oauth/callback`,
+    },
+  ];
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const handleCopy = async (id: string, value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId((c) => (c === id ? null : c)), 1500);
+    } catch {
+      /* clipboard blocked — admin can still triple-click to select */
+    }
+  };
+
+  return (
+    <HtCard data-testid="card-qbo-production-urls">
+      <HtCardHeader title="Production app URLs" />
+      <div className="space-y-4 p-6">
+        <p className="text-sm text-[var(--ht-ink-3)]">
+          Paste these values into Intuit's developer dashboard form: "Add your
+          app's host domain, launch URL, disconnect URL, and connect/reconnect
+          URL" for the production app listing.
+        </p>
+        <ul className="space-y-3">
+          {items.map((item) => (
+            <li key={item.id} className="space-y-1">
+              <p className="text-xs font-medium text-[var(--ht-ink-2)]">
+                {item.label}
+              </p>
+              <div className="flex items-stretch gap-2">
+                <code
+                  className="flex-1 break-all rounded bg-white p-2 font-mono text-[11px] text-[var(--ht-ink)] border border-[var(--ht-border)]"
+                  data-testid={`text-prod-url-${item.id}`}
+                >
+                  {item.value}
+                </code>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleCopy(item.id, item.value)}
+                  data-testid={`btn-copy-prod-url-${item.id}`}
+                >
+                  <Copy className="mr-1 h-3 w-3" />
+                  {copiedId === item.id ? "Copied!" : "Copy"}
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </HtCard>
   );
 }
 
