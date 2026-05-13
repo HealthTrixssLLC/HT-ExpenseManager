@@ -97,6 +97,11 @@ export function QboPage() {
     text: string;
   } | null>(null);
 
+  // Preflight result is owned by the page so the always-visible OAuth
+  // redirect URI card can prefer the server-resolved value when available,
+  // while CredentialsCard still drives the "Test configuration" button.
+  const [preflight, setPreflight] = useState<QboPreflightResult | null>(null);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const status = params.get("qboStatus");
@@ -184,6 +189,8 @@ export function QboPage() {
         </div>
       ) : null}
 
+      <OauthRedirectUriCard preflight={preflight} />
+
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         {isLoading || !connection ? (
           <HtCard>
@@ -193,7 +200,12 @@ export function QboPage() {
           </HtCard>
         ) : (
           <>
-            <CredentialsCard conn={connection} onSaved={refetchConn} />
+            <CredentialsCard
+              conn={connection}
+              onSaved={refetchConn}
+              preflight={preflight}
+              onPreflight={setPreflight}
+            />
             <ConnectionCard conn={connection} onChanged={refetchConn} />
             <HealthCard conn={connection} />
             <PostingPreferencesCard conn={connection} onSaved={refetchConn} />
@@ -205,6 +217,64 @@ export function QboPage() {
 
       <PostingHistoryCard />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// OAuth redirect URI — always visible and copyable, regardless of connection
+// load state, stored credentials, or environment selector. Prefers the
+// server-resolved value (from the most recent preflight) so the displayed
+// string matches what the API actually sends to Intuit; falls back to the
+// browser-computed value when no preflight has been run yet.
+// ---------------------------------------------------------------------------
+function OauthRedirectUriCard({
+  preflight,
+}: {
+  preflight: QboPreflightResult | null;
+}) {
+  const [copyState, setCopyState] = useState<"idle" | "copied">("idle");
+  const browserRedirectUri = computeRedirectUri();
+  const displayedRedirectUri =
+    preflight?.resolvedRedirectUri ?? browserRedirectUri;
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(displayedRedirectUri);
+      setCopyState("copied");
+      setTimeout(() => setCopyState("idle"), 1500);
+    } catch {
+      /* clipboard blocked — admin can still triple-click to select */
+    }
+  };
+
+  return (
+    <HtCard data-testid="card-qbo-redirect-uri">
+      <HtCardHeader title="OAuth redirect URI to register on Intuit" />
+      <div className="space-y-3 p-6">
+        <p className="text-sm text-[var(--ht-ink-3)]">
+          On developer.intuit.com → Keys & OAuth → Redirect URIs, add this
+          exact value (must match character-for-character):
+        </p>
+        <div className="flex items-stretch gap-2">
+          <code
+            className="flex-1 break-all rounded bg-white p-2 font-mono text-[11px] text-[var(--ht-ink)] border border-[var(--ht-border)]"
+            data-testid="text-redirect-uri"
+          >
+            {displayedRedirectUri}
+          </code>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleCopy}
+            data-testid="btn-copy-redirect-uri"
+          >
+            <Copy className="mr-1 h-3 w-3" />
+            {copyState === "copied" ? "Copied!" : "Copy"}
+          </Button>
+        </div>
+      </div>
+    </HtCard>
   );
 }
 
@@ -289,9 +359,13 @@ function ProductionAppUrlsCard() {
 function CredentialsCard({
   conn,
   onSaved,
+  preflight,
+  onPreflight,
 }: {
   conn: QboConnection;
   onSaved: () => void;
+  preflight: QboPreflightResult | null;
+  onPreflight: (p: QboPreflightResult | null) => void;
 }) {
   const [environment, setEnvironment] = useState<"sandbox" | "production">(
     conn.environment,
@@ -299,8 +373,6 @@ function CredentialsCard({
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [savedAt, setSavedAt] = useState<Date | null>(null);
-  const [copyState, setCopyState] = useState<"idle" | "copied">("idle");
-  const [preflight, setPreflight] = useState<QboPreflightResult | null>(null);
 
   useEffect(() => setEnvironment(conn.environment), [conn.environment]);
 
@@ -321,26 +393,16 @@ function CredentialsCard({
           setClientId("");
           setClientSecret("");
           setSavedAt(new Date());
-          setPreflight(null);
+          onPreflight(null);
           onSaved();
         },
       },
     );
   };
 
-  const handleCopyRedirect = async () => {
-    try {
-      await navigator.clipboard.writeText(displayedRedirectUri);
-      setCopyState("copied");
-      setTimeout(() => setCopyState("idle"), 1500);
-    } catch {
-      /* clipboard blocked — admin can still triple-click to select */
-    }
-  };
-
   const handlePreflight = () => {
     runPreflight.mutate(undefined, {
-      onSuccess: (result) => setPreflight(result),
+      onSuccess: (result) => onPreflight(result),
     });
   };
 
@@ -357,18 +419,12 @@ function CredentialsCard({
       {
         onSuccess: () => {
           setSavedAt(new Date());
-          setPreflight(null);
+          onPreflight(null);
           onSaved();
         },
       },
     );
   };
-
-  const redirectUri = computeRedirectUri();
-  // Prefer the server-resolved value once a preflight has been run — this
-  // accounts for proxy / Host-header edge cases where the URI the API will
-  // actually send to Intuit can differ from what the browser computes.
-  const displayedRedirectUri = preflight?.resolvedRedirectUri ?? redirectUri;
 
   return (
     <HtCard data-testid="card-qbo-credentials">
@@ -456,34 +512,6 @@ function CredentialsCard({
             placeholder={conn.hasClientSecret ? "Enter to replace" : "•••••••"}
             data-testid="input-client-secret"
           />
-        </div>
-
-        <div className="rounded-md bg-[var(--ht-bg-2)] p-3 text-xs text-[var(--ht-ink-3)]">
-          <p className="mb-2 font-medium text-[var(--ht-ink-2)]">
-            OAuth redirect URI to register on Intuit
-          </p>
-          <p>
-            On developer.intuit.com → Keys & OAuth → Redirect URIs, add this
-            exact value (must match character-for-character):
-          </p>
-          <div className="mt-2 flex items-stretch gap-2">
-            <code
-              className="flex-1 break-all rounded bg-white p-2 font-mono text-[11px] text-[var(--ht-ink)]"
-              data-testid="text-redirect-uri"
-            >
-              {displayedRedirectUri}
-            </code>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleCopyRedirect}
-              data-testid="btn-copy-redirect-uri"
-            >
-              <Copy className="mr-1 h-3 w-3" />
-              {copyState === "copied" ? "Copied!" : "Copy"}
-            </Button>
-          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
